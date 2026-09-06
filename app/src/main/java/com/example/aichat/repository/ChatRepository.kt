@@ -25,13 +25,17 @@ class ChatRepository(context: Context) {
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    // ============================================================
+    // المحادثة النصية
+    // ============================================================
+
     suspend fun sendMessage(
         history: List<Message>,
         userMessage: String,
         imageBase64: String? = null
     ): String = withContext(Dispatchers.IO) {
 
-        when (settings.provider.lowercase()) {
+        when (settings.provider.lowercase().trim()) {
             "gemini"     -> sendGemini(history, userMessage, imageBase64)
             "openrouter" -> sendOpenAICompatible(
                 baseUrl      = "https://openrouter.ai/api/v1/chat/completions",
@@ -42,7 +46,7 @@ class ChatRepository(context: Context) {
                 imageBase64  = imageBase64,
                 providerName = "OpenRouter"
             )
-            "openai"     -> sendOpenAICompatible(
+            "openai" -> sendOpenAICompatible(
                 baseUrl      = "https://api.openai.com/v1/chat/completions",
                 apiKey       = settings.openaiKey,
                 model        = settings.openaiModel,
@@ -51,7 +55,7 @@ class ChatRepository(context: Context) {
                 imageBase64  = imageBase64,
                 providerName = "OpenAI"
             )
-            "mistral"    -> sendOpenAICompatible(
+            "mistral" -> sendOpenAICompatible(
                 baseUrl      = "https://api.mistral.ai/v1/chat/completions",
                 apiKey       = settings.mistralKey,
                 model        = settings.mistralModel,
@@ -60,7 +64,7 @@ class ChatRepository(context: Context) {
                 imageBase64  = imageBase64,
                 providerName = "Mistral"
             )
-            "groq"       -> sendOpenAICompatible(
+            "groq" -> sendOpenAICompatible(
                 baseUrl      = "https://api.groq.com/openai/v1/chat/completions",
                 apiKey       = settings.groqKey,
                 model        = settings.groqModel,
@@ -69,7 +73,7 @@ class ChatRepository(context: Context) {
                 imageBase64  = imageBase64,
                 providerName = "Groq"
             )
-            "custom"     -> sendOpenAICompatible(
+            "custom" -> sendOpenAICompatible(
                 baseUrl      = settings.customUrl,
                 apiKey       = settings.customKey,
                 model        = settings.customModel,
@@ -79,6 +83,137 @@ class ChatRepository(context: Context) {
                 providerName = "Custom"
             )
             else -> throw IOException("مزود غير معروف: ${settings.provider}")
+        }
+    }
+
+    // ============================================================
+    // توليد الصور
+    // ============================================================
+
+    suspend fun generateImage(
+        prompt: String
+    ): ImageResult = withContext(Dispatchers.IO) {
+
+        val provider = settings.imageProvider.lowercase().trim()
+
+        when (provider) {
+            "openai"     -> generateImageOpenAI(prompt)
+            "openrouter" -> generateImageOpenRouter(prompt)
+            else         -> throw IOException("مزود توليد الصور غير معروف: $provider")
+        }
+    }
+
+    // ============================================================
+    // نتيجة توليد الصورة
+    // ============================================================
+
+    data class ImageResult(
+        val url: String? = null,
+        val base64: String? = null
+    )
+
+    // ============================================================
+    // توليد الصور — OpenAI DALL-E
+    // ============================================================
+
+    private fun generateImageOpenAI(
+        prompt: String
+    ): ImageResult {
+
+        val apiKey = settings.openaiKey
+        val model  = settings.imageModel.trim().ifBlank { "dall-e-3" }
+
+        if (apiKey.isBlank()) {
+            throw IOException("OpenAI: المفتاح فارغ")
+        }
+
+        val requestJson = JSONObject().apply {
+            put("model", model)
+            put("prompt", prompt)
+            put("n", 1)
+            put("size", "1024x1024")
+            put("response_format", "url")
+        }
+
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/images/generations")
+            .post(
+                requestJson.toString()
+                    .toRequestBody("application/json".toMediaType())
+            )
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .build()
+
+        client.newCall(request).execute().use { response ->
+
+            val body = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+                throw IOException("OpenAI Image HTTP ${response.code}: $body")
+            }
+
+            val root = JSONObject(body)
+            val data = root.optJSONArray("data")
+            val url  = data?.optJSONObject(0)?.optString("url", "")
+
+            if (url.isNullOrBlank()) {
+                throw IOException("OpenAI: لم يتم إرجاع رابط الصورة")
+            }
+
+            return ImageResult(url = url)
+        }
+    }
+
+    // ============================================================
+    // توليد الصور — OpenRouter
+    // ============================================================
+
+    private fun generateImageOpenRouter(
+        prompt: String
+    ): ImageResult {
+
+        val apiKey = settings.openrouterKey
+        val model  = settings.imageModel.trim().ifBlank { "black-forest-labs/flux-schnell:free" }
+
+        if (apiKey.isBlank()) {
+            throw IOException("OpenRouter: المفتاح فارغ")
+        }
+
+        val requestJson = JSONObject().apply {
+            put("model", model)
+            put("prompt", prompt)
+        }
+
+        val request = Request.Builder()
+            .url("https://openrouter.ai/api/v1/images/generations")
+            .post(
+                requestJson.toString()
+                    .toRequestBody("application/json".toMediaType())
+            )
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("HTTP-Referer", "https://github.com/")
+            .addHeader("X-Title", "AiChat")
+            .build()
+
+        client.newCall(request).execute().use { response ->
+
+            val body = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+                throw IOException("OpenRouter Image HTTP ${response.code}: $body")
+            }
+
+            val root = JSONObject(body)
+            val data = root.optJSONArray("data")
+            val url  = data?.optJSONObject(0)?.optString("url", "")
+
+            if (url.isNullOrBlank()) {
+                throw IOException("OpenRouter: لم يتم إرجاع رابط الصورة")
+            }
+
+            return ImageResult(url = url)
         }
     }
 
@@ -93,7 +228,7 @@ class ChatRepository(context: Context) {
     ): String {
 
         val apiKey = settings.geminiKey
-        val model  = settings.geminiModel.ifBlank { "gemini-3.6-flash" }
+        val model  = settings.geminiModel.trim().ifBlank { "gemini-3.6-flash" }
 
         val endpoint =
             "https://generativelanguage.googleapis.com/v1beta/models/" +
@@ -101,9 +236,8 @@ class ChatRepository(context: Context) {
 
         val contents = JSONArray()
 
-        // إضافة تاريخ المحادثة
         history.forEach { msg ->
-            val role = if (msg.role == "user") "user" else "model"
+            val role  = if (msg.role == "user") "user" else "model"
             val parts = JSONArray()
 
             if (msg.imageBase64 != null) {
@@ -115,9 +249,7 @@ class ChatRepository(context: Context) {
                 })
             }
 
-            parts.put(JSONObject().apply {
-                put("text", msg.content)
-            })
+            parts.put(JSONObject().apply { put("text", msg.content) })
 
             contents.put(JSONObject().apply {
                 put("role", role)
@@ -125,7 +257,6 @@ class ChatRepository(context: Context) {
             })
         }
 
-        // الرسالة الجديدة
         val newParts = JSONArray()
 
         if (imageBase64 != null) {
@@ -137,9 +268,7 @@ class ChatRepository(context: Context) {
             })
         }
 
-        newParts.put(JSONObject().apply {
-            put("text", userMessage)
-        })
+        newParts.put(JSONObject().apply { put("text", userMessage) })
 
         contents.put(JSONObject().apply {
             put("role", "user")
@@ -172,14 +301,12 @@ class ChatRepository(context: Context) {
 
             val root       = JSONObject(body)
             val candidates = root.optJSONArray("candidates")
-            val content    = candidates
-                ?.optJSONObject(0)
-                ?.optJSONObject("content")
+            val content    = candidates?.optJSONObject(0)?.optJSONObject("content")
             val parts      = content?.optJSONArray("parts")
             val text       = parts?.optJSONObject(0)?.optString("text", "")
 
             return text?.trim()
-                ?: throw IOException("Gemini: لم يتم العثور على نص في الاستجابة")
+                ?: throw IOException("Gemini: لم يتم العثور على نص")
         }
     }
 
@@ -197,14 +324,14 @@ class ChatRepository(context: Context) {
         providerName: String
     ): String {
 
-        if (apiKey.isBlank()) throw IOException("$providerName: المفتاح فارغ")
-        if (model.isBlank())  throw IOException("$providerName: اسم النموذج فارغ")
+        val cleanModel = model.trim()
+
+        if (apiKey.isBlank())      throw IOException("$providerName: المفتاح فارغ")
+        if (cleanModel.isBlank())  throw IOException("$providerName: اسم النموذج فارغ")
 
         val messages = JSONArray()
 
-        // تاريخ المحادثة
         history.forEach { msg ->
-
             val content = JSONArray()
 
             if (msg.imageBase64 != null) {
@@ -227,7 +354,6 @@ class ChatRepository(context: Context) {
             })
         }
 
-        // الرسالة الجديدة
         val newContent = JSONArray()
 
         if (imageBase64 != null) {
@@ -250,7 +376,7 @@ class ChatRepository(context: Context) {
         })
 
         val requestJson = JSONObject().apply {
-            put("model", model)
+            put("model", cleanModel)
             put("messages", messages)
             put("temperature", 0.7)
             put("max_tokens", 8192)
@@ -281,13 +407,11 @@ class ChatRepository(context: Context) {
 
             val root    = JSONObject(body)
             val choices = root.optJSONArray("choices")
-            val message = choices
-                ?.optJSONObject(0)
-                ?.optJSONObject("message")
+            val message = choices?.optJSONObject(0)?.optJSONObject("message")
             val text    = message?.optString("content", "")
 
             return text?.trim()
-                ?: throw IOException("$providerName: لم يتم العثور على نص في الاستجابة")
+                ?: throw IOException("$providerName: لم يتم العثور على نص")
         }
     }
 }
