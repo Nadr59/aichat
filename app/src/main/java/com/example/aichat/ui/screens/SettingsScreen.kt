@@ -311,34 +311,27 @@ var customImageKey by remember { mutableStateOf(settings.customImageKey) }
                 }
 
                 "custom" -> {
-                    OutlinedTextField(
-                        value         = customUrl,
-                        onValueChange = { customUrl = it; saved = false },
-                        modifier      = Modifier.fillMaxWidth(),
-                        label         = { Text("Server URL") },
-                        placeholder   = {
-                            Text("https://api.example.com/v1/chat/completions")
-                        },
-                        singleLine    = true,
-                        shape         = RoundedCornerShape(12.dp)
-                    )
-                    KeyField(
-                        label         = "API Key",
-                        value         = customKey,
-                        onValueChange = { customKey = it; saved = false },
-                        showKey       = showKeys,
-                        placeholder   = "key..."
-                    )
-                    OutlinedTextField(
-                        value         = customModel,
-                        onValueChange = { customModel = it; saved = false },
-                        modifier      = Modifier.fillMaxWidth(),
-                        label         = { Text("اسم النموذج") },
-                        placeholder   = { Text("gpt-4o-mini") },
-                        singleLine    = true,
-                        shape         = RoundedCornerShape(12.dp)
-                    )
+    InfoCard(
+        "للـURL أدخل رابط توليد الصور مثل:\n" +
+        "https://openrouter.ai/api/v1/images/generations\n" +
+        "أو رابط chat إذا كان النموذج يولّد صوراً عبر المحادثة"
+    )
+    OutlinedTextField(
+        value         = customImageUrl,
+        onValueChange = { customImageUrl = it; saved = false },
+        modifier      = Modifier.fillMaxWidth(),
+        label         = { Text("Image API URL") },
+        placeholder   = {
+            Text("https://api.example.com/v1/images/generations")
+        },
+        singleLine    = true,
+        shape         = RoundedCornerShape(12.dp)
+    )
+    // ... بقية الحقول
                 }
+                    
+                        
+                
             }
 
             // ============================================================
