@@ -90,7 +90,7 @@ class ChatRepository(context: Context) {
     // توليد الصور
     // ============================================================
 
-    suspend fun generateImage(
+      suspend fun generateImage(
     prompt: String
 ): ImageResult = withContext(Dispatchers.IO) {
 
@@ -151,6 +151,7 @@ private fun generateImageCustom(
         return ImageResult(url = imageUrl)
     }
 }
+    
     // ============================================================
     // نتيجة توليد الصورة
     // ============================================================
