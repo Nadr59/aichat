@@ -72,6 +72,8 @@ fun SettingsScreen(
     var imageModel      by remember { mutableStateOf(settings.imageModel) }
     var showKeys        by remember { mutableStateOf(false) }
     var saved           by remember { mutableStateOf(false) }
+    var customImageUrl by remember { mutableStateOf(settings.customImageUrl) }
+var customImageKey by remember { mutableStateOf(settings.customImageKey) }
 
     val providers = listOf(
         "gemini"     to "Google Gemini ⭐",
@@ -343,91 +345,152 @@ fun SettingsScreen(
             // قسم توليد الصور
             // ============================================================
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+             // ============================================================
+// قسم توليد الصور
+// ============================================================
 
-            Text(
-                "🎨 إعدادات توليد الصور:",
-                fontWeight = FontWeight.Bold
-            )
+HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape    = RoundedCornerShape(12.dp),
-                colors   = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        .copy(alpha = 0.5f)
-                )
+Text(
+    "🎨 إعدادات توليد الصور:",
+    fontWeight = FontWeight.Bold
+)
+
+Card(
+    modifier = Modifier.fillMaxWidth(),
+    shape    = RoundedCornerShape(12.dp),
+    colors   = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceVariant
+            .copy(alpha = 0.5f)
+    )
+) {
+    Column(Modifier.padding(12.dp)) {
+
+        Text(
+            "مزود توليد الصور:",
+            style      = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        listOf(
+            "openrouter" to "OpenRouter ⭐ (نماذج مجانية)",
+            "openai"     to "OpenAI DALL-E (مدفوع)",
+            "custom"     to "Custom API"
+        ).forEach { (key, name) ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier          = Modifier.padding(vertical = 2.dp)
             ) {
-                Column(Modifier.padding(12.dp)) {
-
-                    Text(
-                        "مزود توليد الصور:",
-                        style      = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    listOf(
-                        "openrouter" to "OpenRouter ⭐ (نماذج مجانية متاحة)",
-                        "openai"     to "OpenAI DALL-E (مدفوع)"
-                    ).forEach { (key, name) ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier          = Modifier.padding(vertical = 2.dp)
-                        ) {
-                            RadioButton(
-                                selected = imageProvider == key,
-                                onClick  = {
-                                    imageProvider = key
-                                    // تغيير النموذج الافتراضي عند تغيير المزود
-                                    imageModel = if (key == "openai") {
-                                        "dall-e-3"
-                                    } else {
-                                        "black-forest-labs/flux-schnell:free"
-                                    }
-                                    saved = false
-                                }
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                name,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                RadioButton(
+                    selected = imageProvider == key,
+                    onClick  = {
+                        imageProvider = key
+                        imageModel = when (key) {
+                            "openai" -> "dall-e-3"
+                            "custom" -> ""
+                            else     -> "black-forest-labs/flux-schnell:free"
                         }
+                        saved = false
                     }
-                }
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    name,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
+        }
+    }
+}
 
-            ModelDropdown(
-                label    = "نموذج توليد الصور",
-                models   = if (imageProvider == "openai") {
-                    listOf(
-                        "dall-e-3" to "DALL-E 3 ⭐ (الأفضل)",
-                        "dall-e-2" to "DALL-E 2"
-                    )
-                } else {
-                    listOf(
-                        "black-forest-labs/flux-schnell:free"       to "FLUX Schnell (مجاني) ⭐",
-                        "black-forest-labs/flux-1-schnell:free"     to "FLUX 1 Schnell (مجاني)",
-                        "stabilityai/stable-diffusion-xl-base-1.0"  to "Stable Diffusion XL",
-                        "openai/dall-e-3"                           to "DALL-E 3 عبر OpenRouter"
-                    )
-                },
-                selected = imageModel,
-                onSelect = { imageModel = it; saved = false }
-            )
+// إعدادات حسب المزود المختار
+when (imageProvider) {
 
-            InfoCard(
-                if (imageProvider == "openrouter")
-                    "يستخدم نفس مفتاح OpenRouter الموجود أعلاه"
-                else
-                    "يستخدم نفس مفتاح OpenAI الموجود أعلاه"
-            )
+    "openrouter" -> {
+
+        ModelDropdown(
+            label    = "نموذج توليد الصور",
+            models   = listOf(
+                "black-forest-labs/flux-schnell:free"      to "FLUX Schnell (مجاني) ⭐",
+                "black-forest-labs/flux-1-schnell:free"    to "FLUX 1 Schnell (مجاني)",
+                "stabilityai/stable-diffusion-xl-base-1.0" to "Stable Diffusion XL",
+                "openai/dall-e-3"                          to "DALL-E 3 عبر OpenRouter"
+            ),
+            selected = imageModel,
+            onSelect = { imageModel = it; saved = false }
+        )
+
+        // حقل يدوي لكتابة أي نموذج
+        OutlinedTextField(
+            value         = imageModel,
+            onValueChange = { imageModel = it; saved = false },
+            modifier      = Modifier.fillMaxWidth(),
+            label         = { Text("أو اكتب اسم النموذج يدوياً") },
+            singleLine    = true,
+            shape         = RoundedCornerShape(12.dp)
+        )
+
+        InfoCard("يستخدم نفس مفتاح OpenRouter الموجود أعلاه")
+    }
+
+    "openai" -> {
+
+        ModelDropdown(
+            label    = "نموذج توليد الصور",
+            models   = listOf(
+                "dall-e-3" to "DALL-E 3 ⭐ (الأفضل)",
+                "dall-e-2" to "DALL-E 2"
+            ),
+            selected = imageModel,
+            onSelect = { imageModel = it; saved = false }
+        )
+
+        InfoCard("يستخدم نفس مفتاح OpenAI الموجود أعلاه")
+    }
+
+    "custom" -> {
+
+        // URL مخصص لتوليد الصور
+        OutlinedTextField(
+            value         = customImageUrl,
+            onValueChange = { customImageUrl = it; saved = false },
+            modifier      = Modifier.fillMaxWidth(),
+            label         = { Text("Image API URL") },
+            placeholder   = {
+                Text("https://api.example.com/v1/images/generations")
+            },
+            singleLine    = true,
+            shape         = RoundedCornerShape(12.dp)
+        )
+
+        // مفتاح مخصص للصور
+        KeyField(
+            label         = "Image API Key",
+            value         = customImageKey,
+            onValueChange = { customImageKey = it; saved = false },
+            showKey       = showKeys,
+            placeholder   = "key..."
+        )
+
+        // اسم النموذج
+        OutlinedTextField(
+            value         = imageModel,
+            onValueChange = { imageModel = it; saved = false },
+            modifier      = Modifier.fillMaxWidth(),
+            label         = { Text("اسم النموذج") },
+            placeholder   = { Text("dall-e-3 أو flux-schnell") },
+            singleLine    = true,
+            shape         = RoundedCornerShape(12.dp)
+        )
+    }
+}
 
             // ============================================================
             // زر الحفظ
             // ============================================================
+            
 
             Spacer(Modifier.height(8.dp))
 
@@ -449,6 +512,8 @@ fun SettingsScreen(
                     settings.customModel     = customModel
                     settings.imageProvider   = imageProvider
                     settings.imageModel      = imageModel
+                    settings.customImageUrl = customImageUrl
+                     settings.customImageKey = customImageKey
                     saved = true
                 },
                 modifier = Modifier
