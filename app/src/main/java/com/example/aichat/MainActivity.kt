@@ -7,16 +7,62 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.example.aichat.ui.theme.AichatTheme
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.aichat.data.local.AiSettings
+import com.example.aichat.ui.screens.ChatScreen
+import com.example.aichat.ui.screens.ConversationsScreen
+import com.example.aichat.ui.screens.SettingsScreen
+import com.example.aichat.ui.theme.AiChatTheme
+import com.example.aichat.ui.viewmodel.ChatViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            AichatTheme {
+            AiChatTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    MainNavigation()
+
+                    val navController = rememberNavController()
+                    val viewModel: ChatViewModel = viewModel()
+                    val settings = AiSettings(this)
+
+                    NavHost(
+                        navController    = navController,
+                        startDestination = "conversations"
+                    ) {
+                        composable("conversations") {
+                            ConversationsScreen(
+                                viewModel = viewModel,
+                                onOpenChat = { conversationId ->
+                                    viewModel.openConversation(conversationId)
+                                    navController.navigate("chat")
+                                },
+                                onNewChat = {
+                                    viewModel.newConversation()
+                                    navController.navigate("chat")
+                                },
+                                onSettings = {
+                                    navController.navigate("settings")
+                                }
+                            )
+                        }
+                        composable("chat") {
+                            ChatScreen(
+                                viewModel = viewModel,
+                                onBack    = { navController.popBackStack() }
+                            )
+                        }
+                        composable("settings") {
+                            SettingsScreen(
+                                settings = settings,
+                                onBack   = { navController.popBackStack() }
+                            )
+                        }
+                    }
                 }
             }
         }
