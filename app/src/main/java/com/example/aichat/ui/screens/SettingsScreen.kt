@@ -54,26 +54,26 @@ fun SettingsScreen(
     settings: AiSettings,
     onBack: () -> Unit
 ) {
-    var provider        by remember { mutableStateOf(settings.provider) }
-    var geminiKey       by remember { mutableStateOf(settings.geminiKey) }
-    var geminiModel     by remember { mutableStateOf(settings.geminiModel) }
-    var openrouterKey   by remember { mutableStateOf(settings.openrouterKey) }
-    var openrouterModel by remember { mutableStateOf(settings.openrouterModel) }
-    var openaiKey       by remember { mutableStateOf(settings.openaiKey) }
-    var openaiModel     by remember { mutableStateOf(settings.openaiModel) }
-    var mistralKey      by remember { mutableStateOf(settings.mistralKey) }
-    var mistralModel    by remember { mutableStateOf(settings.mistralModel) }
-    var groqKey         by remember { mutableStateOf(settings.groqKey) }
-    var groqModel       by remember { mutableStateOf(settings.groqModel) }
-    var customUrl       by remember { mutableStateOf(settings.customUrl) }
-    var customKey       by remember { mutableStateOf(settings.customKey) }
-    var customModel     by remember { mutableStateOf(settings.customModel) }
-    var imageProvider   by remember { mutableStateOf(settings.imageProvider) }
-    var imageModel      by remember { mutableStateOf(settings.imageModel) }
-    var showKeys        by remember { mutableStateOf(false) }
-    var saved           by remember { mutableStateOf(false) }
-    var customImageUrl by remember { mutableStateOf(settings.customImageUrl) }
-var customImageKey by remember { mutableStateOf(settings.customImageKey) }
+    var provider         by remember { mutableStateOf(settings.provider) }
+    var geminiKey        by remember { mutableStateOf(settings.geminiKey) }
+    var geminiModel      by remember { mutableStateOf(settings.geminiModel) }
+    var openrouterKey    by remember { mutableStateOf(settings.openrouterKey) }
+    var openrouterModel  by remember { mutableStateOf(settings.openrouterModel) }
+    var openaiKey        by remember { mutableStateOf(settings.openaiKey) }
+    var openaiModel      by remember { mutableStateOf(settings.openaiModel) }
+    var mistralKey       by remember { mutableStateOf(settings.mistralKey) }
+    var mistralModel     by remember { mutableStateOf(settings.mistralModel) }
+    var groqKey          by remember { mutableStateOf(settings.groqKey) }
+    var groqModel        by remember { mutableStateOf(settings.groqModel) }
+    var customUrl        by remember { mutableStateOf(settings.customUrl) }
+    var customKey        by remember { mutableStateOf(settings.customKey) }
+    var customModel      by remember { mutableStateOf(settings.customModel) }
+    var imageProvider    by remember { mutableStateOf(settings.imageProvider) }
+    var imageModel       by remember { mutableStateOf(settings.imageModel) }
+    var customImageUrl   by remember { mutableStateOf(settings.customImageUrl) }
+    var customImageKey   by remember { mutableStateOf(settings.customImageKey) }
+    var showKeys         by remember { mutableStateOf(false) }
+    var saved            by remember { mutableStateOf(false) }
 
     val providers = listOf(
         "gemini"     to "Google Gemini ⭐",
@@ -110,7 +110,7 @@ var customImageKey by remember { mutableStateOf(settings.customImageKey) }
         ) {
 
             // ============================================================
-            // قسم المزود الرئيسي
+            // مزود المحادثة
             // ============================================================
 
             Text(
@@ -120,9 +120,9 @@ var customImageKey by remember { mutableStateOf(settings.customImageKey) }
 
             providers.forEach { (key, name) ->
                 Card(
-                    onClick = { provider = key; saved = false },
+                    onClick  = { provider = key; saved = false },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
+                    colors   = CardDefaults.cardColors(
                         containerColor = if (provider == key)
                             MaterialTheme.colorScheme.primaryContainer
                         else
@@ -142,9 +142,7 @@ var customImageKey by remember { mutableStateOf(settings.customImageKey) }
                         Text(
                             name,
                             fontWeight = if (provider == key)
-                                FontWeight.Bold
-                            else
-                                FontWeight.Normal
+                                FontWeight.Bold else FontWeight.Normal
                         )
                     }
                 }
@@ -152,15 +150,9 @@ var customImageKey by remember { mutableStateOf(settings.customImageKey) }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            // ============================================================
             // إظهار/إخفاء المفاتيح
-            // ============================================================
-
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "مفاتيح API:",
-                    fontWeight = FontWeight.Bold
-                )
+                Text("مفاتيح API:", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { showKeys = !showKeys }) {
                     Icon(
@@ -311,179 +303,189 @@ var customImageKey by remember { mutableStateOf(settings.customImageKey) }
                 }
 
                 "custom" -> {
-    InfoCard(
-        "للـURL أدخل رابط توليد الصور مثل:\n" +
-        "https://openrouter.ai/api/v1/images/generations\n" +
-        "أو رابط chat إذا كان النموذج يولّد صوراً عبر المحادثة"
-    )
-    OutlinedTextField(
-        value         = customImageUrl,
-        onValueChange = { customImageUrl = it; saved = false },
-        modifier      = Modifier.fillMaxWidth(),
-        label         = { Text("Image API URL") },
-        placeholder   = {
-            Text("https://api.example.com/v1/images/generations")
-        },
-        singleLine    = true,
-        shape         = RoundedCornerShape(12.dp)
-    )
-    // ... بقية الحقول
+
+                    // ----------------------------------------
+                    // الحقول الثلاثة لـ Custom Chat
+                    // ----------------------------------------
+
+                    InfoCard(
+                        "أدخل بيانات API المتوافق مع OpenAI\n" +
+                        "مثال: LM Studio أو Ollama أو أي خادم محلي"
+                    )
+
+                    OutlinedTextField(
+                        value         = customUrl,
+                        onValueChange = { customUrl = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("Server URL") },
+                        placeholder   = {
+                            Text("https://api.example.com/v1/chat/completions")
+                        },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+
+                    KeyField(
+                        label         = "API Key",
+                        value         = customKey,
+                        onValueChange = { customKey = it; saved = false },
+                        showKey       = showKeys,
+                        placeholder   = "key... (اتركه فارغاً إذا لم يكن مطلوباً)"
+                    )
+
+                    OutlinedTextField(
+                        value         = customModel,
+                        onValueChange = { customModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("اسم النموذج") },
+                        placeholder   = { Text("gpt-4o-mini") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
                 }
-                    
-                        
-                
             }
 
             // ============================================================
             // قسم توليد الصور
             // ============================================================
 
-             // ============================================================
-// قسم توليد الصور
-// ============================================================
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            Text(
+                "🎨 إعدادات توليد الصور:",
+                fontWeight = FontWeight.Bold
+            )
 
-Text(
-    "🎨 إعدادات توليد الصور:",
-    fontWeight = FontWeight.Bold
-)
-
-Card(
-    modifier = Modifier.fillMaxWidth(),
-    shape    = RoundedCornerShape(12.dp),
-    colors   = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceVariant
-            .copy(alpha = 0.5f)
-    )
-) {
-    Column(Modifier.padding(12.dp)) {
-
-        Text(
-            "مزود توليد الصور:",
-            style      = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        listOf(
-            "openrouter" to "OpenRouter ⭐ (نماذج مجانية)",
-            "openai"     to "OpenAI DALL-E (مدفوع)",
-            "custom"     to "Custom API"
-        ).forEach { (key, name) ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier          = Modifier.padding(vertical = 2.dp)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        .copy(alpha = 0.5f)
+                )
             ) {
-                RadioButton(
-                    selected = imageProvider == key,
-                    onClick  = {
-                        imageProvider = key
-                        imageModel = when (key) {
-                            "openai" -> "dall-e-3"
-                            "custom" -> ""
-                            else     -> "black-forest-labs/flux-schnell:free"
+                Column(Modifier.padding(12.dp)) {
+
+                    Text(
+                        "مزود توليد الصور:",
+                        style      = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    listOf(
+                        "openrouter" to "OpenRouter ⭐ (نماذج مجانية)",
+                        "openai"     to "OpenAI DALL-E (مدفوع)",
+                        "custom"     to "Custom Image API"
+                    ).forEach { (key, name) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier          = Modifier.padding(vertical = 2.dp)
+                        ) {
+                            RadioButton(
+                                selected = imageProvider == key,
+                                onClick  = {
+                                    imageProvider = key
+                                    imageModel = when (key) {
+                                        "openai" -> "dall-e-3"
+                                        "custom" -> ""
+                                        else     -> "black-forest-labs/flux-schnell:free"
+                                    }
+                                    saved = false
+                                }
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                name,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
                         }
-                        saved = false
                     }
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    name,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                }
             }
-        }
-    }
-}
 
-// إعدادات حسب المزود المختار
-when (imageProvider) {
+            // إعدادات مزود الصور
+            when (imageProvider) {
 
-    "openrouter" -> {
+                "openrouter" -> {
+                    ModelDropdown(
+                        label    = "نموذج توليد الصور",
+                        models   = listOf(
+                            "black-forest-labs/flux-schnell:free"       to "FLUX Schnell (مجاني) ⭐",
+                            "black-forest-labs/flux-1-schnell:free"     to "FLUX 1 Schnell (مجاني)",
+                            "stabilityai/stable-diffusion-xl-base-1.0"  to "Stable Diffusion XL",
+                            "openai/dall-e-3"                           to "DALL-E 3 عبر OpenRouter"
+                        ),
+                        selected = imageModel,
+                        onSelect = { imageModel = it; saved = false }
+                    )
+                    OutlinedTextField(
+                        value         = imageModel,
+                        onValueChange = { imageModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                    InfoCard(
+                        "يستخدم نفس مفتاح OpenRouter الموجود أعلاه\n" +
+                        "تأكد من أن النموذج يدعم توليد الصور"
+                    )
+                }
 
-        ModelDropdown(
-            label    = "نموذج توليد الصور",
-            models   = listOf(
-                "black-forest-labs/flux-schnell:free"      to "FLUX Schnell (مجاني) ⭐",
-                "black-forest-labs/flux-1-schnell:free"    to "FLUX 1 Schnell (مجاني)",
-                "stabilityai/stable-diffusion-xl-base-1.0" to "Stable Diffusion XL",
-                "openai/dall-e-3"                          to "DALL-E 3 عبر OpenRouter"
-            ),
-            selected = imageModel,
-            onSelect = { imageModel = it; saved = false }
-        )
+                "openai" -> {
+                    ModelDropdown(
+                        label    = "نموذج توليد الصور",
+                        models   = listOf(
+                            "dall-e-3" to "DALL-E 3 ⭐ (الأفضل)",
+                            "dall-e-2" to "DALL-E 2"
+                        ),
+                        selected = imageModel,
+                        onSelect = { imageModel = it; saved = false }
+                    )
+                    InfoCard("يستخدم نفس مفتاح OpenAI الموجود أعلاه")
+                }
 
-        // حقل يدوي لكتابة أي نموذج
-        OutlinedTextField(
-            value         = imageModel,
-            onValueChange = { imageModel = it; saved = false },
-            modifier      = Modifier.fillMaxWidth(),
-            label         = { Text("أو اكتب اسم النموذج يدوياً") },
-            singleLine    = true,
-            shape         = RoundedCornerShape(12.dp)
-        )
-
-        InfoCard("يستخدم نفس مفتاح OpenRouter الموجود أعلاه")
-    }
-
-    "openai" -> {
-
-        ModelDropdown(
-            label    = "نموذج توليد الصور",
-            models   = listOf(
-                "dall-e-3" to "DALL-E 3 ⭐ (الأفضل)",
-                "dall-e-2" to "DALL-E 2"
-            ),
-            selected = imageModel,
-            onSelect = { imageModel = it; saved = false }
-        )
-
-        InfoCard("يستخدم نفس مفتاح OpenAI الموجود أعلاه")
-    }
-
-    "custom" -> {
-
-        // URL مخصص لتوليد الصور
-        OutlinedTextField(
-            value         = customImageUrl,
-            onValueChange = { customImageUrl = it; saved = false },
-            modifier      = Modifier.fillMaxWidth(),
-            label         = { Text("Image API URL") },
-            placeholder   = {
-                Text("https://api.example.com/v1/images/generations")
-            },
-            singleLine    = true,
-            shape         = RoundedCornerShape(12.dp)
-        )
-
-        // مفتاح مخصص للصور
-        KeyField(
-            label         = "Image API Key",
-            value         = customImageKey,
-            onValueChange = { customImageKey = it; saved = false },
-            showKey       = showKeys,
-            placeholder   = "key..."
-        )
-
-        // اسم النموذج
-        OutlinedTextField(
-            value         = imageModel,
-            onValueChange = { imageModel = it; saved = false },
-            modifier      = Modifier.fillMaxWidth(),
-            label         = { Text("اسم النموذج") },
-            placeholder   = { Text("dall-e-3 أو flux-schnell") },
-            singleLine    = true,
-            shape         = RoundedCornerShape(12.dp)
-        )
-    }
-}
+                "custom" -> {
+                    InfoCard(
+                        "أدخل رابط API الخاص بتوليد الصور\n" +
+                        "يجب أن يكون متوافقاً مع صيغة OpenAI Images API\n" +
+                        "مثال: https://api.example.com/v1/images/generations"
+                    )
+                    OutlinedTextField(
+                        value         = customImageUrl,
+                        onValueChange = { customImageUrl = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("Image API URL") },
+                        placeholder   = {
+                            Text("https://api.example.com/v1/images/generations")
+                        },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                    KeyField(
+                        label         = "Image API Key",
+                        value         = customImageKey,
+                        onValueChange = { customImageKey = it; saved = false },
+                        showKey       = showKeys,
+                        placeholder   = "key... (اتركه فارغاً إذا لم يكن مطلوباً)"
+                    )
+                    OutlinedTextField(
+                        value         = imageModel,
+                        onValueChange = { imageModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("اسم النموذج") },
+                        placeholder   = { Text("dall-e-3 أو flux-schnell") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
 
             // ============================================================
             // زر الحفظ
             // ============================================================
-            
 
             Spacer(Modifier.height(8.dp))
 
@@ -505,8 +507,8 @@ when (imageProvider) {
                     settings.customModel     = customModel
                     settings.imageProvider   = imageProvider
                     settings.imageModel      = imageModel
-                    settings.customImageUrl = customImageUrl
-                     settings.customImageKey = customImageKey
+                    settings.customImageUrl  = customImageUrl
+                    settings.customImageKey  = customImageKey
                     saved = true
                 },
                 modifier = Modifier
@@ -522,7 +524,6 @@ when (imageProvider) {
                 )
             }
 
-            // رسالة الحفظ
             if (saved) {
                 Card(
                     colors = CardDefaults.cardColors(
@@ -542,7 +543,7 @@ when (imageProvider) {
                         Spacer(Modifier.width(8.dp))
                         Text(
                             "تم الحفظ بنجاح!",
-                            color = MaterialTheme.colorScheme.primary,
+                            color      = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
                         )
                     }
