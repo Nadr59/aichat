@@ -106,93 +106,138 @@ class ChatRepository(context: Context) {
     prompt: String
 ): ImageResult {
 
-    val url    = settings.customImageUrl.trim()
-    val apiKey = settings.customImageKey
-    val model  = settings.imageModel.trim()
+    val url = settings.customImageUrl.trim()
+    val apiKey = settings.customImageKey.trim()
+
+    // إذا كان الحقل فارغًا، نستخدم نموذج cyberrealistic-pony
+    val model = settings.imageModel.trim()
+        .removeSuffix(":free")
 
     if (url.isBlank()) {
         throw IOException("Custom Image: الرابط فارغ")
     }
 
-    // --------------------------------------------------------
-    // نحدد الصيغة بناءً على الـURL
-    // --------------------------------------------------------
-    val isImageGenerationEndpoint =
-        url.contains("images/generations") ||
-        url.contains("image/generate")
-
-    val requestJson = if (isImageGenerationEndpoint) {
-
-        // صيغة DALL-E / Stable Diffusion
-        JSONObject().apply {
-            put("prompt", prompt)
-            if (model.isNotBlank()) put("model", model)
-            put("n", 1)
-        }
-
-    } else {
-
-        // صيغة chat/completions — يحول الطلب إلى رسالة
-        JSONObject().apply {
-            put("model", model)
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", "Generate an image of: $prompt")
-                })
-            })
-            put("max_tokens", 1024)
-        }
+    if (apiKey.isBlank()) {
+        throw IOException("Custom Image: مفتاح API فارغ")
     }
 
-    val requestBuilder = Request.Builder()
+    if (model.isBlank()) {
+        throw IOException("Custom Image: اسم النموذج فارغ")
+    }
+
+    /*
+     * UnoRouter Image Generation
+     *
+     * مثال:
+     * https://api.unorouter.com/v1/images/generations
+     */
+
+    val requestJson = JSONObject().apply {
+        put("model", model)
+        put("prompt", prompt)
+        put("n", 1)
+        put("size", "1024x1024")
+    }
+
+    val request = Request.Builder()
         .url(url)
         .post(
-            requestJson.toString()
+            requestJson
+                .toString()
                 .toRequestBody("application/json".toMediaType())
         )
         .addHeader("Content-Type", "application/json")
+        .addHeader("Authorization", "Bearer $apiKey")
+        .build()
 
-    if (apiKey.isNotBlank()) {
-        requestBuilder.addHeader("Authorization", "Bearer $apiKey")
-    }
-
-    client.newCall(requestBuilder.build()).execute().use { response ->
+    client.newCall(request).execute().use { response ->
 
         val body = response.body?.string().orEmpty()
 
         if (!response.isSuccessful) {
-            throw IOException("Custom Image HTTP ${response.code}: $body")
-        }
-
-        val root = JSONObject(body)
-
-        // محاولة استخراج URL الصورة من صيغ مختلفة
-        val imageUrl =
-            root.optJSONArray("data")
-                ?.optJSONObject(0)
-                ?.optString("url", "")
-                ?.takeIf { it.isNotBlank() }
-            ?:
-            root.optJSONArray("choices")
-                ?.optJSONObject(0)
-                ?.optJSONObject("message")
-                ?.optString("content", "")
-                ?.takeIf { it.isNotBlank() }
-            ?:
-            root.optString("url", "")
-                .takeIf { it.isNotBlank() }
-
-        if (imageUrl.isNullOrBlank()) {
             throw IOException(
-                "Custom Image: لم يتم إرجاع رابط الصورة\nالاستجابة: ${body.take(200)}"
+                "Custom Image HTTP ${response.code}: $body"
             )
         }
 
-        return ImageResult(url = imageUrl)
+        if (body.isBlank()) {
+            throw IOException(
+                "Custom Image: الخادم أعاد استجابة فارغة"
+            )
+        }
+
+        val root = try {
+            JSONObject(body)
+        } catch (e: Exception) {
+            throw IOException(
+                "Custom Image: استجابة JSON غير صالحة\n${body.take(1000)}",
+                e
+            )
+        }
+
+        /*
+         * OpenAI-compatible image response:
+         *
+         * {
+         *   "created": 1234567890,
+         *   "data": [
+         *     {
+         *       "url": "https://..."
+         *     }
+         *   ]
+         * }
+         */
+
+        val data = root.optJSONArray("data")
+
+        if (data != null && data.length() > 0) {
+
+            val imageObject = data.optJSONObject(0)
+
+            if (imageObject != null) {
+
+                // URL مباشر للصورة
+                val imageUrl = imageObject
+                    .optString("url", "")
+                    .trim()
+
+                if (imageUrl.isNotBlank()) {
+                    return ImageResult(url = imageUrl)
+                }
+
+                // بعض المزودين قد يعيدون b64_json
+                val base64 = imageObject
+                    .optString("b64_json", "")
+                    .trim()
+
+                if (base64.isNotBlank()) {
+
+                    return ImageResult(
+                        url = "data:image/png;base64,$base64"
+                    )
+                }
+            }
+        }
+
+        /*
+         * احتياط لصيغ استجابة أخرى
+         */
+
+        val directUrl = root
+            .optString("url", "")
+            .trim()
+
+        if (directUrl.isNotBlank()) {
+            return ImageResult(url = directUrl)
+        }
+
+        throw IOException(
+            "Custom Image: لم يتم العثور على رابط الصورة في الاستجابة\n" +
+                "الاستجابة:\n${body.take(2000)}"
+        )
     }
   }
-
+  
     
     // ============================================================
     // نتيجة توليد الصورة
