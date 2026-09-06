@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "UniversalDocExtractor"
+rootProject.name = "AiChat"
 include(":app")
