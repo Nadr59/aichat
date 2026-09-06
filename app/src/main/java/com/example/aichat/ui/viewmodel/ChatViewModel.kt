@@ -1,9 +1,9 @@
 package com.example.aichat.ui.viewmodel
 
 import android.app.Application
-import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -52,7 +52,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val selectedImageBase64: StateFlow<String?> = _selectedImageBase64.asStateFlow()
 
     // ============================================================
-    // فتح محادثة موجودة
+    // وضع توليد الصور
+    // ============================================================
+
+    private val _isImageGenerationMode = MutableStateFlow(false)
+    val isImageGenerationMode: StateFlow<Boolean> = _isImageGenerationMode.asStateFlow()
+
+    fun toggleImageGenerationMode() {
+        _isImageGenerationMode.value = !_isImageGenerationMode.value
+        _error.value = null
+    }
+
+    // ============================================================
+    // فتح محادثة
     // ============================================================
 
     fun openConversation(conversationId: Long) {
@@ -64,14 +76,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ============================================================
-    // محادثة جديدة
-    // ============================================================
-
     fun newConversation() {
         _currentConversationId.value = null
         _messages.value = emptyList()
         _selectedImageBase64.value = null
+        _isImageGenerationMode.value = false
         _error.value = null
     }
 
@@ -83,6 +92,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         if (userText.isBlank() && _selectedImageBase64.value == null) return
 
+        if (_isImageGenerationMode.value) {
+            generateImage(userText)
+        } else {
+            sendChatMessage(userText)
+        }
+    }
+
+    // ============================================================
+    // رسالة نصية
+    // ============================================================
+
+    private fun sendChatMessage(userText: String) {
+
         viewModelScope.launch {
 
             _isLoading.value = true
@@ -90,60 +112,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
 
-                // إنشاء محادثة جديدة إذا لم تكن موجودة
-                val convId = _currentConversationId.value
-                    ?: run {
-                        val title = userText.take(50).ifBlank { "محادثة جديدة" }
-                        val id = dao.insertConversation(
-                            Conversation(title = title)
-                        )
-                        _currentConversationId.value = id
-                        openConversation(id)
-                        id
-                    }
-
+                val convId = getOrCreateConversation(userText)
                 val imageBase64 = _selectedImageBase64.value
 
-                // حفظ رسالة المستخدم
                 dao.insertMessage(
                     Message(
                         conversationId = convId,
                         role           = "user",
                         content        = userText,
-                        imageBase64    = imageBase64
+                        imageBase64    = imageBase64,
+                        messageType    = "text"
                     )
                 )
 
                 _selectedImageBase64.value = null
 
-                // إرسال إلى النموذج
                 val response = repository.sendMessage(
                     history     = _messages.value,
                     userMessage = userText,
                     imageBase64 = imageBase64
                 )
 
-                // حفظ رد النموذج
                 dao.insertMessage(
                     Message(
                         conversationId = convId,
                         role           = "assistant",
-                        content        = response
+                        content        = response,
+                        messageType    = "text"
                     )
                 )
 
-                // تحديث عنوان المحادثة
-                dao.updateConversation(
-                    Conversation(
-                        id        = convId,
-                        title     = _messages.value
-                            .firstOrNull { it.role == "user" }
-                            ?.content
-                            ?.take(50)
-                            ?: "محادثة",
-                        updatedAt = System.currentTimeMillis()
-                    )
-                )
+                updateConversationTitle(convId)
 
             } catch (e: Exception) {
                 _error.value = e.message ?: "حدث خطأ غير معروف"
@@ -154,8 +153,88 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ============================================================
-    // حذف محادثة
+    // توليد صورة
     // ============================================================
+
+    private fun generateImage(prompt: String) {
+
+        viewModelScope.launch {
+
+            _isLoading.value = true
+            _error.value = null
+
+            try {
+
+                val convId = getOrCreateConversation(prompt)
+
+                // حفظ طلب المستخدم
+                dao.insertMessage(
+                    Message(
+                        conversationId = convId,
+                        role           = "user",
+                        content        = "🎨 $prompt",
+                        messageType    = "image_generation"
+                    )
+                )
+
+                // توليد الصورة
+                val result = repository.generateImage(prompt)
+
+                // حفظ الصورة المولّدة
+                dao.insertMessage(
+                    Message(
+                        conversationId    = convId,
+                        role              = "assistant",
+                        content           = prompt,
+                        generatedImageUrl = result.url,
+                        imageBase64       = result.base64,
+                        messageType       = "image_generation"
+                    )
+                )
+
+                updateConversationTitle(convId)
+
+            } catch (e: Exception) {
+                _error.value = "فشل توليد الصورة: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    // ============================================================
+    // Helpers
+    // ============================================================
+
+    private suspend fun getOrCreateConversation(
+        firstMessage: String
+    ): Long {
+
+        return _currentConversationId.value ?: run {
+            val title = firstMessage.take(50).ifBlank { "محادثة جديدة" }
+            val id    = dao.insertConversation(Conversation(title = title))
+            _currentConversationId.value = id
+            openConversation(id)
+            id
+        }
+    }
+
+    private suspend fun updateConversationTitle(convId: Long) {
+
+        val firstUserMessage = _messages.value
+            .firstOrNull { it.role == "user" }
+            ?.content
+            ?.take(50)
+            ?: "محادثة"
+
+        dao.updateConversation(
+            Conversation(
+                id        = convId,
+                title     = firstUserMessage,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
 
     fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {
@@ -167,10 +246,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ============================================================
-    // تحديد صورة
-    // ============================================================
-
     fun selectImage(uri: Uri) {
         viewModelScope.launch {
             try {
@@ -179,12 +254,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val bitmap  = BitmapFactory.decodeStream(stream)
                 stream.close()
 
-                // ضغط الصورة
                 val output = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
                 val bytes  = output.toByteArray()
 
-                _selectedImageBase64.value = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                _selectedImageBase64.value =
+                    Base64.encodeToString(bytes, Base64.NO_WRAP)
 
             } catch (e: Exception) {
                 _error.value = "فشل تحميل الصورة: ${e.message}"
@@ -192,11 +267,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun clearSelectedImage() {
-        _selectedImageBase64.value = null
-    }
-
-    fun clearError() {
-        _error.value = null
-    }
+    fun clearSelectedImage() { _selectedImageBase64.value = null }
+    fun clearError()         { _error.value = null }
 }
