@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
@@ -62,22 +64,19 @@ fun ChatScreen(
     viewModel: ChatViewModel,
     onBack: () -> Unit
 ) {
-    val messages         by viewModel.messages.collectAsState()
-    val isLoading        by viewModel.isLoading.collectAsState()
-    val error            by viewModel.error.collectAsState()
-    val selectedImage    by viewModel.selectedImageBase64.collectAsState()
+    val messages          by viewModel.messages.collectAsState()
+    val isLoading         by viewModel.isLoading.collectAsState()
+    val error             by viewModel.error.collectAsState()
+    val selectedImage     by viewModel.selectedImageBase64.collectAsState()
+    val isImageMode       by viewModel.isImageGenerationMode.collectAsState()
 
-    var inputText        by remember { mutableStateOf("") }
-    val listState        = rememberLazyListState()
+    var inputText         by remember { mutableStateOf("") }
+    val listState         = rememberLazyListState()
 
-    // اختيار صورة من المعرض
     val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.selectImage(it) }
-    }
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? -> uri?.let { viewModel.selectImage(it) } }
 
-    // التمرير إلى آخر رسالة
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
@@ -88,16 +87,30 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "المحادثة",
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (isImageMode) "🎨 توليد الصور" else "💬 المحادثة",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع")
+                    }
+                },
+                actions = {
+                    // زر التبديل بين وضع المحادثة وتوليد الصور
+                    IconButton(onClick = { viewModel.toggleImageGenerationMode() }) {
                         Icon(
-                            Icons.Filled.ArrowBack,
-                            contentDescription = "رجوع"
+                            if (isImageMode) Icons.Filled.Chat
+                            else Icons.Filled.AutoAwesome,
+                            contentDescription = if (isImageMode) "وضع المحادثة"
+                                                else "توليد الصور",
+                            tint = if (isImageMode)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -112,9 +125,29 @@ fun ChatScreen(
                 .imePadding()
         ) {
 
+            // شريط الوضع الحالي
+            if (isImageMode) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        "🎨 وضع توليد الصور — اكتب وصفاً للصورة التي تريدها",
+                        modifier = Modifier.padding(10.dp),
+                        style    = MaterialTheme.typography.bodySmall,
+                        color    = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
             // قائمة الرسائل
             LazyColumn(
-                state    = listState,
+                state   = listState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -123,29 +156,27 @@ fun ChatScreen(
             ) {
                 item { Spacer(Modifier.height(8.dp)) }
 
-                items(
-                    items = messages,
-                    key   = { it.id }
-                ) { message ->
+                items(items = messages, key = { it.id }) { message ->
                     MessageBubble(message = message)
                 }
 
-                // مؤشر التحميل
                 if (isLoading) {
                     item {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(8.dp),
-                            horizontalArrangement = Arrangement.Start
+                            horizontalArrangement = Arrangement.Start,
+                            verticalAlignment     = Alignment.CenterVertically
                         ) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
+                                modifier    = Modifier.size(20.dp),
                                 strokeWidth = 2.dp
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "جاري الرد...",
+                                if (isImageMode) "جاري توليد الصورة..."
+                                else "جاري الرد...",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                             )
@@ -153,7 +184,6 @@ fun ChatScreen(
                     }
                 }
 
-                // رسالة الخطأ
                 error?.let { errorMsg ->
                     item {
                         Card(
@@ -164,7 +194,7 @@ fun ChatScreen(
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
+                                modifier          = Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
@@ -199,28 +229,25 @@ fun ChatScreen(
                         .padding(bottom = 4.dp)
                 ) {
                     AsyncImage(
-                        model             = android.util.Base64.decode(
+                        model              = android.util.Base64.decode(
                             selectedImage, android.util.Base64.NO_WRAP
                         ),
                         contentDescription = "صورة مختارة",
-                        modifier          = Modifier
+                        modifier           = Modifier
                             .height(80.dp)
                             .clip(RoundedCornerShape(8.dp)),
-                        contentScale      = ContentScale.Fit
+                        contentScale       = ContentScale.Fit
                     )
                     IconButton(
                         onClick  = { viewModel.clearSelectedImage() },
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .size(24.dp)
-                            .background(
-                                MaterialTheme.colorScheme.error,
-                                CircleShape
-                            )
+                            .background(MaterialTheme.colorScheme.error, CircleShape)
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "إزالة الصورة",
+                            contentDescription = "إزالة",
                             tint     = Color.White,
                             modifier = Modifier.size(16.dp)
                         )
@@ -228,7 +255,7 @@ fun ChatScreen(
                 }
             }
 
-            // حقل الإدخال
+            // شريط الإدخال
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -236,33 +263,38 @@ fun ChatScreen(
                     .padding(bottom = 12.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                // زر إرفاق صورة
-                IconButton(
-                    onClick  = { imagePicker.launch("image/*") },
-                    modifier = Modifier.padding(bottom = 4.dp)
-                ) {
-                    Icon(
-                        Icons.Filled.AttachFile,
-                        contentDescription = "إرفاق صورة",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                // زر الإرفاق — يُخفى في وضع الصور
+                if (!isImageMode) {
+                    IconButton(
+                        onClick  = { imagePicker.launch("image/*") },
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.AttachFile,
+                            contentDescription = "إرفاق صورة",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
 
-                // حقل النص
                 OutlinedTextField(
                     value         = inputText,
                     onValueChange = { inputText = it },
                     modifier      = Modifier.weight(1f),
-                    placeholder   = { Text("اكتب رسالتك...") },
-                    shape         = RoundedCornerShape(24.dp),
-                    maxLines      = 5
+                    placeholder   = {
+                        Text(
+                            if (isImageMode) "صف الصورة التي تريدها..."
+                            else "اكتب رسالتك..."
+                        )
+                    },
+                    shape    = RoundedCornerShape(24.dp),
+                    maxLines = 5
                 )
 
                 Spacer(Modifier.width(8.dp))
 
-                // زر الإرسال
                 IconButton(
-                    onClick  = {
+                    onClick = {
                         if (!isLoading) {
                             viewModel.sendMessage(inputText)
                             inputText = ""
@@ -271,11 +303,11 @@ fun ChatScreen(
                     modifier = Modifier
                         .padding(bottom = 4.dp)
                         .background(
-                            color  = if (isLoading)
+                            color = if (isLoading)
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                             else
                                 MaterialTheme.colorScheme.primary,
-                            shape  = CircleShape
+                            shape = CircleShape
                         )
                 ) {
                     Icon(
@@ -299,28 +331,45 @@ private fun MessageBubble(message: Message) {
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         Column(
-            modifier       = Modifier.widthIn(max = 300.dp),
+            modifier            = Modifier.widthIn(max = 300.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
-            // صورة مرفقة إن وجدت
+            // صورة مرفقة من المستخدم
             message.imageBase64?.let { base64 ->
+                if (message.generatedImageUrl == null) {
+                    AsyncImage(
+                        model              = android.util.Base64.decode(
+                            base64, android.util.Base64.NO_WRAP
+                        ),
+                        contentDescription = "صورة",
+                        modifier           = Modifier
+                            .height(150.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .padding(bottom = 4.dp),
+                        contentScale       = ContentScale.Fit
+                    )
+                }
+            }
+
+            // صورة مولّدة
+            message.generatedImageUrl?.let { url ->
                 AsyncImage(
-                    model              = android.util.Base64.decode(
-                        base64, android.util.Base64.NO_WRAP
-                    ),
-                    contentDescription = "صورة",
+                    model              = url,
+                    contentDescription = "صورة مولّدة",
                     modifier           = Modifier
-                        .height(150.dp)
+                        .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .padding(bottom = 4.dp),
-                    contentScale       = ContentScale.Fit
+                    contentScale       = ContentScale.FillWidth
                 )
             }
 
             // نص الرسالة
-            if (message.content.isNotBlank()) {
+            if (message.content.isNotBlank() &&
+                message.generatedImageUrl == null
+            ) {
                 Card(
-                    shape  = RoundedCornerShape(
+                    shape = RoundedCornerShape(
                         topStart    = if (isUser) 16.dp else 4.dp,
                         topEnd      = if (isUser) 4.dp else 16.dp,
                         bottomStart = 16.dp,
@@ -339,11 +388,11 @@ private fun MessageBubble(message: Message) {
                             horizontal = 12.dp,
                             vertical   = 8.dp
                         ),
-                        color    = if (isUser)
+                        color = if (isUser)
                             MaterialTheme.colorScheme.onPrimary
                         else
                             MaterialTheme.colorScheme.onSurfaceVariant,
-                        style    = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium
                     )
                 }
             }
