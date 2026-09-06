@@ -8,7 +8,8 @@ data class Message(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val conversationId: Long,
+    val role: String,       // "user" أو "assistant"
     val content: String,
-    val isFromUser: Boolean,
+    val imageBase64: String? = null,  // صورة مرفقة إن وجدت
     val timestamp: Long = System.currentTimeMillis()
 )
