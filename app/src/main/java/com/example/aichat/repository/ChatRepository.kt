@@ -1,12 +1,10 @@
 package com.example.aichat.repository
 
 import android.content.Context
+import android.util.Base64
 import com.example.aichat.data.local.AiSettings
-import com.example.aichat.data.local.ChatDatabase
-import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.Message
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -14,100 +12,282 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class ChatRepository(context: Context) {
 
-    private val dao = ChatDatabase.getDatabase(context).chatDao()
-    private val settings = AiSettings(context)
+    val settings = AiSettings(context)
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    fun getAllConversations(): Flow<List<Conversation>> =
-        dao.getAllConversations()
+    suspend fun sendMessage(
+        history: List<Message>,
+        userMessage: String,
+        imageBase64: String? = null
+    ): String = withContext(Dispatchers.IO) {
 
-    suspend fun createConversation(title: String): Long =
-        dao.insertConversation(Conversation(title = title))
-
-    suspend fun deleteConversation(conversation: Conversation) {
-        dao.deleteMessagesByConversationId(conversation.id)
-        dao.deleteConversation(conversation)
-    }
-
-    fun getMessages(conversationId: Long): Flow<List<Message>> =
-        dao.getMessagesByConversationId(conversationId)
-
-    suspend fun sendMessage(conversationId: Long, userMessage: String): String {
-        val msg = Message(
-            conversationId = conversationId,
-            content = userMessage,
-            isFromUser = true
-        )
-        dao.insertMessage(msg)
-
-        val conv = Conversation(
-            id = conversationId,
-            title = "",
-            updatedAt = System.currentTimeMillis()
-        )
-        dao.updateConversation(conv)
-
-        return try {
-            val aiResponse = callApi(userMessage)
-            val aiMsg = Message(
-                conversationId = conversationId,
-                content = aiResponse,
-                isFromUser = false
+        when (settings.provider.lowercase()) {
+            "gemini"     -> sendGemini(history, userMessage, imageBase64)
+            "openrouter" -> sendOpenAICompatible(
+                baseUrl      = "https://openrouter.ai/api/v1/chat/completions",
+                apiKey       = settings.openrouterKey,
+                model        = settings.openrouterModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "OpenRouter"
             )
-            dao.insertMessage(aiMsg)
-            aiResponse
-        } catch (e: Exception) {
-            val errorMsg = "Error: ${e.message}"
-            val aiMsg = Message(
-                conversationId = conversationId,
-                content = errorMsg,
-                isFromUser = false
+            "openai"     -> sendOpenAICompatible(
+                baseUrl      = "https://api.openai.com/v1/chat/completions",
+                apiKey       = settings.openaiKey,
+                model        = settings.openaiModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "OpenAI"
             )
-            dao.insertMessage(aiMsg)
-            errorMsg
+            "mistral"    -> sendOpenAICompatible(
+                baseUrl      = "https://api.mistral.ai/v1/chat/completions",
+                apiKey       = settings.mistralKey,
+                model        = settings.mistralModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "Mistral"
+            )
+            "groq"       -> sendOpenAICompatible(
+                baseUrl      = "https://api.groq.com/openai/v1/chat/completions",
+                apiKey       = settings.groqKey,
+                model        = settings.groqModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "Groq"
+            )
+            "custom"     -> sendOpenAICompatible(
+                baseUrl      = settings.customUrl,
+                apiKey       = settings.customKey,
+                model        = settings.customModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "Custom"
+            )
+            else -> throw IOException("مزود غير معروف: ${settings.provider}")
         }
     }
 
-    suspend fun callApi(userMessage: String): String = withContext(Dispatchers.IO) {
-        val messagesArray = JSONArray().apply {
-            put(JSONObject().apply {
-                put("role", "system")
-                put("content", settings.systemPrompt)
+    // ============================================================
+    // Gemini
+    // ============================================================
+
+    private fun sendGemini(
+        history: List<Message>,
+        userMessage: String,
+        imageBase64: String?
+    ): String {
+
+        val apiKey = settings.geminiKey
+        val model  = settings.geminiModel.ifBlank { "gemini-3.6-flash" }
+
+        val endpoint =
+            "https://generativelanguage.googleapis.com/v1beta/models/" +
+            "$model:generateContent?key=$apiKey"
+
+        val contents = JSONArray()
+
+        // إضافة تاريخ المحادثة
+        history.forEach { msg ->
+            val role = if (msg.role == "user") "user" else "model"
+            val parts = JSONArray()
+
+            if (msg.imageBase64 != null) {
+                parts.put(JSONObject().apply {
+                    put("inline_data", JSONObject().apply {
+                        put("mime_type", "image/jpeg")
+                        put("data", msg.imageBase64)
+                    })
+                })
+            }
+
+            parts.put(JSONObject().apply {
+                put("text", msg.content)
             })
-            put(JSONObject().apply {
-                put("role", "user")
-                put("content", userMessage)
+
+            contents.put(JSONObject().apply {
+                put("role", role)
+                put("parts", parts)
             })
         }
 
-        val body = JSONObject().apply {
-            put("model", settings.model)
-            put("messages", messagesArray)
-            put("temperature", settings.temperature.toDouble())
+        // الرسالة الجديدة
+        val newParts = JSONArray()
+
+        if (imageBase64 != null) {
+            newParts.put(JSONObject().apply {
+                put("inline_data", JSONObject().apply {
+                    put("mime_type", "image/jpeg")
+                    put("data", imageBase64)
+                })
+            })
+        }
+
+        newParts.put(JSONObject().apply {
+            put("text", userMessage)
+        })
+
+        contents.put(JSONObject().apply {
+            put("role", "user")
+            put("parts", newParts)
+        })
+
+        val requestJson = JSONObject().apply {
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.7)
+                put("maxOutputTokens", 8192)
+            })
         }
 
         val request = Request.Builder()
-            .url(settings.apiUrl)
-            .addHeader("Authorization", "Bearer ${settings.apiKey}")
-            .addHeader("Content-Type", "application/json")
-            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .url(endpoint)
+            .post(
+                requestJson.toString()
+                    .toRequestBody("application/json".toMediaType())
+            )
             .build()
 
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: ""
+        client.newCall(request).execute().use { response ->
 
-        val json = JSONObject(responseBody)
-        json.getJSONArray("choices")
-            .getJSONObject(0)
-            .getJSONObject("message")
-            .getString("content")
+            val body = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+                throw IOException("Gemini HTTP ${response.code}: $body")
+            }
+
+            val root       = JSONObject(body)
+            val candidates = root.optJSONArray("candidates")
+            val content    = candidates
+                ?.optJSONObject(0)
+                ?.optJSONObject("content")
+            val parts      = content?.optJSONArray("parts")
+            val text       = parts?.optJSONObject(0)?.optString("text", "")
+
+            return text?.trim()
+                ?: throw IOException("Gemini: لم يتم العثور على نص في الاستجابة")
+        }
+    }
+
+    // ============================================================
+    // OpenAI Compatible
+    // ============================================================
+
+    private fun sendOpenAICompatible(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        history: List<Message>,
+        userMessage: String,
+        imageBase64: String?,
+        providerName: String
+    ): String {
+
+        if (apiKey.isBlank()) throw IOException("$providerName: المفتاح فارغ")
+        if (model.isBlank())  throw IOException("$providerName: اسم النموذج فارغ")
+
+        val messages = JSONArray()
+
+        // تاريخ المحادثة
+        history.forEach { msg ->
+
+            val content = JSONArray()
+
+            if (msg.imageBase64 != null) {
+                content.put(JSONObject().apply {
+                    put("type", "image_url")
+                    put("image_url", JSONObject().apply {
+                        put("url", "data:image/jpeg;base64,${msg.imageBase64}")
+                    })
+                })
+            }
+
+            content.put(JSONObject().apply {
+                put("type", "text")
+                put("text", msg.content)
+            })
+
+            messages.put(JSONObject().apply {
+                put("role", msg.role)
+                put("content", content)
+            })
+        }
+
+        // الرسالة الجديدة
+        val newContent = JSONArray()
+
+        if (imageBase64 != null) {
+            newContent.put(JSONObject().apply {
+                put("type", "image_url")
+                put("image_url", JSONObject().apply {
+                    put("url", "data:image/jpeg;base64,$imageBase64")
+                })
+            })
+        }
+
+        newContent.put(JSONObject().apply {
+            put("type", "text")
+            put("text", userMessage)
+        })
+
+        messages.put(JSONObject().apply {
+            put("role", "user")
+            put("content", newContent)
+        })
+
+        val requestJson = JSONObject().apply {
+            put("model", model)
+            put("messages", messages)
+            put("temperature", 0.7)
+            put("max_tokens", 8192)
+        }
+
+        val requestBuilder = Request.Builder()
+            .url(baseUrl)
+            .post(
+                requestJson.toString()
+                    .toRequestBody("application/json".toMediaType())
+            )
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+
+        if (providerName == "OpenRouter") {
+            requestBuilder
+                .addHeader("HTTP-Referer", "https://github.com/")
+                .addHeader("X-Title", "AiChat")
+        }
+
+        client.newCall(requestBuilder.build()).execute().use { response ->
+
+            val body = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+                throw IOException("$providerName HTTP ${response.code}: $body")
+            }
+
+            val root    = JSONObject(body)
+            val choices = root.optJSONArray("choices")
+            val message = choices
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+            val text    = message?.optString("content", "")
+
+            return text?.trim()
+                ?: throw IOException("$providerName: لم يتم العثور على نص في الاستجابة")
+        }
     }
 }
