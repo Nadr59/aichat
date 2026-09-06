@@ -91,18 +91,66 @@ class ChatRepository(context: Context) {
     // ============================================================
 
     suspend fun generateImage(
-        prompt: String
-    ): ImageResult = withContext(Dispatchers.IO) {
+    prompt: String
+): ImageResult = withContext(Dispatchers.IO) {
 
-        val provider = settings.imageProvider.lowercase().trim()
+    when (settings.imageProvider.lowercase().trim()) {
+        "openai"     -> generateImageOpenAI(prompt)
+        "openrouter" -> generateImageOpenRouter(prompt)
+        "custom"     -> generateImageCustom(prompt)
+        else         -> throw IOException("مزود غير معروف: ${settings.imageProvider}")
+    }
+}
 
-        when (provider) {
-            "openai"     -> generateImageOpenAI(prompt)
-            "openrouter" -> generateImageOpenRouter(prompt)
-            else         -> throw IOException("مزود توليد الصور غير معروف: $provider")
-        }
+private fun generateImageCustom(
+    prompt: String
+): ImageResult {
+
+    val url    = settings.customImageUrl.trim()
+    val apiKey = settings.customImageKey
+    val model  = settings.imageModel.trim()
+
+    if (url.isBlank()) {
+        throw IOException("Custom Image: الرابط فارغ")
     }
 
+    val requestJson = JSONObject().apply {
+        put("prompt", prompt)
+        if (model.isNotBlank()) put("model", model)
+        put("n", 1)
+    }
+
+    val requestBuilder = Request.Builder()
+        .url(url)
+        .post(
+            requestJson.toString()
+                .toRequestBody("application/json".toMediaType())
+        )
+        .addHeader("Content-Type", "application/json")
+
+    if (apiKey.isNotBlank()) {
+        requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+    }
+
+    client.newCall(requestBuilder.build()).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw IOException("Custom Image HTTP ${response.code}: $body")
+        }
+
+        val root = JSONObject(body)
+        val data = root.optJSONArray("data")
+        val imageUrl = data?.optJSONObject(0)?.optString("url", "")
+
+        if (imageUrl.isNullOrBlank()) {
+            throw IOException("Custom Image: لم يتم إرجاع رابط الصورة")
+        }
+
+        return ImageResult(url = imageUrl)
+    }
+}
     // ============================================================
     // نتيجة توليد الصورة
     // ============================================================
