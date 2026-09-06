@@ -30,6 +30,15 @@ class AiSettings(context: Context) {
             ?: "black-forest-labs/flux-schnell:free"
         set(value) = prefs.edit().putString("image_model", value.trim()).apply()
 
+    // مفتاح وURL مخصصان لتوليد الصور
+    var customImageUrl: String
+        get() = prefs.getString("custom_image_url", "")?.trim() ?: ""
+        set(value) = prefs.edit().putString("custom_image_url", value.trim()).apply()
+
+    var customImageKey: String
+        get() = prefs.getString("custom_image_key", "") ?: ""
+        set(value) = prefs.edit().putString("custom_image_key", value).apply()
+
     // ============================================================
     // Gemini
     // ============================================================
@@ -93,7 +102,7 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("groq_model", value.trim()).apply()
 
     // ============================================================
-    // Custom
+    // Custom — محادثة
     // ============================================================
 
     var customUrl: String
