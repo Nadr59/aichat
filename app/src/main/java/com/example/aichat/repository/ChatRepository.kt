@@ -102,7 +102,7 @@ class ChatRepository(context: Context) {
     }
 }
 
-private fun generateImageCustom(
+  private fun generateImageCustom(
     prompt: String
 ): ImageResult {
 
@@ -114,10 +114,35 @@ private fun generateImageCustom(
         throw IOException("Custom Image: الرابط فارغ")
     }
 
-    val requestJson = JSONObject().apply {
-        put("prompt", prompt)
-        if (model.isNotBlank()) put("model", model)
-        put("n", 1)
+    // --------------------------------------------------------
+    // نحدد الصيغة بناءً على الـURL
+    // --------------------------------------------------------
+    val isImageGenerationEndpoint =
+        url.contains("images/generations") ||
+        url.contains("image/generate")
+
+    val requestJson = if (isImageGenerationEndpoint) {
+
+        // صيغة DALL-E / Stable Diffusion
+        JSONObject().apply {
+            put("prompt", prompt)
+            if (model.isNotBlank()) put("model", model)
+            put("n", 1)
+        }
+
+    } else {
+
+        // صيغة chat/completions — يحول الطلب إلى رسالة
+        JSONObject().apply {
+            put("model", model)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", "Generate an image of: $prompt")
+                })
+            })
+            put("max_tokens", 1024)
+        }
     }
 
     val requestBuilder = Request.Builder()
@@ -141,16 +166,33 @@ private fun generateImageCustom(
         }
 
         val root = JSONObject(body)
-        val data = root.optJSONArray("data")
-        val imageUrl = data?.optJSONObject(0)?.optString("url", "")
+
+        // محاولة استخراج URL الصورة من صيغ مختلفة
+        val imageUrl =
+            root.optJSONArray("data")
+                ?.optJSONObject(0)
+                ?.optString("url", "")
+                ?.takeIf { it.isNotBlank() }
+            ?:
+            root.optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content", "")
+                ?.takeIf { it.isNotBlank() }
+            ?:
+            root.optString("url", "")
+                .takeIf { it.isNotBlank() }
 
         if (imageUrl.isNullOrBlank()) {
-            throw IOException("Custom Image: لم يتم إرجاع رابط الصورة")
+            throw IOException(
+                "Custom Image: لم يتم إرجاع رابط الصورة\nالاستجابة: ${body.take(200)}"
+            )
         }
 
         return ImageResult(url = imageUrl)
     }
-}
+  }
+
     
     // ============================================================
     // نتيجة توليد الصورة
