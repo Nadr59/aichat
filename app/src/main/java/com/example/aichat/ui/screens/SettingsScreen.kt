@@ -54,22 +54,24 @@ fun SettingsScreen(
     settings: AiSettings,
     onBack: () -> Unit
 ) {
-    var provider       by remember { mutableStateOf(settings.provider) }
-    var geminiKey      by remember { mutableStateOf(settings.geminiKey) }
-    var geminiModel    by remember { mutableStateOf(settings.geminiModel) }
-    var openrouterKey  by remember { mutableStateOf(settings.openrouterKey) }
+    var provider        by remember { mutableStateOf(settings.provider) }
+    var geminiKey       by remember { mutableStateOf(settings.geminiKey) }
+    var geminiModel     by remember { mutableStateOf(settings.geminiModel) }
+    var openrouterKey   by remember { mutableStateOf(settings.openrouterKey) }
     var openrouterModel by remember { mutableStateOf(settings.openrouterModel) }
-    var openaiKey      by remember { mutableStateOf(settings.openaiKey) }
-    var openaiModel    by remember { mutableStateOf(settings.openaiModel) }
-    var mistralKey     by remember { mutableStateOf(settings.mistralKey) }
-    var mistralModel   by remember { mutableStateOf(settings.mistralModel) }
-    var groqKey        by remember { mutableStateOf(settings.groqKey) }
-    var groqModel      by remember { mutableStateOf(settings.groqModel) }
-    var customUrl      by remember { mutableStateOf(settings.customUrl) }
-    var customKey      by remember { mutableStateOf(settings.customKey) }
-    var customModel    by remember { mutableStateOf(settings.customModel) }
-    var showKeys       by remember { mutableStateOf(false) }
-    var saved          by remember { mutableStateOf(false) }
+    var openaiKey       by remember { mutableStateOf(settings.openaiKey) }
+    var openaiModel     by remember { mutableStateOf(settings.openaiModel) }
+    var mistralKey      by remember { mutableStateOf(settings.mistralKey) }
+    var mistralModel    by remember { mutableStateOf(settings.mistralModel) }
+    var groqKey         by remember { mutableStateOf(settings.groqKey) }
+    var groqModel       by remember { mutableStateOf(settings.groqModel) }
+    var customUrl       by remember { mutableStateOf(settings.customUrl) }
+    var customKey       by remember { mutableStateOf(settings.customKey) }
+    var customModel     by remember { mutableStateOf(settings.customModel) }
+    var imageProvider   by remember { mutableStateOf(settings.imageProvider) }
+    var imageModel      by remember { mutableStateOf(settings.imageModel) }
+    var showKeys        by remember { mutableStateOf(false) }
+    var saved           by remember { mutableStateOf(false) }
 
     val providers = listOf(
         "gemini"     to "Google Gemini ⭐",
@@ -86,7 +88,10 @@ fun SettingsScreen(
                 title = { Text("الإعدادات") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع")
+                        Icon(
+                            Icons.Filled.ArrowBack,
+                            contentDescription = "رجوع"
+                        )
                     }
                 }
             )
@@ -102,7 +107,14 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
-            Text("المزود:", fontWeight = FontWeight.Bold)
+            // ============================================================
+            // قسم المزود الرئيسي
+            // ============================================================
+
+            Text(
+                "مزود المحادثة:",
+                fontWeight = FontWeight.Bold
+            )
 
             providers.forEach { (key, name) ->
                 Card(
@@ -128,7 +140,9 @@ fun SettingsScreen(
                         Text(
                             name,
                             fontWeight = if (provider == key)
-                                FontWeight.Bold else FontWeight.Normal
+                                FontWeight.Bold
+                            else
+                                FontWeight.Normal
                         )
                     }
                 }
@@ -136,8 +150,15 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
+            // ============================================================
+            // إظهار/إخفاء المفاتيح
+            // ============================================================
+
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("مفاتيح API:", fontWeight = FontWeight.Bold)
+                Text(
+                    "مفاتيح API:",
+                    fontWeight = FontWeight.Bold
+                )
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { showKeys = !showKeys }) {
                     Icon(
@@ -150,10 +171,16 @@ fun SettingsScreen(
                 }
             }
 
+            // ============================================================
+            // إعدادات المزود المختار
+            // ============================================================
+
             when (provider) {
 
                 "gemini" -> {
-                    InfoCard("احصل على مفتاح مجاني من: aistudio.google.com/apikey")
+                    InfoCard(
+                        "احصل على مفتاح مجاني من:\naistudio.google.com/apikey"
+                    )
                     KeyField(
                         label         = "Gemini API Key",
                         value         = geminiKey,
@@ -181,7 +208,9 @@ fun SettingsScreen(
                 }
 
                 "openrouter" -> {
-                    InfoCard("احصل على مفتاح من: openrouter.ai/keys")
+                    InfoCard(
+                        "احصل على مفتاح من: openrouter.ai/keys\nبعض النماذج مجانية"
+                    )
                     KeyField(
                         label         = "OpenRouter API Key",
                         value         = openrouterKey,
@@ -208,13 +237,14 @@ fun SettingsScreen(
                         value         = openrouterModel,
                         onValueChange = { openrouterModel = it; saved = false },
                         modifier      = Modifier.fillMaxWidth(),
-                        label         = { Text("أو اكتب اسم النموذج") },
+                        label         = { Text("أو اكتب اسم النموذج يدوياً") },
                         singleLine    = true,
                         shape         = RoundedCornerShape(12.dp)
                     )
                 }
 
                 "openai" -> {
+                    InfoCard("احصل على مفتاح من: platform.openai.com")
                     KeyField(
                         label         = "OpenAI API Key",
                         value         = openaiKey,
@@ -225,11 +255,11 @@ fun SettingsScreen(
                     ModelDropdown(
                         label    = "النموذج",
                         models   = listOf(
-                            "gpt-4o"        to "GPT-4o",
-                            "gpt-4o-mini"   to "GPT-4o Mini",
-                            "gpt-4-turbo"   to "GPT-4 Turbo",
-                            "o1-mini"       to "o1 Mini",
-                            "o3-mini"       to "o3 Mini"
+                            "gpt-4o"      to "GPT-4o ⭐",
+                            "gpt-4o-mini" to "GPT-4o Mini",
+                            "gpt-4-turbo" to "GPT-4 Turbo",
+                            "o1-mini"     to "o1 Mini",
+                            "o3-mini"     to "o3 Mini"
                         ),
                         selected = openaiModel,
                         onSelect = { openaiModel = it; saved = false }
@@ -237,6 +267,7 @@ fun SettingsScreen(
                 }
 
                 "mistral" -> {
+                    InfoCard("احصل على مفتاح من: console.mistral.ai")
                     KeyField(
                         label         = "Mistral API Key",
                         value         = mistralKey,
@@ -258,6 +289,7 @@ fun SettingsScreen(
                 }
 
                 "groq" -> {
+                    InfoCard("احصل على مفتاح من: console.groq.com")
                     KeyField(
                         label         = "Groq API Key",
                         value         = groqKey,
@@ -282,7 +314,9 @@ fun SettingsScreen(
                         onValueChange = { customUrl = it; saved = false },
                         modifier      = Modifier.fillMaxWidth(),
                         label         = { Text("Server URL") },
-                        placeholder   = { Text("https://api.example.com/v1/chat/completions") },
+                        placeholder   = {
+                            Text("https://api.example.com/v1/chat/completions")
+                        },
                         singleLine    = true,
                         shape         = RoundedCornerShape(12.dp)
                     )
@@ -305,24 +339,116 @@ fun SettingsScreen(
                 }
             }
 
+            // ============================================================
+            // قسم توليد الصور
+            // ============================================================
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            Text(
+                "🎨 إعدادات توليد الصور:",
+                fontWeight = FontWeight.Bold
+            )
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        .copy(alpha = 0.5f)
+                )
+            ) {
+                Column(Modifier.padding(12.dp)) {
+
+                    Text(
+                        "مزود توليد الصور:",
+                        style      = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    listOf(
+                        "openrouter" to "OpenRouter ⭐ (نماذج مجانية متاحة)",
+                        "openai"     to "OpenAI DALL-E (مدفوع)"
+                    ).forEach { (key, name) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier          = Modifier.padding(vertical = 2.dp)
+                        ) {
+                            RadioButton(
+                                selected = imageProvider == key,
+                                onClick  = {
+                                    imageProvider = key
+                                    // تغيير النموذج الافتراضي عند تغيير المزود
+                                    imageModel = if (key == "openai") {
+                                        "dall-e-3"
+                                    } else {
+                                        "black-forest-labs/flux-schnell:free"
+                                    }
+                                    saved = false
+                                }
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                name,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+
+            ModelDropdown(
+                label    = "نموذج توليد الصور",
+                models   = if (imageProvider == "openai") {
+                    listOf(
+                        "dall-e-3" to "DALL-E 3 ⭐ (الأفضل)",
+                        "dall-e-2" to "DALL-E 2"
+                    )
+                } else {
+                    listOf(
+                        "black-forest-labs/flux-schnell:free"       to "FLUX Schnell (مجاني) ⭐",
+                        "black-forest-labs/flux-1-schnell:free"     to "FLUX 1 Schnell (مجاني)",
+                        "stabilityai/stable-diffusion-xl-base-1.0"  to "Stable Diffusion XL",
+                        "openai/dall-e-3"                           to "DALL-E 3 عبر OpenRouter"
+                    )
+                },
+                selected = imageModel,
+                onSelect = { imageModel = it; saved = false }
+            )
+
+            InfoCard(
+                if (imageProvider == "openrouter")
+                    "يستخدم نفس مفتاح OpenRouter الموجود أعلاه"
+                else
+                    "يستخدم نفس مفتاح OpenAI الموجود أعلاه"
+            )
+
+            // ============================================================
+            // زر الحفظ
+            // ============================================================
+
             Spacer(Modifier.height(8.dp))
 
             Button(
                 onClick = {
-                    settings.provider       = provider
-                    settings.geminiKey      = geminiKey
-                    settings.geminiModel    = geminiModel
-                    settings.openrouterKey  = openrouterKey
+                    settings.provider        = provider
+                    settings.geminiKey       = geminiKey
+                    settings.geminiModel     = geminiModel
+                    settings.openrouterKey   = openrouterKey
                     settings.openrouterModel = openrouterModel
-                    settings.openaiKey      = openaiKey
-                    settings.openaiModel    = openaiModel
-                    settings.mistralKey     = mistralKey
-                    settings.mistralModel   = mistralModel
-                    settings.groqKey        = groqKey
-                    settings.groqModel      = groqModel
-                    settings.customUrl      = customUrl
-                    settings.customKey      = customKey
-                    settings.customModel    = customModel
+                    settings.openaiKey       = openaiKey
+                    settings.openaiModel     = openaiModel
+                    settings.mistralKey      = mistralKey
+                    settings.mistralModel    = mistralModel
+                    settings.groqKey         = groqKey
+                    settings.groqModel       = groqModel
+                    settings.customUrl       = customUrl
+                    settings.customKey       = customKey
+                    settings.customModel     = customModel
+                    settings.imageProvider   = imageProvider
+                    settings.imageModel      = imageModel
                     saved = true
                 },
                 modifier = Modifier
@@ -332,9 +458,13 @@ fun SettingsScreen(
             ) {
                 Icon(Icons.Filled.Save, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("حفظ الإعدادات", fontWeight = FontWeight.Bold)
+                Text(
+                    "حفظ الإعدادات",
+                    fontWeight = FontWeight.Bold
+                )
             }
 
+            // رسالة الحفظ
             if (saved) {
                 Card(
                     colors = CardDefaults.cardColors(
@@ -353,8 +483,9 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "تم الحفظ!",
-                            color = MaterialTheme.colorScheme.primary
+                            "تم الحفظ بنجاح!",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -365,11 +496,16 @@ fun SettingsScreen(
     }
 }
 
+// ============================================================
+// Composables مساعدة
+// ============================================================
+
 @Composable
 private fun InfoCard(text: String) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                .copy(alpha = 0.5f)
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
@@ -391,13 +527,13 @@ private fun KeyField(
     placeholder: String
 ) {
     OutlinedTextField(
-        value                  = value,
-        onValueChange          = onValueChange,
-        modifier               = Modifier.fillMaxWidth(),
-        label                  = { Text(label) },
-        placeholder            = { Text(placeholder) },
-        singleLine             = true,
-        visualTransformation   = if (showKey)
+        value                = value,
+        onValueChange        = onValueChange,
+        modifier             = Modifier.fillMaxWidth(),
+        label                = { Text(label) },
+        placeholder          = { Text(placeholder) },
+        singleLine           = true,
+        visualTransformation = if (showKey)
             VisualTransformation.None
         else
             PasswordVisualTransformation(),
@@ -416,7 +552,7 @@ private fun ModelDropdown(
     var expanded by remember { mutableStateOf(false) }
 
     ExposedDropdownMenuBox(
-        expanded        = expanded,
+        expanded         = expanded,
         onExpandedChange = { expanded = !expanded }
     ) {
         OutlinedTextField(
@@ -426,12 +562,14 @@ private fun ModelDropdown(
             modifier      = Modifier
                 .fillMaxWidth()
                 .menuAnchor(),
-            trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            shape         = RoundedCornerShape(12.dp),
-            label         = { Text(label) }
+            trailingIcon  = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded)
+            },
+            shape = RoundedCornerShape(12.dp),
+            label = { Text(label) }
         )
         ExposedDropdownMenu(
-            expanded        = expanded,
+            expanded         = expanded,
             onDismissRequest = { expanded = false }
         ) {
             models.forEach { (id, name) ->
