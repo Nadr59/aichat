@@ -11,6 +11,7 @@ import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.Message
 import com.example.aichat.repository.ChatRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +38,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages.asStateFlow()
+
+    // ✅ تتبع Job الـ collect لإلغائه عند الحاجة
+    private var messagesCollectJob: Job? = null
 
     // ============================================================
     // UI State
@@ -69,7 +73,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openConversation(conversationId: Long) {
         _currentConversationId.value = conversationId
-        viewModelScope.launch {
+
+        // ✅ إلغاء الـ collect السابق قبل بدء جديد
+        messagesCollectJob?.cancel()
+        messagesCollectJob = viewModelScope.launch {
             dao.getMessages(conversationId).collect { msgs ->
                 _messages.value = msgs
             }
@@ -77,6 +84,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun newConversation() {
+        // ✅ إلغاء الـ collect عند بدء محادثة جديدة
+        messagesCollectJob?.cancel()
+        messagesCollectJob = null
+
         _currentConversationId.value = null
         _messages.value = emptyList()
         _selectedImageBase64.value = null
@@ -85,10 +96,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ============================================================
-    // إرسال رسالة
+    // إرسال رسالة - مع حماية من الطلبات المتعددة
     // ============================================================
 
     fun sendMessage(userText: String) {
+
+        // ✅ منع الإرسال أثناء التحميل
+        if (_isLoading.value) return
 
         if (userText.isBlank() && _selectedImageBase64.value == null) return
 
@@ -105,15 +119,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun sendChatMessage(userText: String) {
 
+        // ✅ منع طلب مزدوج
+        if (_isLoading.value) return
+
         viewModelScope.launch {
 
             _isLoading.value = true
             _error.value = null
 
             try {
-
-                val convId = getOrCreateConversation(userText)
+                val convId     = getOrCreateConversation(userText)
                 val imageBase64 = _selectedImageBase64.value
+
+                // ✅ احفظ snapshot من الرسائل قبل الإضافة
+                // لتجنب إرسال الرسالة الجديدة ضمن الـ history
+                val historySnapshot = _messages.value.toList()
 
                 dao.insertMessage(
                     Message(
@@ -127,8 +147,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 _selectedImageBase64.value = null
 
+                // ✅ استخدم الـ snapshot وليس _messages.value الحالية
                 val response = repository.sendMessage(
-                    history     = _messages.value,
+                    history     = historySnapshot,
                     userMessage = userText,
                     imageBase64 = imageBase64
                 )
@@ -145,7 +166,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 updateConversationTitle(convId)
 
             } catch (e: Exception) {
-                _error.value = e.message ?: "حدث خطأ غير معروف"
+                _error.value = when {
+                    e.message?.contains("429") == true ->
+                        "⚠️ تجاوزت حد الطلبات - انتظر دقيقة ثم حاول مرة أخرى"
+                    e.message?.contains("401") == true ->
+                        "❌ المفتاح غير صحيح أو منتهي الصلاحية"
+                    e.message?.contains("timeout") == true ->
+                        "⏱️ انتهت مهلة الاتصال - تحقق من الإنترنت"
+                    else -> e.message ?: "حدث خطأ غير معروف"
+                }
             } finally {
                 _isLoading.value = false
             }
@@ -158,16 +187,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun generateImage(prompt: String) {
 
+        // ✅ منع طلب مزدوج
+        if (_isLoading.value) return
+
         viewModelScope.launch {
 
             _isLoading.value = true
             _error.value = null
 
             try {
-
                 val convId = getOrCreateConversation(prompt)
 
-                // حفظ طلب المستخدم
                 dao.insertMessage(
                     Message(
                         conversationId = convId,
@@ -177,10 +207,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                // توليد الصورة
                 val result = repository.generateImage(prompt)
 
-                // حفظ الصورة المولّدة
                 dao.insertMessage(
                     Message(
                         conversationId    = convId,
@@ -195,7 +223,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 updateConversationTitle(convId)
 
             } catch (e: Exception) {
-                _error.value = "فشل توليد الصورة: ${e.message}"
+                _error.value = when {
+                    e.message?.contains("429") == true ->
+                        "⚠️ تجاوزت حد الطلبات - انتظر دقيقة ثم حاول مرة أخرى"
+                    e.message?.contains("401") == true ->
+                        "❌ المفتاح غير صحيح أو منتهي الصلاحية"
+                    else ->
+                        "فشل توليد الصورة: ${e.message}"
+                }
             } finally {
                 _isLoading.value = false
             }
@@ -206,10 +241,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // Helpers
     // ============================================================
 
-    private suspend fun getOrCreateConversation(
-        firstMessage: String
-    ): Long {
-
+    private suspend fun getOrCreateConversation(firstMessage: String): Long {
         return _currentConversationId.value ?: run {
             val title = firstMessage.take(50).ifBlank { "محادثة جديدة" }
             val id    = dao.insertConversation(Conversation(title = title))
@@ -220,7 +252,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun updateConversationTitle(convId: Long) {
-
         val firstUserMessage = _messages.value
             .firstOrNull { it.role == "user" }
             ?.content
@@ -256,10 +287,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 val output = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
-                val bytes  = output.toByteArray()
 
                 _selectedImageBase64.value =
-                    Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
 
             } catch (e: Exception) {
                 _error.value = "فشل تحميل الصورة: ${e.message}"
@@ -267,44 +297,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun selectBitmap(bitmap: Bitmap) {
+        viewModelScope.launch {
+            try {
+                val output = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
+                _selectedImageBase64.value =
+                    Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+            } catch (e: Exception) {
+                _error.value = "فشل تحميل الصورة: ${e.message}"
+            }
+        }
+    }
+
+    fun selectFile(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val context  = getApplication<Application>()
+                val mimeType = context.contentResolver.getType(uri) ?: ""
+                if (mimeType.startsWith("image/")) {
+                    selectImage(uri)
+                } else {
+                    val fileName = uri.lastPathSegment?.substringAfterLast("/") ?: "ملف"
+                    _error.value = "⚠️ الملفات غير الصورة غير مدعومة: $fileName"
+                }
+            } catch (e: Exception) {
+                _error.value = "فشل تحميل الملف: ${e.message}"
+            }
+        }
+    }
+
     fun clearSelectedImage() { _selectedImageBase64.value = null }
     fun clearError()         { _error.value = null }
-    fun selectBitmap(bitmap: android.graphics.Bitmap) {
-    viewModelScope.launch {
-        try {
-            val output = ByteArrayOutputStream()
-            bitmap.compress(
-                android.graphics.Bitmap.CompressFormat.JPEG,
-                85,
-                output
-            )
-            _selectedImageBase64.value = Base64.encodeToString(
-                output.toByteArray(),
-                Base64.NO_WRAP
-            )
-        } catch (e: Exception) {
-            _error.value = "فشل تحميل الصورة: ${e.message}"
-        }
-    }
-}
-
-fun selectFile(uri: Uri) {
-    viewModelScope.launch {
-        try {
-            val context  = getApplication<Application>()
-            val mimeType = context.contentResolver.getType(uri) ?: ""
-
-            if (mimeType.startsWith("image/")) {
-                selectImage(uri)
-            } else {
-                val fileName = uri.lastPathSegment
-                    ?.substringAfterLast("/")
-                    ?: "ملف"
-                _error.value = "⚠️ الملفات غير الصورة غير مدعومة حالياً: $fileName"
-            }
-        } catch (e: Exception) {
-            _error.value = "فشل تحميل الملف: ${e.message}"
-        }
-    }
-}
 }
