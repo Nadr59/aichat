@@ -270,3 +270,41 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun clearSelectedImage() { _selectedImageBase64.value = null }
     fun clearError()         { _error.value = null }
 }
+fun selectBitmap(bitmap: android.graphics.Bitmap) {
+    viewModelScope.launch {
+        try {
+            val output = ByteArrayOutputStream()
+            bitmap.compress(
+                android.graphics.Bitmap.CompressFormat.JPEG,
+                85,
+                output
+            )
+            _selectedImageBase64.value = Base64.encodeToString(
+                output.toByteArray(),
+                Base64.NO_WRAP
+            )
+        } catch (e: Exception) {
+            _error.value = "فشل تحميل الصورة: ${e.message}"
+        }
+    }
+}
+
+fun selectFile(uri: Uri) {
+    viewModelScope.launch {
+        try {
+            val context  = getApplication<Application>()
+            val mimeType = context.contentResolver.getType(uri) ?: ""
+
+            if (mimeType.startsWith("image/")) {
+                selectImage(uri)
+            } else {
+                val fileName = uri.lastPathSegment
+                    ?.substringAfterLast("/")
+                    ?: "ملف"
+                _error.value = "⚠️ الملفات غير الصورة غير مدعومة حالياً: $fileName"
+            }
+        } catch (e: Exception) {
+            _error.value = "فشل تحميل الملف: ${e.message}"
+        }
+    }
+}
