@@ -18,6 +18,25 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("provider", value.trim()).apply()
 
     // ============================================================
+    // AI Horde
+    // ============================================================
+
+    var hordeKey: String
+        get() = prefs.getString("horde_key", "0000000000")
+            ?: "0000000000"
+        set(value) = prefs.edit().putString("horde_key", value).apply()
+
+    var hordeTextModel: String
+        get() = prefs.getString("horde_text_model", "mistralai/Mistral-7B-Instruct-v0.2")?.trim()
+            ?: "mistralai/Mistral-7B-Instruct-v0.2"
+        set(value) = prefs.edit().putString("horde_text_model", value.trim()).apply()
+
+    var hordeImageModel: String
+        get() = prefs.getString("horde_image_model", "Stable Diffusion XL")?.trim()
+            ?: "Stable Diffusion XL"
+        set(value) = prefs.edit().putString("horde_image_model", value.trim()).apply()
+
+    // ============================================================
     // مزود توليد الصور
     // ============================================================
 
@@ -30,7 +49,6 @@ class AiSettings(context: Context) {
             ?: "black-forest-labs/flux-schnell:free"
         set(value) = prefs.edit().putString("image_model", value.trim()).apply()
 
-    // مفتاح وURL مخصصان لتوليد الصور
     var customImageUrl: String
         get() = prefs.getString("custom_image_url", "")?.trim() ?: ""
         set(value) = prefs.edit().putString("custom_image_url", value.trim()).apply()
@@ -102,7 +120,7 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("groq_model", value.trim()).apply()
 
     // ============================================================
-    // Custom — محادثة
+    // Custom
     // ============================================================
 
     var customUrl: String
@@ -128,6 +146,7 @@ class AiSettings(context: Context) {
             "openai"     -> openaiKey
             "mistral"    -> mistralKey
             "groq"       -> groqKey
+            "horde"      -> hordeKey
             "custom"     -> customKey
             else         -> ""
         }
@@ -140,6 +159,7 @@ class AiSettings(context: Context) {
             "openai"     -> openaiModel
             "mistral"    -> mistralModel
             "groq"       -> groqModel
+            "horde"      -> hordeTextModel
             "custom"     -> customModel
             else         -> ""
         }
