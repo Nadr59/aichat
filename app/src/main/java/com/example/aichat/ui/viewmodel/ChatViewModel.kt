@@ -269,8 +269,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearSelectedImage() { _selectedImageBase64.value = null }
     fun clearError()         { _error.value = null }
-}
-fun selectBitmap(bitmap: android.graphics.Bitmap) {
+    fun selectBitmap(bitmap: android.graphics.Bitmap) {
     viewModelScope.launch {
         try {
             val output = ByteArrayOutputStream()
@@ -307,4 +306,5 @@ fun selectFile(uri: Uri) {
             _error.value = "فشل تحميل الملف: ${e.message}"
         }
     }
+}
 }
