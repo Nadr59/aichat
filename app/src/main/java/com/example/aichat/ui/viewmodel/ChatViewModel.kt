@@ -223,14 +223,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 updateConversationTitle(convId)
 
             } catch (e: Exception) {
-                _error.value = when {
-                    e.message?.contains("429") == true ->
-                        "⚠️ تجاوزت حد الطلبات - انتظر دقيقة ثم حاول مرة أخرى"
-                    e.message?.contains("401") == true ->
-                        "❌ المفتاح غير صحيح أو منتهي الصلاحية"
-                    else ->
-                        "فشل توليد الصورة: ${e.message}"
-                }
+    // ✅ اعرض الخطأ الكامل مؤقتاً لنرى المشكلة
+    _error.value = e.message ?: "خطأ غير معروف"
+            
             } finally {
                 _isLoading.value = false
             }
