@@ -254,18 +254,16 @@ class ChatRepository(context: Context) {
 
     val messages = JSONArray()
 
-    messages.put(JSONObject().apply {
-        put("role", "system")
-        put("content", "You are a helpful AI assistant.")
-    })
-
-    history.takeLast(10).forEach { msg ->
+    // ✅ بدون system prompt - أبسط طلب ممكن
+    // ✅ آخر رسالتين فقط من الـ history
+    history.takeLast(2).forEach { msg ->
         messages.put(JSONObject().apply {
             put("role", msg.role)
             put("content", msg.content)
         })
     }
 
+    // الرسالة الحالية فقط
     messages.put(JSONObject().apply {
         put("role", "user")
         put("content", userMessage)
@@ -274,8 +272,6 @@ class ChatRepository(context: Context) {
     val requestJson = JSONObject().apply {
         put("model", model)
         put("messages", messages)
-        put("temperature", 0.7)
-        put("max_tokens", 4096)
     }
 
     val request = Request.Builder()
@@ -288,7 +284,6 @@ class ChatRepository(context: Context) {
     client.newCall(request).execute().use { response ->
         val body = response.body?.string().orEmpty()
 
-        // ✅ رمي الخطأ الكامل بدون تصفية
         if (!response.isSuccessful) {
             throw IOException(
                 "Code:${response.code}\n" +
@@ -309,7 +304,6 @@ class ChatRepository(context: Context) {
             ?: throw IOException("Mistral: الرد فارغ\n$body")
     }
     }
-    
 
     // ============================================================
     // OpenAI Compatible
