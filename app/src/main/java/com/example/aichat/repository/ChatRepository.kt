@@ -251,124 +251,125 @@ class ChatRepository(context: Context) {
     // ============================================================
 
     private fun sendOpenAICompatible(
-        baseUrl: String,
-        apiKey: String,
-        model: String,
-        history: List<Message>,
-        userMessage: String,
-        imageBase64: String?,
-        providerName: String,
-        extraHeaders: Map<String, String> = emptyMap()
-    ): String {
+    baseUrl: String,
+    apiKey: String,
+    model: String,
+    history: List<Message>,
+    userMessage: String,
+    imageBase64: String?,
+    providerName: String,
+    extraHeaders: Map<String, String> = emptyMap()
+): String {
 
-        val cleanModel = model.trim()
+    val cleanModel = model.trim()
 
-        if (apiKey.isBlank())     throw IOException("$providerName: المفتاح فارغ")
-        if (cleanModel.isBlank()) throw IOException("$providerName: اسم النموذج فارغ")
-        if (baseUrl.isBlank())    throw IOException("$providerName: الرابط فارغ")
+    if (apiKey.isBlank())     throw IOException("$providerName: المفتاح فارغ")
+    if (cleanModel.isBlank()) throw IOException("$providerName: اسم النموذج فارغ")
+    if (baseUrl.isBlank())    throw IOException("$providerName: الرابط فارغ")
 
-        val messages = JSONArray()
+    val messages = JSONArray()
 
-        // System prompt
+    // System prompt - نص فقط دائماً
+    messages.put(JSONObject().apply {
+        put("role", "system")
+        put("content", "You are a helpful AI assistant.")
+    })
+
+    // ✅ history - نص فقط دائماً بدون أي Array
+    history.takeLast(10).forEach { msg ->
         messages.put(JSONObject().apply {
-            put("role", "system")
-            put("content", "You are a helpful AI assistant.")
+            put("role", msg.role)
+            put("content", msg.content) // ✅ String دائماً
         })
+    }
 
-        // ✅ آخر 10 رسائل نصية فقط من الـ history - بدون صور سابقة
-        history.takeLast(10).forEach { msg ->
-            messages.put(JSONObject().apply {
-                put("role", msg.role)
-                // ✅ نص فقط من الـ history - الصور السابقة تُحذف
-                put("content", msg.content)
-            })
-        }
+    // ✅ الرسالة الحالية
+    val hasImage  = imageBase64 != null && supportsVision(cleanModel)
 
-        // ✅ الرسالة الحالية فقط تحمل الصورة إن وجدت
-        val hasVision = imageBase64 != null && supportsVision(cleanModel)
-
-        if (hasVision) {
-            messages.put(JSONObject().apply {
-                put("role", "user")
-                put("content", JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("type", "image_url")
-                        put("image_url", JSONObject().apply {
-                            put("url", "data:image/jpeg;base64,$imageBase64")
-                            put("detail", "low") // ✅ low بدلاً من auto لتقليل الـ tokens
-                        })
-                    })
-                    put(JSONObject().apply {
-                        put("type", "text")
-                        put("text", userMessage)
+    if (hasImage) {
+        // ✅ فقط عند وجود صورة نستخدم Array
+        messages.put(JSONObject().apply {
+            put("role", "user")
+            put("content", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "image_url")
+                    put("image_url", JSONObject().apply {
+                        put("url", "data:image/jpeg;base64,$imageBase64")
+                        put("detail", "low")
                     })
                 })
+                put(JSONObject().apply {
+                    put("type", "text")
+                    put("text", userMessage)
+                })
             })
-        } else {
-            messages.put(JSONObject().apply {
-                put("role", "user")
-                put("content", userMessage)
-            })
+        })
+    } else {
+        // ✅ بدون صورة = String فقط - يعمل مع Mistral وGroq وكل المزودين
+        messages.put(JSONObject().apply {
+            put("role", "user")
+            put("content", userMessage) // ✅ String وليس Array
+        })
+    }
+
+    val requestJson = JSONObject().apply {
+        put("model", cleanModel)
+        put("messages", messages)
+        put("temperature", 0.7)
+        put("max_tokens", 4096)
+        put("stream", false)
+    }
+
+    android.util.Log.d("ChatRepo", 
+        "$providerName | model=$cleanModel | size=${requestJson.toString().length}"
+    )
+
+    val requestBuilder = Request.Builder()
+        .url(baseUrl)
+        .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+        .addHeader("Authorization", "Bearer $apiKey")
+        .addHeader("Content-Type", "application/json")
+
+    extraHeaders.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
+
+    client.newCall(requestBuilder.build()).execute().use { response ->
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            val errorMsg = runCatching {
+                val json = JSONObject(body)
+                json.optJSONObject("error")?.optString("message")
+                    ?: json.optString("message", body)
+            }.getOrDefault(body)
+
+            throw IOException(
+                when (response.code) {
+                    429  -> "⚠️ تجاوزت حد الطلبات\nانتظر دقيقة ثم حاول مرة أخرى"
+                    401  -> "❌ المفتاح غير صحيح أو منتهي الصلاحية"
+                    403  -> "❌ ليس لديك صلاحية لهذا النموذج"
+                    422  -> "❌ صيغة الطلب خاطئة: $errorMsg"
+                    500  -> "❌ خطأ في الخادم - حاول لاحقاً"
+                    else -> "$providerName ${response.code}: $errorMsg"
+                }
+            )
         }
 
-        val requestJson = JSONObject().apply {
-            put("model", cleanModel)
-            put("messages", messages)
-            put("temperature", 0.7)
-            put("max_tokens", 4096) // ✅ قلّل من 8192 إلى 4096
-            put("stream", false)
-        }
+        val root    = JSONObject(body)
+        val choices = root.optJSONArray("choices")
+            ?: throw IOException("$providerName: لا توجد choices في الرد")
 
-        // ✅ Log لمعرفة حجم الطلب
-        val requestSize = requestJson.toString().length
-        android.util.Log.d("ChatRepo", "$providerName - حجم الطلب: $requestSize حرف")
+        if (choices.length() == 0)
+            throw IOException("$providerName: الـchoices فارغة")
 
-        val requestBuilder = Request.Builder()
-            .url(baseUrl)
-            .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
+        val choice       = choices.optJSONObject(0)
+        val message      = choice?.optJSONObject("message")
+        val text         = message?.optString("content", "")?.trim()
+        val finishReason = choice?.optString("finish_reason", "")
 
-        extraHeaders.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
+        if (!text.isNullOrBlank()) return text
 
-        client.newCall(requestBuilder.build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-                val errorMsg = runCatching {
-                    val json = JSONObject(body)
-                    json.optJSONObject("error")?.optString("message")
-                        ?: json.optString("message", body)
-                }.getOrDefault(body)
-
-                // ✅ رسائل واضحة لكل كود خطأ
-                throw IOException(
-                    when (response.code) {
-                        429  -> "⚠️ تجاوزت حد الطلبات\nانتظر دقيقة ثم حاول مرة أخرى"
-                        401  -> "❌ المفتاح غير صحيح أو منتهي الصلاحية"
-                        403  -> "❌ ليس لديك صلاحية لهذا النموذج"
-                        500  -> "❌ خطأ في الخادم - حاول لاحقاً"
-                        else -> "$providerName ${response.code}: $errorMsg"
-                    }
-                )
-            }
-
-            val root    = JSONObject(body)
-            val choices = root.optJSONArray("choices")
-                ?: throw IOException("$providerName: لا توجد choices في الرد")
-
-            if (choices.length() == 0)
-                throw IOException("$providerName: الـchoices فارغة")
-
-            val choice       = choices.optJSONObject(0)
-            val message      = choice?.optJSONObject("message")
-            val text         = message?.optString("content", "")?.trim()
-            val finishReason = choice?.optString("finish_reason", "")
-
-            if (!text.isNullOrBlank()) return text
-
-            throw IOException("$providerName: رد فارغ (finish_reason=$finishReason)")
-        }
+        throw IOException("$providerName: رد فارغ (finish_reason=$finishReason)")
+    }
     }
 
     private fun supportsVision(model: String): Boolean {
