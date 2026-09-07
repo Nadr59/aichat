@@ -245,6 +245,116 @@ class ChatRepository(context: Context) {
             )
         }
     }
+    private fun sendMistral(
+    history: List<Message>,
+    userMessage: String,
+    imageBase64: String?
+): String {
+
+    val apiKey = settings.mistralKey.trim()
+    val model  = settings.mistralModel.trim()
+
+    if (apiKey.isBlank()) throw IOException("Mistral: المفتاح فارغ")
+    if (model.isBlank())  throw IOException("Mistral: النموذج فارغ")
+
+    val messages = JSONArray()
+
+    // System
+    messages.put(JSONObject().apply {
+        put("role", "system")
+        put("content", "You are a helpful AI assistant.")
+    })
+
+    // History - نص فقط
+    history.takeLast(10).forEach { msg ->
+        messages.put(JSONObject().apply {
+            put("role", msg.role)
+            put("content", msg.content)
+        })
+    }
+
+    // الرسالة الحالية
+    val isVisionModel = model.contains("pixtral") || model.contains("vision")
+
+    if (imageBase64 != null && isVisionModel) {
+        messages.put(JSONObject().apply {
+            put("role", "user")
+            put("content", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "text")
+                    put("text", userMessage)
+                })
+                put(JSONObject().apply {
+                    put("type", "image_url")
+                    put("image_url", JSONObject().apply {
+                        put("url", "data:image/jpeg;base64,$imageBase64")
+                    })
+                })
+            })
+        })
+    } else {
+        messages.put(JSONObject().apply {
+            put("role", "user")
+            put("content", userMessage)
+        })
+    }
+
+    // ✅ Mistral format - بسيط وصحيح
+    val requestJson = JSONObject().apply {
+        put("model", model)
+        put("messages", messages)
+        put("temperature", 0.7)
+        put("max_tokens", 4096)
+        // ❌ بدون stream
+        // ❌ بدون top_p
+        // ❌ بدون أي حقل إضافي
+    }
+
+    android.util.Log.e("MISTRAL", requestJson.toString())
+
+    val request = Request.Builder()
+        .url("https://api.mistral.ai/v1/chat/completions")
+        .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+        .addHeader("Authorization", "Bearer $apiKey")
+        .addHeader("Content-Type", "application/json")
+        .addHeader("Accept", "application/json")
+        .build()
+
+    client.newCall(request).execute().use { response ->
+        val body = response.body?.string().orEmpty()
+
+        android.util.Log.e("MISTRAL_RESPONSE", "Code: ${response.code}")
+        android.util.Log.e("MISTRAL_RESPONSE", "Body: $body")
+
+        if (!response.isSuccessful) {
+            val errorMsg = runCatching {
+                val json = JSONObject(body)
+                json.optJSONObject("error")?.optString("message")
+                    ?: json.optString("message", body)
+                    ?: json.optString("detail", body)
+            }.getOrDefault(body)
+
+            throw IOException(
+                when (response.code) {
+                    429  -> "⚠️ Mistral: تجاوزت حد الطلبات\nانتظر دقيقة ثم حاول"
+                    401  -> "❌ Mistral: المفتاح غير صحيح"
+                    422  -> "❌ Mistral: صيغة خاطئة: $errorMsg"
+                    else -> "Mistral ${response.code}: $errorMsg"
+                }
+            )
+        }
+
+        val text = JSONObject(body)
+            .optJSONArray("choices")
+            ?.optJSONObject(0)
+            ?.optJSONObject("message")
+            ?.optString("content", "")
+            ?.trim()
+
+        return text?.takeIf { it.isNotBlank() }
+            ?: throw IOException("Mistral: الرد فارغ")
+    }
+    }
 
     // ============================================================
     // ✅ OpenAI Compatible - إصلاح حجم الطلب
