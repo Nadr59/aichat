@@ -21,13 +21,9 @@ class ChatRepository(context: Context) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
-
-    // ============================================================
-    // نتيجة توليد الصورة
-    // ============================================================
 
     data class ImageResult(
         val url: String? = null,
@@ -35,7 +31,7 @@ class ChatRepository(context: Context) {
     )
 
     // ============================================================
-    // المحادثة النصية
+    // إرسال رسالة نصية
     // ============================================================
 
     suspend fun sendMessage(
@@ -45,7 +41,8 @@ class ChatRepository(context: Context) {
     ): String = withContext(Dispatchers.IO) {
 
         when (settings.provider.lowercase().trim()) {
-            "gemini"     -> sendGemini(history, userMessage, imageBase64)
+            "gemini" -> sendGemini(history, userMessage, imageBase64)
+
             "openrouter" -> sendOpenAICompatible(
                 baseUrl      = "https://openrouter.ai/api/v1/chat/completions",
                 apiKey       = settings.openrouterKey,
@@ -53,8 +50,13 @@ class ChatRepository(context: Context) {
                 history      = history,
                 userMessage  = userMessage,
                 imageBase64  = imageBase64,
-                providerName = "OpenRouter"
+                providerName = "OpenRouter",
+                extraHeaders = mapOf(
+                    "HTTP-Referer" to "https://github.com/",
+                    "X-Title"      to "AiChat"
+                )
             )
+
             "openai" -> sendOpenAICompatible(
                 baseUrl      = "https://api.openai.com/v1/chat/completions",
                 apiKey       = settings.openaiKey,
@@ -64,6 +66,7 @@ class ChatRepository(context: Context) {
                 imageBase64  = imageBase64,
                 providerName = "OpenAI"
             )
+
             "mistral" -> sendOpenAICompatible(
                 baseUrl      = "https://api.mistral.ai/v1/chat/completions",
                 apiKey       = settings.mistralKey,
@@ -73,6 +76,7 @@ class ChatRepository(context: Context) {
                 imageBase64  = imageBase64,
                 providerName = "Mistral"
             )
+
             "groq" -> sendOpenAICompatible(
                 baseUrl      = "https://api.groq.com/openai/v1/chat/completions",
                 apiKey       = settings.groqKey,
@@ -82,19 +86,23 @@ class ChatRepository(context: Context) {
                 imageBase64  = imageBase64,
                 providerName = "Groq"
             )
-            "horde" -> sendHordeText(
-                history     = history,
-                userMessage = userMessage
-            )
-            "custom" -> sendOpenAICompatible(
-                baseUrl      = settings.customUrl,
-                apiKey       = settings.customKey,
-                model        = settings.customModel,
-                history      = history,
-                userMessage  = userMessage,
-                imageBase64  = imageBase64,
-                providerName = "Custom"
-            )
+
+            "horde" -> sendHordeText(history, userMessage)
+
+            "custom" -> {
+                val url = settings.customUrl.trim()
+                if (url.isBlank()) throw IOException("Custom: رابط الخادم فارغ")
+                sendOpenAICompatible(
+                    baseUrl      = url,
+                    apiKey       = settings.customKey,
+                    model        = settings.customModel,
+                    history      = history,
+                    userMessage  = userMessage,
+                    imageBase64  = imageBase64,
+                    providerName = "Custom"
+                )
+            }
+
             else -> throw IOException("مزود غير معروف: ${settings.provider}")
         }
     }
@@ -103,269 +111,18 @@ class ChatRepository(context: Context) {
     // توليد الصور
     // ============================================================
 
-    suspend fun generateImage(
-        prompt: String
-    ): ImageResult = withContext(Dispatchers.IO) {
-
+    suspend fun generateImage(prompt: String): ImageResult = withContext(Dispatchers.IO) {
         when (settings.imageProvider.lowercase().trim()) {
             "openai"     -> generateImageOpenAI(prompt)
             "openrouter" -> generateImageOpenRouter(prompt)
             "horde"      -> generateImageHorde(prompt)
             "custom"     -> generateImageCustom(prompt)
-            else         -> throw IOException("مزود غير معروف: ${settings.imageProvider}")
+            else         -> throw IOException("مزود صور غير معروف: ${settings.imageProvider}")
         }
     }
 
     // ============================================================
-    // AI Horde — النصوص
-    // ============================================================
-
-    private suspend fun sendHordeText(
-        history: List<Message>,
-        userMessage: String
-    ): String {
-
-        val apiKey = settings.hordeKey.ifBlank { "0000000000" }
-        val model  = settings.hordeTextModel.trim()
-
-        // بناء المحادثة كـprompt نصي
-        val promptBuilder = StringBuilder()
-
-        history.takeLast(10).forEach { msg ->
-            when (msg.role) {
-                "user"      -> promptBuilder.append("User: ${msg.content}\n")
-                "assistant" -> promptBuilder.append("Assistant: ${msg.content}\n")
-            }
-        }
-
-        promptBuilder.append("User: $userMessage\nAssistant:")
-
-        val requestJson = JSONObject().apply {
-            put("prompt", promptBuilder.toString())
-            put("models", JSONArray().apply { put(model) })
-            put("params", JSONObject().apply {
-                put("max_length", 512)
-                put("max_context_length", 2048)
-                put("temperature", 0.7)
-                put("top_p", 0.9)
-            })
-        }
-
-        val request = Request.Builder()
-            .url("https://aihorde.net/api/v2/generate/text/async")
-            .post(
-                requestJson.toString()
-                    .toRequestBody("application/json".toMediaType())
-            )
-            .addHeader("apikey", apiKey)
-            .addHeader("Content-Type", "application/json")
-            .addHeader("Client-Agent", "AiChat:1.0:github")
-            .build()
-
-        // إرسال الطلب
-        val jobId = client.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IOException("Horde Text HTTP ${response.code}: $body")
-            }
-            JSONObject(body).optString("id", "")
-                .takeIf { it.isNotBlank() }
-                ?: throw IOException("Horde: لم يتم إرجاع job_id")
-        }
-
-        // Polling حتى اكتمال المهمة
-        return pollHordeTextResult(jobId, apiKey)
-    }
-
-    private suspend fun pollHordeTextResult(
-        jobId: String,
-        apiKey: String
-    ): String {
-
-        val maxAttempts = 60
-        val delayMs     = 3000L
-
-        repeat(maxAttempts) { attempt ->
-
-            delay(delayMs)
-
-            val checkRequest = Request.Builder()
-                .url("https://aihorde.net/api/v2/generate/text/status/$jobId")
-                .get()
-                .addHeader("apikey", apiKey)
-                .addHeader("Client-Agent", "AiChat:1.0:github")
-                .build()
-
-            val result = client.newCall(checkRequest).execute().use { response ->
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) return@use null
-                JSONObject(body)
-            } ?: return@repeat
-
-            val isDone = result.optBoolean("done", false)
-
-            if (isDone) {
-                val generations = result.optJSONArray("generations")
-                val text = generations
-                    ?.optJSONObject(0)
-                    ?.optString("text", "")
-                    ?.trim()
-
-                if (!text.isNullOrBlank()) {
-                    return text
-                }
-
-                throw IOException("Horde: النتيجة فارغة")
-            }
-
-            // انتظر أكثر إذا كانت المهمة لا تزال قيد التنفيذ
-        }
-
-        throw IOException("Horde: انتهى الوقت المحدد بدون نتيجة (${maxAttempts * delayMs / 1000} ثانية)")
-    }
-
-    // ============================================================
-    // AI Horde — الصور
-    // ============================================================
-
-    private suspend fun generateImageHorde(
-        prompt: String
-    ): ImageResult {
-
-        val apiKey = settings.hordeKey.ifBlank { "0000000000" }
-        val model  = settings.hordeImageModel.trim()
-
-        val requestJson = JSONObject().apply {
-            put("prompt", prompt)
-            put("models", JSONArray().apply { put(model) })
-            put("params", JSONObject().apply {
-                put("width", 512)
-                put("height", 512)
-                put("steps", 20)
-                put("cfg_scale", 7.0)
-                put("sampler_name", "k_euler_a")
-                put("n", 1)
-            })
-            put("r2", true) // استخدام R2 storage للحصول على رابط مباشر
-        }
-
-        val request = Request.Builder()
-            .url("https://aihorde.net/api/v2/generate/async")
-            .post(
-                requestJson.toString()
-                    .toRequestBody("application/json".toMediaType())
-            )
-            .addHeader("apikey", apiKey)
-            .addHeader("Content-Type", "application/json")
-            .addHeader("Client-Agent", "AiChat:1.0:github")
-            .build()
-
-        val jobId = client.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IOException("Horde Image HTTP ${response.code}: $body")
-            }
-            JSONObject(body).optString("id", "")
-                .takeIf { it.isNotBlank() }
-                ?: throw IOException("Horde: لم يتم إرجاع job_id")
-        }
-
-        return pollHordeImageResult(jobId, apiKey)
-    }
-
-    private suspend fun pollHordeImageResult(
-        jobId: String,
-        apiKey: String
-    ): ImageResult {
-
-        val maxAttempts = 120
-        val delayMs     = 5000L
-
-        repeat(maxAttempts) {
-
-            delay(delayMs)
-
-            val checkRequest = Request.Builder()
-                .url("https://aihorde.net/api/v2/generate/check/$jobId")
-                .get()
-                .addHeader("apikey", apiKey)
-                .addHeader("Client-Agent", "AiChat:1.0:github")
-                .build()
-
-            val checkResult = client.newCall(checkRequest).execute().use { response ->
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) return@use null
-                JSONObject(body)
-            } ?: return@repeat
-
-            val isDone = checkResult.optBoolean("done", false)
-            val isFaulted = checkResult.optBoolean("faulted", false)
-
-            if (isFaulted) {
-                throw IOException("Horde: فشل توليد الصورة")
-            }
-
-            if (isDone) {
-
-                // جلب النتيجة
-                val statusRequest = Request.Builder()
-                    .url("https://aihorde.net/api/v2/generate/status/$jobId")
-                    .get()
-                    .addHeader("apikey", apiKey)
-                    .addHeader("Client-Agent", "AiChat:1.0:github")
-                    .build()
-
-                val statusResult = client.newCall(statusRequest).execute().use { response ->
-                    val body = response.body?.string().orEmpty()
-                    if (!response.isSuccessful) {
-                        throw IOException("Horde Status HTTP ${response.code}: $body")
-                    }
-                    JSONObject(body)
-                }
-
-                val generations = statusResult.optJSONArray("generations")
-                val generation  = generations?.optJSONObject(0)
-
-                // رابط مباشر إذا كان R2 مفعلاً
-                val imageUrl = generation?.optString("img", "")
-                    ?.takeIf { it.isNotBlank() && it.startsWith("http") }
-
-                if (imageUrl != null) {
-                    return ImageResult(url = imageUrl)
-                }
-
-                // Base64 إذا لم يكن رابطاً
-                val base64 = generation?.optString("img", "")
-                    ?.takeIf { it.isNotBlank() }
-
-                if (base64 != null) {
-                    return ImageResult(base64 = base64)
-                }
-
-                throw IOException("Horde: لم يتم إرجاع صورة")
-            }
-
-            // معلومات الانتظار
-            val waitTime    = checkResult.optInt("wait_time", 0)
-            val queuePos    = checkResult.optInt("queue_position", 0)
-
-            if (waitTime > 300) {
-                throw IOException(
-                    "Horde: وقت الانتظار طويل جداً ($waitTime ثانية)\n" +
-                    "الموضع في الطابور: $queuePos\n" +
-                    "حاول لاحقاً أو استخدم مزوداً آخر."
-                )
-            }
-        }
-
-        throw IOException(
-            "Horde: انتهى الوقت المحدد بدون نتيجة\n" +
-            "الشبكة مشغولة — حاول لاحقاً."
-        )
-    }
-
-    // ============================================================
-    // Gemini
+    // Gemini - النماذج كما هي بدون تغيير
     // ============================================================
 
     private fun sendGemini(
@@ -374,16 +131,19 @@ class ChatRepository(context: Context) {
         imageBase64: String?
     ): String {
 
-        val apiKey = settings.geminiKey
-        val model  = settings.geminiModel.trim().ifBlank { "gemini-3.6-flash" }
+        val apiKey = settings.geminiKey.trim()
+        if (apiKey.isBlank()) throw IOException("Gemini: المفتاح فارغ")
 
-        val endpoint =
-            "https://generativelanguage.googleapis.com/v1beta/models/" +
-            "$model:generateContent?key=$apiKey"
+        val model = settings.geminiModel.trim().ifBlank { "gemini-3.6-flash" }
+
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" +
+                       "$model:generateContent?key=$apiKey"
 
         val contents = JSONArray()
 
-        history.forEach { msg ->
+        // سجل المحادثة
+        history.takeLast(20).forEach { msg ->
+            // Gemini يستخدم "model" بدلاً من "assistant"
             val role  = if (msg.role == "user") "user" else "model"
             val parts = JSONArray()
 
@@ -404,6 +164,7 @@ class ChatRepository(context: Context) {
             })
         }
 
+        // الرسالة الجديدة
         val newParts = JSONArray()
 
         if (imageBase64 != null) {
@@ -427,34 +188,70 @@ class ChatRepository(context: Context) {
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.7)
                 put("maxOutputTokens", 8192)
+                put("topP", 0.95)
+            })
+            put("safetySettings", JSONArray().apply {
+                listOf(
+                    "HARM_CATEGORY_HARASSMENT",
+                    "HARM_CATEGORY_HATE_SPEECH",
+                    "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "HARM_CATEGORY_DANGEROUS_CONTENT"
+                ).forEach { category ->
+                    put(JSONObject().apply {
+                        put("category", category)
+                        put("threshold", "BLOCK_ONLY_HIGH")
+                    })
+                }
             })
         }
 
         val request = Request.Builder()
             .url(endpoint)
-            .post(
-                requestJson.toString()
-                    .toRequestBody("application/json".toMediaType())
-            )
+            .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+            .addHeader("Content-Type", "application/json")
             .build()
 
         client.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
+
             if (!response.isSuccessful) {
-                throw IOException("Gemini HTTP ${response.code}: $body")
+                val errorMsg = runCatching {
+                    JSONObject(body).optJSONObject("error")
+                        ?.optString("message") ?: body
+                }.getOrDefault(body)
+                throw IOException("Gemini ${response.code}: $errorMsg")
             }
+
             val root       = JSONObject(body)
             val candidates = root.optJSONArray("candidates")
-            val content    = candidates?.optJSONObject(0)?.optJSONObject("content")
-            val parts      = content?.optJSONArray("parts")
-            val text       = parts?.optJSONObject(0)?.optString("text", "")
-            return text?.trim()
-                ?: throw IOException("Gemini: لم يتم العثور على نص")
+
+            if (candidates == null || candidates.length() == 0) {
+                val blockReason = root.optJSONObject("promptFeedback")
+                    ?.optString("blockReason", "غير معروف")
+                throw IOException("Gemini: لا توجد استجابة. سبب الحجب: $blockReason")
+            }
+
+            val candidate    = candidates.optJSONObject(0)
+            val finishReason = candidate?.optString("finishReason", "")
+            val content      = candidate?.optJSONObject("content")
+            val parts        = content?.optJSONArray("parts")
+            val text         = parts?.optJSONObject(0)?.optString("text", "")?.trim()
+
+            if (!text.isNullOrBlank()) return text
+
+            throw IOException(
+                when (finishReason) {
+                    "SAFETY"     -> "Gemini: تم حجب الرسالة لأسباب أمان"
+                    "RECITATION" -> "Gemini: تم حجب الرسالة لأسباب حقوق الملكية"
+                    "MAX_TOKENS" -> "Gemini: الرد طويل جداً"
+                    else         -> "Gemini: رد فارغ (finishReason=$finishReason)"
+                }
+            )
         }
     }
 
     // ============================================================
-    // OpenAI Compatible
+    // OpenAI Compatible - مُصلَح
     // ============================================================
 
     private fun sendOpenAICompatible(
@@ -464,88 +261,358 @@ class ChatRepository(context: Context) {
         history: List<Message>,
         userMessage: String,
         imageBase64: String?,
-        providerName: String
+        providerName: String,
+        extraHeaders: Map<String, String> = emptyMap()
     ): String {
 
         val cleanModel = model.trim()
 
         if (apiKey.isBlank())     throw IOException("$providerName: المفتاح فارغ")
         if (cleanModel.isBlank()) throw IOException("$providerName: اسم النموذج فارغ")
+        if (baseUrl.isBlank())    throw IOException("$providerName: الرابط فارغ")
 
         val messages = JSONArray()
 
-        history.forEach { msg ->
-            val content = JSONArray()
-            if (msg.imageBase64 != null) {
-                content.put(JSONObject().apply {
-                    put("type", "image_url")
-                    put("image_url", JSONObject().apply {
-                        put("url", "data:image/jpeg;base64,${msg.imageBase64}")
-                    })
-                })
-            }
-            content.put(JSONObject().apply {
-                put("type", "text")
-                put("text", msg.content)
-            })
-            messages.put(JSONObject().apply {
-                put("role", msg.role)
-                put("content", content)
-            })
+        // System prompt
+        messages.put(JSONObject().apply {
+            put("role", "system")
+            put("content", "You are a helpful AI assistant. Answer clearly and concisely.")
+        })
+
+        // سجل المحادثة - آخر 20 رسالة
+        history.takeLast(20).forEach { msg ->
+            messages.put(
+                buildOpenAIMessage(
+                    role        = msg.role,
+                    content     = msg.content,
+                    imageBase64 = msg.imageBase64,
+                    hasVision   = supportsVision(cleanModel)
+                )
+            )
         }
 
-        val newContent = JSONArray()
-        if (imageBase64 != null) {
-            newContent.put(JSONObject().apply {
-                put("type", "image_url")
-                put("image_url", JSONObject().apply {
-                    put("url", "data:image/jpeg;base64,$imageBase64")
-                })
-            })
-        }
-        newContent.put(JSONObject().apply {
-            put("type", "text")
-            put("text", userMessage)
-        })
-        messages.put(JSONObject().apply {
-            put("role", "user")
-            put("content", newContent)
-        })
+        // الرسالة الجديدة
+        messages.put(
+            buildOpenAIMessage(
+                role        = "user",
+                content     = userMessage,
+                imageBase64 = imageBase64,
+                hasVision   = supportsVision(cleanModel)
+            )
+        )
 
         val requestJson = JSONObject().apply {
             put("model", cleanModel)
             put("messages", messages)
             put("temperature", 0.7)
             put("max_tokens", 8192)
+            put("stream", false)
         }
 
         val requestBuilder = Request.Builder()
             .url(baseUrl)
-            .post(
-                requestJson.toString()
-                    .toRequestBody("application/json".toMediaType())
-            )
+            .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("Content-Type", "application/json")
 
-        if (providerName == "OpenRouter") {
-            requestBuilder
-                .addHeader("HTTP-Referer", "https://github.com/")
-                .addHeader("X-Title", "AiChat")
-        }
+        extraHeaders.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
 
         client.newCall(requestBuilder.build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
+
             if (!response.isSuccessful) {
-                throw IOException("$providerName HTTP ${response.code}: $body")
+                val errorMsg = runCatching {
+                    val json = JSONObject(body)
+                    json.optJSONObject("error")?.optString("message")
+                        ?: json.optString("message", body)
+                }.getOrDefault(body)
+                throw IOException("$providerName ${response.code}: $errorMsg")
             }
+
             val root    = JSONObject(body)
             val choices = root.optJSONArray("choices")
-            val message = choices?.optJSONObject(0)?.optJSONObject("message")
-            val text    = message?.optString("content", "")
-            return text?.trim()
-                ?: throw IOException("$providerName: لم يتم العثور على نص")
+                ?: throw IOException("$providerName: لا توجد choices في الرد")
+
+            if (choices.length() == 0)
+                throw IOException("$providerName: الـchoices فارغة")
+
+            val choice       = choices.optJSONObject(0)
+            val message      = choice?.optJSONObject("message")
+            val text         = message?.optString("content", "")?.trim()
+            val finishReason = choice?.optString("finish_reason", "")
+
+            if (!text.isNullOrBlank()) return text
+
+            throw IOException("$providerName: رد فارغ (finish_reason=$finishReason)")
         }
+    }
+
+    // بناء رسالة OpenAI بشكل صحيح
+    private fun buildOpenAIMessage(
+        role: String,
+        content: String,
+        imageBase64: String?,
+        hasVision: Boolean
+    ): JSONObject {
+
+        // رسالة مع صورة - content كـ Array
+        return if (imageBase64 != null && hasVision) {
+            JSONObject().apply {
+                put("role", role)
+                put("content", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("type", "image_url")
+                        put("image_url", JSONObject().apply {
+                            put("url", "data:image/jpeg;base64,$imageBase64")
+                            put("detail", "auto")
+                        })
+                    })
+                    put(JSONObject().apply {
+                        put("type", "text")
+                        put("text", content)
+                    })
+                })
+            }
+        } else {
+            // رسالة نصية فقط - content كـ String (أكثر توافقاً مع جميع المزودين)
+            JSONObject().apply {
+                put("role", role)
+                put("content", content)
+            }
+        }
+    }
+
+    // فحص دعم الرؤية حسب النموذج
+    private fun supportsVision(model: String): Boolean {
+        val m = model.lowercase()
+        return listOf(
+            "gpt-4o", "gpt-4-turbo", "gpt-4-vision",
+            "gemini", "claude-3", "claude-opus",
+            "pixtral", "llava", "vision",
+            "qwen-vl", "qwen2-vl", "internvl",
+            "mistral-large", "pixtral-large"
+        ).any { m.contains(it) }
+    }
+
+    // ============================================================
+    // AI Horde — النصوص
+    // ============================================================
+
+    private suspend fun sendHordeText(
+        history: List<Message>,
+        userMessage: String
+    ): String {
+
+        val apiKey = settings.hordeKey.ifBlank { "0000000000" }
+        val model  = settings.hordeTextModel.trim()
+
+        val promptBuilder = StringBuilder()
+        promptBuilder.append("### System\nYou are a helpful AI assistant.\n\n")
+
+        history.takeLast(10).forEach { msg ->
+            when (msg.role) {
+                "user"      -> promptBuilder.append("### Human\n${msg.content}\n\n")
+                "assistant" -> promptBuilder.append("### Assistant\n${msg.content}\n\n")
+            }
+        }
+        promptBuilder.append("### Human\n$userMessage\n\n### Assistant\n")
+
+        val requestJson = JSONObject().apply {
+            put("prompt", promptBuilder.toString())
+            put("models", JSONArray().apply { put(model) })
+            put("params", JSONObject().apply {
+                put("max_length", 512)
+                put("max_context_length", 2048)
+                put("temperature", 0.7)
+                put("top_p", 0.9)
+                put("top_k", 0)
+                put("rep_pen", 1.1)
+            })
+            put("trusted_workers", false)
+            put("slow_workers", true)
+        }
+
+        val request = Request.Builder()
+            .url("https://aihorde.net/api/v2/generate/text/async")
+            .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+            .addHeader("apikey", apiKey)
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Client-Agent", "AiChat:1.0:anonymous")
+            .build()
+
+        val jobId = client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val msg = runCatching {
+                    JSONObject(body).optString("message", body)
+                }.getOrDefault(body)
+                throw IOException("Horde Text ${response.code}: $msg")
+            }
+            JSONObject(body).optString("id", "")
+                .takeIf { it.isNotBlank() }
+                ?: throw IOException("Horde: لم يتم إرجاع job_id")
+        }
+
+        return pollHordeTextResult(jobId, apiKey)
+    }
+
+    private suspend fun pollHordeTextResult(jobId: String, apiKey: String): String {
+
+        repeat(60) {
+            delay(3000L)
+
+            val req = Request.Builder()
+                .url("https://aihorde.net/api/v2/generate/text/status/$jobId")
+                .get()
+                .addHeader("apikey", apiKey)
+                .addHeader("Client-Agent", "AiChat:1.0:anonymous")
+                .build()
+
+            val obj = runCatching {
+                client.newCall(req).execute().use { resp ->
+                    JSONObject(resp.body?.string().orEmpty())
+                }
+            }.getOrNull() ?: return@repeat
+
+            if (obj.optBoolean("faulted", false)) {
+                throw IOException("Horde: فشلت المهمة")
+            }
+
+            if (obj.optBoolean("done", false)) {
+                val text = obj.optJSONArray("generations")
+                    ?.optJSONObject(0)
+                    ?.optString("text", "")
+                    ?.trim()
+
+                return text?.takeIf { it.isNotBlank() }
+                    ?: throw IOException("Horde: النتيجة فارغة")
+            }
+
+            val queuePos = obj.optInt("queue_position", 0)
+            if (queuePos > 100) {
+                throw IOException(
+                    "Horde: الطابور طويل جداً (الموضع: $queuePos)\n" +
+                    "حاول لاحقاً أو استخدم مزوداً آخر"
+                )
+            }
+        }
+
+        throw IOException("Horde: انتهى الوقت (180 ثانية) بدون نتيجة")
+    }
+
+    // ============================================================
+    // AI Horde — الصور
+    // ============================================================
+
+    private suspend fun generateImageHorde(prompt: String): ImageResult {
+
+        val apiKey = settings.hordeKey.ifBlank { "0000000000" }
+        val model  = settings.hordeImageModel.trim()
+
+        val requestJson = JSONObject().apply {
+            put("prompt", prompt)
+            put("models", JSONArray().apply { put(model) })
+            put("params", JSONObject().apply {
+                put("width", 512)
+                put("height", 512)
+                put("steps", 20)
+                put("cfg_scale", 7.5)
+                put("sampler_name", "k_euler_a")
+                put("n", 1)
+                put("karras", true)
+            })
+            put("r2", true)
+            put("shared", false)
+            put("trusted_workers", false)
+            put("slow_workers", true)
+        }
+
+        val request = Request.Builder()
+            .url("https://aihorde.net/api/v2/generate/async")
+            .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+            .addHeader("apikey", apiKey)
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Client-Agent", "AiChat:1.0:anonymous")
+            .build()
+
+        val jobId = client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val msg = runCatching {
+                    JSONObject(body).optString("message", body)
+                }.getOrDefault(body)
+                throw IOException("Horde Image ${response.code}: $msg")
+            }
+            JSONObject(body).optString("id", "")
+                .takeIf { it.isNotBlank() }
+                ?: throw IOException("Horde: لم يتم إرجاع job_id للصورة")
+        }
+
+        return pollHordeImageResult(jobId, apiKey)
+    }
+
+    private suspend fun pollHordeImageResult(jobId: String, apiKey: String): ImageResult {
+
+        repeat(120) {
+            delay(5000L)
+
+            val checkReq = Request.Builder()
+                .url("https://aihorde.net/api/v2/generate/check/$jobId")
+                .get()
+                .addHeader("apikey", apiKey)
+                .addHeader("Client-Agent", "AiChat:1.0:anonymous")
+                .build()
+
+            val check = runCatching {
+                client.newCall(checkReq).execute().use { resp ->
+                    JSONObject(resp.body?.string().orEmpty())
+                }
+            }.getOrNull() ?: return@repeat
+
+            if (check.optBoolean("faulted", false)) {
+                throw IOException("Horde: فشل توليد الصورة")
+            }
+
+            val queuePos = check.optInt("queue_position", 0)
+            if (queuePos > 200) {
+                throw IOException(
+                    "Horde: الطابور طويل جداً (الموضع: $queuePos)\n" +
+                    "حاول لاحقاً أو استخدم مزوداً آخر"
+                )
+            }
+
+            if (!check.optBoolean("done", false)) return@repeat
+
+            // جلب النتيجة الكاملة
+            val statusReq = Request.Builder()
+                .url("https://aihorde.net/api/v2/generate/status/$jobId")
+                .get()
+                .addHeader("apikey", apiKey)
+                .addHeader("Client-Agent", "AiChat:1.0:anonymous")
+                .build()
+
+            val status = client.newCall(statusReq).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful)
+                    throw IOException("Horde Status ${resp.code}: $body")
+                JSONObject(body)
+            }
+
+            val gen = status.optJSONArray("generations")?.optJSONObject(0)
+                ?: throw IOException("Horde: لم يتم إرجاع بيانات الصورة")
+
+            val img = gen.optString("img", "")
+
+            return if (img.startsWith("http")) {
+                ImageResult(url = img)
+            } else if (img.isNotBlank()) {
+                ImageResult(base64 = img)
+            } else {
+                throw IOException("Horde: حقل الصورة فارغ")
+            }
+        }
+
+        throw IOException("Horde: انتهى الوقت (600 ثانية) بدون صورة")
     }
 
     // ============================================================
@@ -554,7 +621,7 @@ class ChatRepository(context: Context) {
 
     private fun generateImageOpenAI(prompt: String): ImageResult {
 
-        val apiKey = settings.openaiKey
+        val apiKey = settings.openaiKey.trim()
         val model  = settings.imageModel.trim().ifBlank { "dall-e-3" }
 
         if (apiKey.isBlank()) throw IOException("OpenAI: المفتاح فارغ")
@@ -563,8 +630,9 @@ class ChatRepository(context: Context) {
             put("model", model)
             put("prompt", prompt)
             put("n", 1)
-            put("size", "1024x1024")
+            put("size", if (model == "dall-e-3") "1024x1024" else "512x512")
             put("response_format", "url")
+            if (model == "dall-e-3") put("quality", "standard")
         }
 
         val request = Request.Builder()
@@ -576,12 +644,21 @@ class ChatRepository(context: Context) {
 
         client.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
+
             if (!response.isSuccessful) {
-                throw IOException("OpenAI Image HTTP ${response.code}: $body")
+                val msg = runCatching {
+                    JSONObject(body).optJSONObject("error")?.optString("message") ?: body
+                }.getOrDefault(body)
+                throw IOException("OpenAI Image ${response.code}: $msg")
             }
-            val url = JSONObject(body).optJSONArray("data")
-                ?.optJSONObject(0)?.optString("url", "")
-            if (url.isNullOrBlank()) throw IOException("OpenAI: لم يتم إرجاع رابط الصورة")
+
+            val url = JSONObject(body)
+                .optJSONArray("data")
+                ?.optJSONObject(0)
+                ?.optString("url", "")
+                ?.takeIf { it.isNotBlank() }
+                ?: throw IOException("OpenAI: لم يتم إرجاع رابط الصورة")
+
             return ImageResult(url = url)
         }
     }
@@ -592,7 +669,7 @@ class ChatRepository(context: Context) {
 
     private fun generateImageOpenRouter(prompt: String): ImageResult {
 
-        val apiKey = settings.openrouterKey
+        val apiKey = settings.openrouterKey.trim()
         val model  = settings.imageModel.trim()
             .ifBlank { "black-forest-labs/flux-schnell:free" }
 
@@ -601,6 +678,7 @@ class ChatRepository(context: Context) {
         val requestJson = JSONObject().apply {
             put("model", model)
             put("prompt", prompt)
+            put("n", 1)
         }
 
         val request = Request.Builder()
@@ -614,13 +692,32 @@ class ChatRepository(context: Context) {
 
         client.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
+
             if (!response.isSuccessful) {
-                throw IOException("OpenRouter Image HTTP ${response.code}: $body")
+                val msg = runCatching {
+                    val json = JSONObject(body)
+                    json.optJSONObject("error")?.optString("message")
+                        ?: json.optString("message", body)
+                }.getOrDefault(body)
+                throw IOException("OpenRouter Image ${response.code}: $msg")
             }
-            val url = JSONObject(body).optJSONArray("data")
-                ?.optJSONObject(0)?.optString("url", "")
-            if (url.isNullOrBlank()) throw IOException("OpenRouter: لم يتم إرجاع رابط الصورة")
-            return ImageResult(url = url)
+
+            val root = JSONObject(body)
+
+            // محاولة استخراج URL أو Base64
+            root.optJSONArray("data")?.optJSONObject(0)?.let { data ->
+                val url = data.optString("url", "").takeIf { it.isNotBlank() }
+                if (url != null) return ImageResult(url = url)
+
+                val b64 = data.optString("b64_json", "").takeIf { it.isNotBlank() }
+                if (b64 != null) return ImageResult(base64 = b64)
+            }
+
+            throw IOException(
+                "OpenRouter: لم يتم إرجاع صورة\n" +
+                "تأكد أن النموذج '$model' يدعم توليد الصور\n" +
+                body.take(200)
+            )
         }
     }
 
@@ -631,31 +728,15 @@ class ChatRepository(context: Context) {
     private fun generateImageCustom(prompt: String): ImageResult {
 
         val url    = settings.customImageUrl.trim()
-        val apiKey = settings.customImageKey
+        val apiKey = settings.customImageKey.trim()
         val model  = settings.imageModel.trim()
 
         if (url.isBlank()) throw IOException("Custom Image: الرابط فارغ")
 
-        val isImageEndpoint = url.contains("images/generations") ||
-                              url.contains("image/generate")
-
-        val requestJson = if (isImageEndpoint) {
-            JSONObject().apply {
-                put("prompt", prompt)
-                if (model.isNotBlank()) put("model", model)
-                put("n", 1)
-            }
-        } else {
-            JSONObject().apply {
-                put("model", model)
-                put("messages", JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", prompt)
-                    })
-                })
-                put("max_tokens", 1024)
-            }
+        val requestJson = JSONObject().apply {
+            put("prompt", prompt)
+            if (model.isNotBlank()) put("model", model)
+            put("n", 1)
         }
 
         val requestBuilder = Request.Builder()
@@ -669,31 +750,22 @@ class ChatRepository(context: Context) {
 
         client.newCall(requestBuilder.build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
+
             if (!response.isSuccessful) {
-                throw IOException("Custom Image HTTP ${response.code}: $body")
+                throw IOException("Custom Image ${response.code}: ${body.take(300)}")
             }
+
             val root = JSONObject(body)
 
-            val fromData = root.optJSONArray("data")
-                ?.optJSONObject(0)?.optString("url", "")
-                ?.takeIf { it.isNotBlank() }
-            if (fromData != null) return ImageResult(url = fromData)
+            root.optJSONArray("data")?.optJSONObject(0)?.let { data ->
+                val imgUrl = data.optString("url", "").takeIf { it.isNotBlank() }
+                if (imgUrl != null) return ImageResult(url = imgUrl)
 
-            val fromChat = root.optJSONArray("choices")
-                ?.optJSONObject(0)?.optJSONObject("message")
-                ?.optString("content", "")?.takeIf { it.isNotBlank() }
-            if (fromChat != null) {
-                val urlRegex = Regex(
-                    "(https?://[^\\s\"'<>]+\\.(?:png|jpg|jpeg|webp|gif)(?:[^\\s\"'<>]*)?)",
-                    RegexOption.IGNORE_CASE
-                )
-                val extracted = urlRegex.find(fromChat)?.value
-                if (extracted != null) return ImageResult(url = extracted)
+                val b64 = data.optString("b64_json", "").takeIf { it.isNotBlank() }
+                if (b64 != null) return ImageResult(base64 = b64)
             }
 
-            throw IOException(
-                "Custom Image: لم يتم إرجاع صورة\n${body.take(200)}"
-            )
+            throw IOException("Custom Image: لم يتم إرجاع صورة\n${body.take(200)}")
         }
     }
 }
