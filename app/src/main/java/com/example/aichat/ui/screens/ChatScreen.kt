@@ -618,6 +618,12 @@ private fun getModelsForProvider(
             "mistral-large-latest" to "Mistral Large",
             "mistral-small-latest" to "Mistral Small"
         )
+        "horde" -> listOf(
+    "mistralai/Mistral-7B-Instruct-v0.2" to "Mistral 7B ⭐",
+    "meta-llama/Llama-3-8b-chat-hf"      to "Llama 3 8B",
+    "Pygmalion-13B"                       to "Pygmalion 13B",
+    "koalpaca"                            to "KoAlpaca"
+)
 
         "groq" -> listOf(
             "llama-3.3-70b-versatile"    to "Llama 3.3 70B",
