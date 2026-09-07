@@ -74,15 +74,19 @@ fun SettingsScreen(
     var customImageKey   by remember { mutableStateOf(settings.customImageKey) }
     var showKeys         by remember { mutableStateOf(false) }
     var saved            by remember { mutableStateOf(false) }
+    var hordeKey        by remember { mutableStateOf(settings.hordeKey) }
+   var hordeTextModel  by remember { mutableStateOf(settings.hordeTextModel) }
+   var hordeImageModel by remember { mutableStateOf(settings.hordeImageModel) }
 
     val providers = listOf(
-        "gemini"     to "Google Gemini ⭐",
-        "openrouter" to "OpenRouter",
-        "openai"     to "OpenAI",
-        "mistral"    to "Mistral AI",
-        "groq"       to "Groq",
-        "custom"     to "Custom API"
-    )
+    "gemini"     to "Google Gemini ⭐",
+    "openrouter" to "OpenRouter",
+    "openai"     to "OpenAI",
+    "mistral"    to "Mistral AI",
+    "groq"       to "Groq",
+    "horde"      to "AI Horde (مجاني تماماً)",
+    "custom"     to "Custom API"
+)
 
     Scaffold(
         topBar = {
@@ -259,6 +263,39 @@ fun SettingsScreen(
                         onSelect = { openaiModel = it; saved = false }
                     )
                 }
+                "horde" -> {
+    InfoCard(
+        "AI Horde شبكة موزعة مجانية تماماً\n" +
+        "المفتاح الافتراضي 0000000000 يعمل بدون تسجيل\n" +
+        "للأولوية: سجّل على aihorde.net واحصل على مفتاحك"
+    )
+    KeyField(
+        label         = "Horde API Key",
+        value         = hordeKey,
+        onValueChange = { hordeKey = it; saved = false },
+        showKey       = showKeys,
+        placeholder   = "0000000000 (يعمل بدون مفتاح)"
+    )
+    ModelDropdown(
+        label    = "نموذج النصوص",
+        models   = listOf(
+            "mistralai/Mistral-7B-Instruct-v0.2" to "Mistral 7B ⭐",
+            "meta-llama/Llama-3-8b-chat-hf"      to "Llama 3 8B",
+            "Pygmalion-13B"                       to "Pygmalion 13B",
+            "koalpaca"                            to "KoAlpaca"
+        ),
+        selected = hordeTextModel,
+        onSelect = { hordeTextModel = it; saved = false }
+    )
+    OutlinedTextField(
+        value         = hordeTextModel,
+        onValueChange = { hordeTextModel = it; saved = false },
+        modifier      = Modifier.fillMaxWidth(),
+        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+        singleLine    = true,
+        shape         = RoundedCornerShape(12.dp)
+    )
+                }
 
                 "mistral" -> {
                     InfoCard("احصل على مفتاح من: console.mistral.ai")
@@ -375,9 +412,12 @@ fun SettingsScreen(
                     Spacer(Modifier.height(8.dp))
 
                     listOf(
-                        "openrouter" to "OpenRouter ⭐ (نماذج مجانية)",
-                        "openai"     to "OpenAI DALL-E (مدفوع)",
-                        "custom"     to "Custom Image API"
+    "openrouter" to "OpenRouter ⭐ (نماذج مجانية)",
+    "openai"     to "OpenAI DALL-E (مدفوع)",
+    "horde"      to "AI Horde (مجاني تماماً)",
+    "custom"     to "Custom Image API"
+
+                
                     ).forEach { (key, name) ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -432,6 +472,34 @@ fun SettingsScreen(
                         "يستخدم نفس مفتاح OpenRouter الموجود أعلاه\n" +
                         "تأكد من أن النموذج يدعم توليد الصور"
                     )
+                }
+                "horde" -> {
+    InfoCard(
+        "AI Horde يولّد الصور مجاناً\n" +
+        "قد يستغرق من 30 ثانية إلى عدة دقائق\n" +
+        "حسب ازدحام الشبكة"
+    )
+    ModelDropdown(
+        label    = "نموذج الصور",
+        models   = listOf(
+            "Stable Diffusion XL"     to "SDXL ⭐",
+            "Deliberate"              to "Deliberate",
+            "Dreamshaper"             to "Dreamshaper",
+            "Realistic Vision"        to "Realistic Vision",
+            "AbsoluteReality"         to "Absolute Reality"
+        ),
+        selected = hordeImageModel,
+        onSelect = { hordeImageModel = it; saved = false }
+    )
+    OutlinedTextField(
+        value         = hordeImageModel,
+        onValueChange = { hordeImageModel = it; saved = false },
+        modifier      = Modifier.fillMaxWidth(),
+        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+        singleLine    = true,
+        shape         = RoundedCornerShape(12.dp)
+    )
+    InfoCard("يستخدم نفس مفتاح Horde الموجود أعلاه")
                 }
 
                 "openai" -> {
@@ -509,6 +577,9 @@ fun SettingsScreen(
                     settings.imageModel      = imageModel
                     settings.customImageUrl  = customImageUrl
                     settings.customImageKey  = customImageKey
+                    settings.hordeKey        = hordeKey
+                    settings.hordeTextModel  = hordeTextModel
+                    settings.hordeImageModel = hordeImageModel
                     saved = true
                 },
                 modifier = Modifier
