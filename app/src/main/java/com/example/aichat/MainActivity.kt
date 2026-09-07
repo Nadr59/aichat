@@ -51,10 +51,11 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("chat") {
-                            ChatScreen(
-                                viewModel = viewModel,
-                                onBack    = { navController.popBackStack() }
-                            )
+                          ChatScreen(
+                           viewModel = viewModel,
+                             settings  = settings,
+                             onBack    = { navController.popBackStack() }
+                           )
                         }
                         composable("settings") {
                             SettingsScreen(
