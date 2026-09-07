@@ -111,7 +111,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val convId          = getOrCreateConversation(userText)
                 val imageBase64     = _selectedImageBase64.value
+
+                // ✅ snapshot قبل أي تغيير
                 val historySnapshot = _messages.value.toList()
+
+                // ✅ أوقف collect أثناء الكتابة في DB
+                messagesCollectJob?.cancel()
 
                 dao.insertMessage(
                     Message(
@@ -125,6 +130,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 _selectedImageBase64.value = null
 
+                // ✅ طلب واحد فقط للـ API
                 val response = repository.sendMessage(
                     history     = historySnapshot,
                     userMessage = userText,
@@ -143,9 +149,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 updateConversationTitle(convId)
 
             } catch (e: Exception) {
-                // ✅ عرض الخطأ الحقيقي كما هو
                 _error.value = e.message ?: "خطأ غير معروف"
             } finally {
+                // ✅ أعد collect بعد الانتهاء
+                _currentConversationId.value?.let { openConversation(it) }
                 _isLoading.value = false
             }
         }
@@ -160,6 +167,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 val convId = getOrCreateConversation(prompt)
+
+                // ✅ أوقف collect أثناء الكتابة في DB
+                messagesCollectJob?.cancel()
 
                 dao.insertMessage(
                     Message(
@@ -186,9 +196,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 updateConversationTitle(convId)
 
             } catch (e: Exception) {
-                // ✅ عرض الخطأ الحقيقي كما هو
                 _error.value = e.message ?: "خطأ غير معروف"
             } finally {
+                // ✅ أعد collect بعد الانتهاء
+                _currentConversationId.value?.let { openConversation(it) }
                 _isLoading.value = false
             }
         }
@@ -244,7 +255,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 val output = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
-
                 _selectedImageBase64.value =
                     Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
 
