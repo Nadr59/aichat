@@ -9,10 +9,6 @@ class AiSettings(context: Context) {
         Context.MODE_PRIVATE
     )
 
-    // ============================================================
-    // المزود الرئيسي
-    // ============================================================
-
     var provider: String
         get() = prefs.getString("provider", "gemini")?.trim() ?: "gemini"
         set(value) = prefs.edit().putString("provider", value.trim()).apply()
@@ -22,13 +18,14 @@ class AiSettings(context: Context) {
     // ============================================================
 
     var hordeKey: String
-        get() = prefs.getString("horde_key", "0000000000")
-            ?: "0000000000"
+        get() = prefs.getString("horde_key", "0000000000") ?: "0000000000"
         set(value) = prefs.edit().putString("horde_key", value).apply()
 
     var hordeTextModel: String
-        get() = prefs.getString("horde_text_model", "mistralai/Mistral-7B-Instruct-v0.2")?.trim()
-            ?: "mistralai/Mistral-7B-Instruct-v0.2"
+        get() = prefs.getString(
+            "horde_text_model",
+            "mistralai/Mistral-7B-Instruct-v0.2"
+        )?.trim() ?: "mistralai/Mistral-7B-Instruct-v0.2"
         set(value) = prefs.edit().putString("horde_text_model", value.trim()).apply()
 
     var hordeImageModel: String
@@ -45,8 +42,10 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("image_provider", value.trim()).apply()
 
     var imageModel: String
-        get() = prefs.getString("image_model", "black-forest-labs/flux-schnell:free")?.trim()
-            ?: "black-forest-labs/flux-schnell:free"
+        get() = prefs.getString(
+            "image_model",
+            "black-forest-labs/flux-schnell:free"
+        )?.trim() ?: "black-forest-labs/flux-schnell:free"
         set(value) = prefs.edit().putString("image_model", value.trim()).apply()
 
     var customImageUrl: String
@@ -58,7 +57,7 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("custom_image_key", value).apply()
 
     // ============================================================
-    // Gemini
+    // Gemini - النماذج كما هي بدون تغيير
     // ============================================================
 
     var geminiKey: String
@@ -66,7 +65,8 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("gemini_key", value).apply()
 
     var geminiModel: String
-        get() = prefs.getString("gemini_model", "gemini-3.6-flash")?.trim() ?: "gemini-3.6-flash"
+        get() = prefs.getString("gemini_model", "gemini-3.6-flash")?.trim()
+            ?: "gemini-3.6-flash"
         set(value) = prefs.edit().putString("gemini_model", value.trim()).apply()
 
     // ============================================================
@@ -78,8 +78,10 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("openrouter_key", value).apply()
 
     var openrouterModel: String
-        get() = prefs.getString("openrouter_model", "google/gemini-2.5-flash")?.trim()
-            ?: "google/gemini-2.5-flash"
+        get() = prefs.getString(
+            "openrouter_model",
+            "google/gemini-2.5-flash"
+        )?.trim() ?: "google/gemini-2.5-flash"
         set(value) = prefs.edit().putString("openrouter_model", value.trim()).apply()
 
     // ============================================================
@@ -116,7 +118,8 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("groq_key", value).apply()
 
     var groqModel: String
-        get() = prefs.getString("groq_model", "")?.trim() ?: ""
+        get() = prefs.getString("groq_model", "llama-3.3-70b-versatile")?.trim()
+            ?: "llama-3.3-70b-versatile"
         set(value) = prefs.edit().putString("groq_model", value.trim()).apply()
 
     // ============================================================
@@ -139,30 +142,26 @@ class AiSettings(context: Context) {
     // Helpers
     // ============================================================
 
-    fun getActiveKey(): String {
-        return when (provider) {
-            "gemini"     -> geminiKey
-            "openrouter" -> openrouterKey
-            "openai"     -> openaiKey
-            "mistral"    -> mistralKey
-            "groq"       -> groqKey
-            "horde"      -> hordeKey
-            "custom"     -> customKey
-            else         -> ""
-        }
+    fun getActiveKey(): String = when (provider) {
+        "gemini"     -> geminiKey
+        "openrouter" -> openrouterKey
+        "openai"     -> openaiKey
+        "mistral"    -> mistralKey
+        "groq"       -> groqKey
+        "horde"      -> hordeKey
+        "custom"     -> customKey
+        else         -> ""
     }
 
-    fun getActiveModel(): String {
-        return when (provider) {
-            "gemini"     -> geminiModel
-            "openrouter" -> openrouterModel
-            "openai"     -> openaiModel
-            "mistral"    -> mistralModel
-            "groq"       -> groqModel
-            "horde"      -> hordeTextModel
-            "custom"     -> customModel
-            else         -> ""
-        }
+    fun getActiveModel(): String = when (provider) {
+        "gemini"     -> geminiModel
+        "openrouter" -> openrouterModel
+        "openai"     -> openaiModel
+        "mistral"    -> mistralModel
+        "groq"       -> groqModel
+        "horde"      -> hordeTextModel
+        "custom"     -> customModel
+        else         -> ""
     }
 
     fun isConfigured(): Boolean = getActiveKey().isNotBlank()
