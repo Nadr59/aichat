@@ -117,68 +117,56 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // رسالة نصية
     // ============================================================
 
-    private fun sendChatMessage(userText: String) {
+    = private fun sendChatMessage(userText: String) {
 
-        // ✅ منع طلب مزدوج
-        if (_isLoading.value) return
+    if (_isLoading.value) return
 
-        viewModelScope.launch {
+    viewModelScope.launch {
 
-            _isLoading.value = true
-            _error.value = null
+        _isLoading.value = true
+        _error.value = null
 
-            try {
-                val convId     = getOrCreateConversation(userText)
-                val imageBase64 = _selectedImageBase64.value
+        try {
+            val convId      = getOrCreateConversation(userText)
+            val imageBase64 = _selectedImageBase64.value
+            val historySnapshot = _messages.value.toList()
 
-                // ✅ احفظ snapshot من الرسائل قبل الإضافة
-                // لتجنب إرسال الرسالة الجديدة ضمن الـ history
-                val historySnapshot = _messages.value.toList()
-
-                dao.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role           = "user",
-                        content        = userText,
-                        imageBase64    = imageBase64,
-                        messageType    = "text"
-                    )
+            dao.insertMessage(
+                Message(
+                    conversationId = convId,
+                    role           = "user",
+                    content        = userText,
+                    imageBase64    = imageBase64,
+                    messageType    = "text"
                 )
+            )
 
-                _selectedImageBase64.value = null
+            _selectedImageBase64.value = null
 
-                // ✅ استخدم الـ snapshot وليس _messages.value الحالية
-                val response = repository.sendMessage(
-                    history     = historySnapshot,
-                    userMessage = userText,
-                    imageBase64 = imageBase64
+            val response = repository.sendMessage(
+                history     = historySnapshot,
+                userMessage = userText,
+                imageBase64 = imageBase64
+            )
+
+            dao.insertMessage(
+                Message(
+                    conversationId = convId,
+                    role           = "assistant",
+                    content        = response,
+                    messageType    = "text"
                 )
+            )
 
-                dao.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role           = "assistant",
-                        content        = response,
-                        messageType    = "text"
-                    )
-                )
+            updateConversationTitle(convId)
 
-                updateConversationTitle(convId)
-
-            } catch (e: Exception) {
-                _error.value = when {
-                    e.message?.contains("429") == true ->
-                        "⚠️ تجاوزت حد الطلبات - انتظر دقيقة ثم حاول مرة أخرى"
-                    e.message?.contains("401") == true ->
-                        "❌ المفتاح غير صحيح أو منتهي الصلاحية"
-                    e.message?.contains("timeout") == true ->
-                        "⏱️ انتهت مهلة الاتصال - تحقق من الإنترنت"
-                    else -> e.message ?: "حدث خطأ غير معروف"
-                }
-            } finally {
-                _isLoading.value = false
-            }
+        } catch (e: Exception) {
+            // ✅ اعرض الخطأ الحقيقي كما هو بدون تصفية
+            _error.value = e.message ?: "خطأ غير معروف"
+        } finally {
+            _isLoading.value = false
         }
+    }
     }
 
     // ============================================================
