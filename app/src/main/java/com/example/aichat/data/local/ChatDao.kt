@@ -43,4 +43,7 @@ interface ChatDao {
 
     @Query("DELETE FROM messages WHERE conversationId = :conversationId")
     suspend fun deleteMessages(conversationId: Long)
+    // أضف هذه الدالة
+@Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
+suspend fun getMessagesOnce(conversationId: Long): List<Message>
 }
