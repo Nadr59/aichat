@@ -9,55 +9,16 @@ class AiSettings(context: Context) {
         Context.MODE_PRIVATE
     )
 
+    // ============================================================
+    // المزود الرئيسي
+    // ============================================================
+
     var provider: String
         get() = prefs.getString("provider", "gemini")?.trim() ?: "gemini"
         set(value) = prefs.edit().putString("provider", value.trim()).apply()
 
     // ============================================================
-    // AI Horde
-    // ============================================================
-
-    var hordeKey: String
-        get() = prefs.getString("horde_key", "0000000000") ?: "0000000000"
-        set(value) = prefs.edit().putString("horde_key", value).apply()
-
-    var hordeTextModel: String
-        get() = prefs.getString(
-            "horde_text_model",
-            "mistralai/Mistral-7B-Instruct-v0.2"
-        )?.trim() ?: "mistralai/Mistral-7B-Instruct-v0.2"
-        set(value) = prefs.edit().putString("horde_text_model", value.trim()).apply()
-
-    var hordeImageModel: String
-        get() = prefs.getString("horde_image_model", "Stable Diffusion XL")?.trim()
-            ?: "Stable Diffusion XL"
-        set(value) = prefs.edit().putString("horde_image_model", value.trim()).apply()
-
-    // ============================================================
-    // مزود توليد الصور
-    // ============================================================
-
-    var imageProvider: String
-        get() = prefs.getString("image_provider", "openrouter")?.trim() ?: "openrouter"
-        set(value) = prefs.edit().putString("image_provider", value.trim()).apply()
-
-    var imageModel: String
-        get() = prefs.getString(
-            "image_model",
-            "black-forest-labs/flux-schnell:free"
-        )?.trim() ?: "black-forest-labs/flux-schnell:free"
-        set(value) = prefs.edit().putString("image_model", value.trim()).apply()
-
-    var customImageUrl: String
-        get() = prefs.getString("custom_image_url", "")?.trim() ?: ""
-        set(value) = prefs.edit().putString("custom_image_url", value.trim()).apply()
-
-    var customImageKey: String
-        get() = prefs.getString("custom_image_key", "") ?: ""
-        set(value) = prefs.edit().putString("custom_image_key", value).apply()
-
-    // ============================================================
-    // Gemini - النماذج كما هي بدون تغيير
+    // Gemini
     // ============================================================
 
     var geminiKey: String
@@ -78,10 +39,8 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("openrouter_key", value).apply()
 
     var openrouterModel: String
-        get() = prefs.getString(
-            "openrouter_model",
-            "google/gemini-2.5-flash"
-        )?.trim() ?: "google/gemini-2.5-flash"
+        get() = prefs.getString("openrouter_model", "google/gemini-2.5-flash:free")?.trim()
+            ?: "google/gemini-2.5-flash:free"
         set(value) = prefs.edit().putString("openrouter_model", value.trim()).apply()
 
     // ============================================================
@@ -104,9 +63,10 @@ class AiSettings(context: Context) {
         get() = prefs.getString("mistral_key", "") ?: ""
         set(value) = prefs.edit().putString("mistral_key", value).apply()
 
+    // ✅ pixtral-12b-2409 الأفضل للمجاني - لا يعطي 429
     var mistralModel: String
-        get() = prefs.getString("mistral_model", "pixtral-large-2411")?.trim()
-            ?: "pixtral-large-2411"
+        get() = prefs.getString("mistral_model", "pixtral-12b-2409")?.trim()
+            ?: "pixtral-12b-2409"
         set(value) = prefs.edit().putString("mistral_model", value.trim()).apply()
 
     // ============================================================
@@ -123,6 +83,26 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit().putString("groq_model", value.trim()).apply()
 
     // ============================================================
+    // AI Horde
+    // ============================================================
+
+    var hordeKey: String
+        get() = prefs.getString("horde_key", "0000000000") ?: "0000000000"
+        set(value) = prefs.edit().putString("horde_key", value).apply()
+
+    var hordeTextModel: String
+        get() = prefs.getString(
+            "horde_text_model",
+            "mistralai/Mistral-7B-Instruct-v0.2"
+        )?.trim() ?: "mistralai/Mistral-7B-Instruct-v0.2"
+        set(value) = prefs.edit().putString("horde_text_model", value.trim()).apply()
+
+    var hordeImageModel: String
+        get() = prefs.getString("horde_image_model", "Stable Diffusion XL")?.trim()
+            ?: "Stable Diffusion XL"
+        set(value) = prefs.edit().putString("horde_image_model", value.trim()).apply()
+
+    // ============================================================
     // Custom
     // ============================================================
 
@@ -137,6 +117,26 @@ class AiSettings(context: Context) {
     var customModel: String
         get() = prefs.getString("custom_model", "")?.trim() ?: ""
         set(value) = prefs.edit().putString("custom_model", value.trim()).apply()
+
+    // ============================================================
+    // توليد الصور
+    // ============================================================
+
+    var imageProvider: String
+        get() = prefs.getString("image_provider", "openai")?.trim() ?: "openai"
+        set(value) = prefs.edit().putString("image_provider", value.trim()).apply()
+
+    var imageModel: String
+        get() = prefs.getString("image_model", "dall-e-3")?.trim() ?: "dall-e-3"
+        set(value) = prefs.edit().putString("image_model", value.trim()).apply()
+
+    var customImageUrl: String
+        get() = prefs.getString("custom_image_url", "")?.trim() ?: ""
+        set(value) = prefs.edit().putString("custom_image_url", value.trim()).apply()
+
+    var customImageKey: String
+        get() = prefs.getString("custom_image_key", "") ?: ""
+        set(value) = prefs.edit().putString("custom_image_key", value).apply()
 
     // ============================================================
     // Helpers
