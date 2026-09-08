@@ -99,82 +99,78 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun sendChatMessage(userText: String) {
-        if (_isLoading.value) return
+    if (_isLoading.value) return
 
-        viewModelScope.launch {
-            _isLoading.value = true
-            _error.value     = null
+    viewModelScope.launch {
+        _isLoading.value = true
+        _error.value     = null
 
-            // ✅ 1. أوقف collect فوراً
-            messagesCollectJob?.cancel()
-            messagesCollectJob = null
+        messagesCollectJob?.cancel()
+        messagesCollectJob = null
 
-            try {
-                val imageBase64     = _selectedImageBase64.value
-                // ✅ 2. snapshot قبل أي كتابة
-                val historySnapshot = _messages.value.toList()
+        try {
+            val imageBase64 = _selectedImageBase64.value
 
-                // ✅ 3. أنشئ محادثة بدون openConversation
-                val convId = _currentConversationId.value ?: run {
-                    val id = dao.insertConversation(
-                        Conversation(title = userText.take(50).ifBlank { "محادثة جديدة" })
-                    )
-                    _currentConversationId.value = id
-                    id
-                }
-
-                // ✅ 4. اكتب رسالة المستخدم
-                dao.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role           = "user",
-                        content        = userText,
-                        imageBase64    = imageBase64,
-                        messageType    = "text"
-                    )
+            val convId = _currentConversationId.value ?: run {
+                val id = dao.insertConversation(
+                    Conversation(title = userText.take(50).ifBlank { "محادثة جديدة" })
                 )
-
-                _selectedImageBase64.value = null
-
-                // ✅ 5. طلب API واحد فقط
-                val response = repository.sendMessage(
-                    history     = historySnapshot,
-                    userMessage = userText,
-                    imageBase64 = imageBase64
-                )
-
-                // ✅ 6. اكتب رد النموذج
-                dao.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role           = "assistant",
-                        content        = response,
-                        messageType    = "text"
-                    )
-                )
-
-                // ✅ 7. حدّث العنوان
-                val title = historySnapshot
-                    .firstOrNull { it.role == "user" }?.content
-                    ?: userText
-                dao.updateConversation(
-                    Conversation(
-                        id        = convId,
-                        title     = title.take(50),
-                        updatedAt = System.currentTimeMillis()
-                    )
-                )
-
-            } catch (e: Exception) {
-                _error.value = e.message ?: "خطأ غير معروف"
-            } finally {
-                // ✅ 8. أعد collect مرة واحدة فقط
-                _currentConversationId.value?.let { startCollecting(it) }
-                _isLoading.value = false
+                _currentConversationId.value = id
+                id
             }
+
+            // ✅ الإصلاح: خذ snapshot بعد تحديد convId وقبل إضافة رسالة جديدة
+            // هذا يضمن أن history يحتوي على الرسائل السابقة فقط
+            val historySnapshot = dao.getMessagesOnce(convId)
+
+            dao.insertMessage(
+                Message(
+                    conversationId = convId,
+                    role           = "user",
+                    content        = userText,
+                    imageBase64    = imageBase64,
+                    messageType    = "text"
+                )
+            )
+
+            _selectedImageBase64.value = null
+
+            val response = repository.sendMessage(
+                history     = historySnapshot,
+                userMessage = userText,
+                imageBase64 = imageBase64
+            )
+
+            dao.insertMessage(
+                Message(
+                    conversationId = convId,
+                    role           = "assistant",
+                    content        = response,
+                    messageType    = "text"
+                )
+            )
+
+            val title = historySnapshot
+                .firstOrNull { it.role == "user" }?.content
+                ?: userText
+            dao.updateConversation(
+                Conversation(
+                    id        = convId,
+                    title     = title.take(50),
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+
+        } catch (e: Exception) {
+            _error.value = e.message ?: "خطأ غير معروف"
+        } finally {
+            _currentConversationId.value?.let { startCollecting(it) }
+            _isLoading.value = false
         }
     }
+    }
 
+                
     private fun generateImage(prompt: String) {
         if (_isLoading.value) return
 
