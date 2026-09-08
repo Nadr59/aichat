@@ -2,12 +2,15 @@ package com.example.aichat.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,16 +18,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,146 +42,163 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.aichat.data.local.AiSettings
-import android.content.Context
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.AssistChip
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.ui.platform.LocalContext
 import com.example.aichat.data.model.ModelInfo
-import com.example.aichat.repository.ChatRepository
+import com.example.aichat.repository.ModelCatalogRepository
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     settings: AiSettings,
     onBack: () -> Unit
 ) {
-    var provider         by remember { mutableStateOf(settings.provider) }
-    var geminiKey        by remember { mutableStateOf(settings.geminiKey) }
-    var geminiModel      by remember { mutableStateOf(settings.geminiModel) }
-    var openrouterKey    by remember { mutableStateOf(settings.openrouterKey) }
-    var openrouterModel  by remember { mutableStateOf(settings.openrouterModel) }
-    var openaiKey        by remember { mutableStateOf(settings.openaiKey) }
-    var openaiModel      by remember { mutableStateOf(settings.openaiModel) }
-    var mistralKey       by remember { mutableStateOf(settings.mistralKey) }
-    var mistralModel     by remember { mutableStateOf(settings.mistralModel) }
-    var groqKey          by remember { mutableStateOf(settings.groqKey) }
-    var groqModel        by remember { mutableStateOf(settings.groqModel) }
-    var customUrl        by remember { mutableStateOf(settings.customUrl) }
-    var customKey        by remember { mutableStateOf(settings.customKey) }
-    var customModel      by remember { mutableStateOf(settings.customModel) }
-    var imageProvider    by remember { mutableStateOf(settings.imageProvider) }
-    var imageModel       by remember { mutableStateOf(settings.imageModel) }
-    var customImageUrl   by remember { mutableStateOf(settings.customImageUrl) }
-    var customImageKey   by remember { mutableStateOf(settings.customImageKey) }
-    var showKeys         by remember { mutableStateOf(false) }
-    var saved            by remember { mutableStateOf(false) }
+    // ============================================================
+    // State
+    // ============================================================
+
+    var provider        by remember { mutableStateOf(settings.provider) }
+    var geminiKey       by remember { mutableStateOf(settings.geminiKey) }
+    var geminiModel     by remember { mutableStateOf(settings.geminiModel) }
+    var openrouterKey   by remember { mutableStateOf(settings.openrouterKey) }
+    var openrouterModel by remember { mutableStateOf(settings.openrouterModel) }
+    var openaiKey       by remember { mutableStateOf(settings.openaiKey) }
+    var openaiModel     by remember { mutableStateOf(settings.openaiModel) }
+    var mistralKey      by remember { mutableStateOf(settings.mistralKey) }
+    var mistralModel    by remember { mutableStateOf(settings.mistralModel) }
+    var groqKey         by remember { mutableStateOf(settings.groqKey) }
+    var groqModel       by remember { mutableStateOf(settings.groqModel) }
     var hordeKey        by remember { mutableStateOf(settings.hordeKey) }
-   var hordeTextModel  by remember { mutableStateOf(settings.hordeTextModel) }
-   var hordeImageModel by remember { mutableStateOf(settings.hordeImageModel) }
-val context = LocalContext.current
+    var hordeTextModel  by remember { mutableStateOf(settings.hordeTextModel) }
+    var hordeImageModel by remember { mutableStateOf(settings.hordeImageModel) }
+    var customUrl       by remember { mutableStateOf(settings.customUrl) }
+    var customKey       by remember { mutableStateOf(settings.customKey) }
+    var customModel     by remember { mutableStateOf(settings.customModel) }
+    var imageProvider   by remember { mutableStateOf(settings.imageProvider) }
+    var imageModel      by remember { mutableStateOf(settings.imageModel) }
+    var customImageUrl  by remember { mutableStateOf(settings.customImageUrl) }
+    var customImageKey  by remember { mutableStateOf(settings.customImageKey) }
+    var showKeys        by remember { mutableStateOf(false) }
+    var saved           by remember { mutableStateOf(false) }
 
-val repository = remember(context) {
-    ChatRepository(context)
-}
+    // ============================================================
+    // نظام الكتالوج الديناميكي
+    // ============================================================
 
-var availableModels by remember {
-    mutableStateOf<List<ModelInfo>>(emptyList())
-}
+    val context    = LocalContext.current
+    val scope      = rememberCoroutineScope()
+    val catalog    = remember { ModelCatalogRepository(settings) }
 
-var loadingModels by remember {
-    mutableStateOf(false)
-}
+    var models         by remember { mutableStateOf<List<ModelInfo>>(emptyList()) }
+    var loadingModels  by remember { mutableStateOf(false) }
+    var modelsError    by remember { mutableStateOf<String?>(null) }
+    var refreshTrigger by remember { mutableIntStateOf(0) }
 
-var modelsError by remember {
-    mutableStateOf<String?>(null)
-}
+    // فلاتر
+    var onlyFree        by remember { mutableStateOf(false) }
+    var onlyRecommended by remember { mutableStateOf(false) }
+    var onlyVision      by remember { mutableStateOf(false) }
 
-var onlyFree by remember {
-    mutableStateOf(false)
-}
-
-var onlyRecommended by remember {
-    mutableStateOf(false)
-}
-
-var onlyVision by remember {
-    mutableStateOf(false)
-}
-
-LaunchedEffect(
-    provider,
-    geminiKey,
-    openrouterKey,
-    openaiKey,
-    mistralKey,
-    groqKey,
-    hordeKey
-) {
-
-    if (provider == "custom") {
-        availableModels = emptyList()
-        return@LaunchedEffect
+    // المفتاح الحالي حسب المزود
+    val currentKey = when (provider) {
+        "gemini"     -> geminiKey
+        "openrouter" -> openrouterKey
+        "openai"     -> openaiKey
+        "mistral"    -> mistralKey
+        "groq"       -> groqKey
+        "horde"      -> hordeKey
+        else         -> ""
     }
 
-    loadingModels = true
-    modelsError = null
+    // النموذج الحالي حسب المزود
+    val currentModel = when (provider) {
+        "gemini"     -> geminiModel
+        "openrouter" -> openrouterModel
+        "openai"     -> openaiModel
+        "mistral"    -> mistralModel
+        "groq"       -> groqModel
+        "horde"      -> hordeTextModel
+        else         -> customModel
+    }
 
-    try {
+    // تحميل النماذج عند تغيير المزود أو الضغط على تحديث
+    LaunchedEffect(provider, refreshTrigger) {
+        if (provider == "custom") {
+            models = emptyList()
+            return@LaunchedEffect
+        }
 
-        availableModels =
-            repository.getAvailableModels(
-                provider = provider,
+        loadingModels = true
+        modelsError   = null
+
+        try {
+            models = catalog.getModels(
+                provider  = provider,
+                apiKey    = currentKey,
                 forImages = false
             )
-
-    } catch (e: Exception) {
-
-        availableModels = emptyList()
-
-        modelsError =
-            e.message ?: "تعذر تحميل النماذج"
-
-    } finally {
-
-        loadingModels = false
+        } catch (e: Exception) {
+            models      = emptyList()
+            modelsError = e.message ?: "تعذر تحميل النماذج"
+        } finally {
+            loadingModels = false
+        }
     }
-}
-val filteredModels =
-    availableModels
-        .filter {
-            !onlyFree || it.isFree
+
+    // القائمة مع إضافة النموذج المحفوظ إذا لم يكن موجوداً
+    val modelsWithSaved = remember(models, currentModel) {
+        if (currentModel.isBlank() || models.any { it.id == currentModel }) {
+            models
+        } else {
+            listOf(
+                ModelInfo(
+                    id          = currentModel,
+                    name        = "$currentModel 💾",
+                    provider    = provider,
+                    isFree      = currentModel.contains(":free"),
+                    recommended = false
+                )
+            ) + models
         }
-        .filter {
-            !onlyRecommended || it.recommended
-        }
-        .filter {
-            !onlyVision || it.supportsVision
-        }
-        
+    }
+
+    // تطبيق الفلاتر
+    val filteredModels = modelsWithSaved
+        .filter { !onlyFree        || it.isFree }
+        .filter { !onlyRecommended || it.recommended }
+        .filter { !onlyVision      || it.supportsVision }
+
+    // ============================================================
+    // قائمة المزودين
+    // ============================================================
+
     val providers = listOf(
-    "gemini"     to "Google Gemini ⭐",
-    "openrouter" to "OpenRouter",
-    "openai"     to "OpenAI",
-    "mistral"    to "Mistral AI",
-    "groq"       to "Groq",
-    "horde"      to "AI Horde (مجاني تماماً)",
-    "custom"     to "Custom API"
-)
+        "gemini"     to "Google Gemini ⭐",
+        "openrouter" to "OpenRouter",
+        "openai"     to "OpenAI",
+        "mistral"    to "Mistral AI",
+        "groq"       to "Groq",
+        "horde"      to "AI Horde (مجاني تماماً)",
+        "custom"     to "Custom API"
+    )
+
+    // ============================================================
+    // UI
+    // ============================================================
 
     Scaffold(
         topBar = {
@@ -183,10 +206,7 @@ val filteredModels =
                 title = { Text("الإعدادات") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.Filled.ArrowBack,
-                            contentDescription = "رجوع"
-                        )
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع")
                     }
                 }
             )
@@ -202,30 +222,24 @@ val filteredModels =
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
-            // ============================================================
-            // مزود المحادثة
-            // ============================================================
-
-            Text(
-                "مزود المحادثة:",
-                fontWeight = FontWeight.Bold
-            )
+            // ---- مزود المحادثة ----
+            Text("مزود المحادثة:", fontWeight = FontWeight.Bold)
 
             providers.forEach { (key, name) ->
                 Card(
                     onClick = {
-    provider = key
-    saved = false
-
-    onlyFree = false
-    onlyRecommended = false
-    onlyVision = false
-
-    availableModels = emptyList()
-    modelsError = null
+                        if (provider != key) {
+                            provider        = key
+                            saved           = false
+                            onlyFree        = false
+                            onlyRecommended = false
+                            onlyVision      = false
+                            models          = emptyList()
+                            modelsError     = null
+                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors   = CardDefaults.cardColors(
+                    colors = CardDefaults.cardColors(
                         containerColor = if (provider == key)
                             MaterialTheme.colorScheme.primaryContainer
                         else
@@ -239,7 +253,7 @@ val filteredModels =
                     ) {
                         RadioButton(
                             selected = provider == key,
-                            onClick  = { provider = key; saved = false }
+                            onClick  = null
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
@@ -253,7 +267,7 @@ val filteredModels =
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            // إظهار/إخفاء المفاتيح
+            // ---- إظهار/إخفاء المفاتيح ----
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("مفاتيح API:", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
@@ -268,16 +282,11 @@ val filteredModels =
                 }
             }
 
-            // ============================================================
-            // إعدادات المزود المختار
-            // ============================================================
-
+            // ---- إعدادات المزود ----
             when (provider) {
 
                 "gemini" -> {
-                    InfoCard(
-                        "احصل على مفتاح مجاني من:\naistudio.google.com/apikey"
-                    )
+                    InfoCard("احصل على مفتاح مجاني من:\naistudio.google.com/apikey")
                     KeyField(
                         label         = "Gemini API Key",
                         value         = geminiKey,
@@ -285,29 +294,24 @@ val filteredModels =
                         showKey       = showKeys,
                         placeholder   = "AIza..."
                     )
-                    ModelDropdown(
-                        label    = "النموذج",
-                        models   = listOf(
-                            "gemini-3.6-flash"      to "Gemini 3.6 Flash ⭐",
-                            "gemini-3.7-flash"      to "Gemini 3.7 Flash",
-                            "gemini-3.8-flash"      to "Gemini 3.8 Flash",
-                            "gemini-3.5-flash"      to "Gemini 3.5 Flash",
-                            "gemini-3.5-flash-lite" to "Gemini 3.5 Flash-Lite",
-                            "gemini-2.5-flash"      to "Gemini 2.5 Flash",
-                            "gemini-2.5-flash-lite" to "Gemini 2.5 Flash-Lite",
-                            "gemini-2.5-pro"        to "Gemini 2.5 Pro",
-                            "gemini-flash-latest"   to "Gemini Flash Latest",
-                            "gemini-pro-latest"     to "Gemini Pro Latest"
-                        ),
-                        selected = geminiModel,
-                        onSelect = { geminiModel = it; saved = false }
+                    DynamicModelSelector(
+                        models          = filteredModels,
+                        selected        = geminiModel,
+                        loading         = loadingModels,
+                        error           = modelsError,
+                        onlyFree        = onlyFree,
+                        onlyRecommended = onlyRecommended,
+                        onlyVision      = onlyVision,
+                        onFreeChange        = { onlyFree = it },
+                        onRecommendedChange = { onlyRecommended = it },
+                        onVisionChange      = { onlyVision = it },
+                        onSelect        = { geminiModel = it; saved = false },
+                        onRefresh       = { refreshTrigger++ }
                     )
                 }
 
                 "openrouter" -> {
-                    InfoCard(
-                        "احصل على مفتاح من: openrouter.ai/keys\nبعض النماذج مجانية"
-                    )
+                    InfoCard("احصل على مفتاح من: openrouter.ai/keys\nبعض النماذج مجانية تماماً")
                     KeyField(
                         label         = "OpenRouter API Key",
                         value         = openrouterKey,
@@ -315,20 +319,19 @@ val filteredModels =
                         showKey       = showKeys,
                         placeholder   = "sk-or-..."
                     )
-                    ModelDropdown(
-                        label    = "النموذج",
-                        models   = listOf(
-                            "google/gemini-2.5-flash"                  to "Gemini 2.5 Flash ⭐",
-                            "google/gemini-2.5-flash:free"             to "Gemini 2.5 Flash (مجاني)",
-                            "google/gemini-2.0-flash-exp:free"         to "Gemini 2.0 Flash (مجاني)",
-                            "anthropic/claude-3.5-sonnet"              to "Claude 3.5 Sonnet",
-                            "anthropic/claude-opus-4"                  to "Claude Opus 4",
-                            "meta-llama/llama-3.2-90b-vision-instruct" to "Llama 3.2 90B Vision",
-                            "qwen/qwen-2.5-vl-72b-instruct:free"       to "Qwen 2.5 VL 72B (مجاني)",
-                            "mistralai/pixtral-large-2411"             to "Pixtral Large"
-                        ),
-                        selected = openrouterModel,
-                        onSelect = { openrouterModel = it; saved = false }
+                    DynamicModelSelector(
+                        models          = filteredModels,
+                        selected        = openrouterModel,
+                        loading         = loadingModels,
+                        error           = modelsError,
+                        onlyFree        = onlyFree,
+                        onlyRecommended = onlyRecommended,
+                        onlyVision      = onlyVision,
+                        onFreeChange        = { onlyFree = it },
+                        onRecommendedChange = { onlyRecommended = it },
+                        onVisionChange      = { onlyVision = it },
+                        onSelect        = { openrouterModel = it; saved = false },
+                        onRefresh       = { refreshTrigger++ }
                     )
                     OutlinedTextField(
                         value         = openrouterModel,
@@ -349,55 +352,27 @@ val filteredModels =
                         showKey       = showKeys,
                         placeholder   = "sk-..."
                     )
-                    ModelDropdown(
-                        label    = "النموذج",
-                        models   = listOf(
-                            "gpt-4o"      to "GPT-4o ⭐",
-                            "gpt-4o-mini" to "GPT-4o Mini",
-                            "gpt-4-turbo" to "GPT-4 Turbo",
-                            "o1-mini"     to "o1 Mini",
-                            "o3-mini"     to "o3 Mini"
-                        ),
-                        selected = openaiModel,
-                        onSelect = { openaiModel = it; saved = false }
+                    DynamicModelSelector(
+                        models          = filteredModels,
+                        selected        = openaiModel,
+                        loading         = loadingModels,
+                        error           = modelsError,
+                        onlyFree        = onlyFree,
+                        onlyRecommended = onlyRecommended,
+                        onlyVision      = onlyVision,
+                        onFreeChange        = { onlyFree = it },
+                        onRecommendedChange = { onlyRecommended = it },
+                        onVisionChange      = { onlyVision = it },
+                        onSelect        = { openaiModel = it; saved = false },
+                        onRefresh       = { refreshTrigger++ }
                     )
-                }
-                "horde" -> {
-    InfoCard(
-        "AI Horde شبكة موزعة مجانية تماماً\n" +
-        "المفتاح الافتراضي 0000000000 يعمل بدون تسجيل\n" +
-        "للأولوية: سجّل على aihorde.net واحصل على مفتاحك"
-    )
-    KeyField(
-        label         = "Horde API Key",
-        value         = hordeKey,
-        onValueChange = { hordeKey = it; saved = false },
-        showKey       = showKeys,
-        placeholder   = "0000000000 (يعمل بدون مفتاح)"
-    )
-    ModelDropdown(
-        label    = "نموذج النصوص",
-        models   = listOf(
-            "mistralai/Mistral-7B-Instruct-v0.2" to "Mistral 7B ⭐",
-            "meta-llama/Llama-3-8b-chat-hf"      to "Llama 3 8B",
-            "Pygmalion-13B"                       to "Pygmalion 13B",
-            "koalpaca"                            to "KoAlpaca"
-        ),
-        selected = hordeTextModel,
-        onSelect = { hordeTextModel = it; saved = false }
-    )
-    OutlinedTextField(
-        value         = hordeTextModel,
-        onValueChange = { hordeTextModel = it; saved = false },
-        modifier      = Modifier.fillMaxWidth(),
-        label         = { Text("أو اكتب اسم النموذج يدوياً") },
-        singleLine    = true,
-        shape         = RoundedCornerShape(12.dp)
-    )
                 }
 
                 "mistral" -> {
-                    InfoCard("احصل على مفتاح من: console.mistral.ai")
+                    InfoCard(
+                        "احصل على مفتاح من: console.mistral.ai\n" +
+                        "✅ pixtral-12b-2409 موصى به للمجاني"
+                    )
                     KeyField(
                         label         = "Mistral API Key",
                         value         = mistralKey,
@@ -405,17 +380,19 @@ val filteredModels =
                         showKey       = showKeys,
                         placeholder   = "key..."
                     )
-                    ModelDropdown(
-                        label    = "النموذج",
-                        models   = listOf(
-                            "pixtral-large-2411"   to "Pixtral Large ⭐ (Vision)",
-                            "pixtral-12b-2409"     to "Pixtral 12B (Vision)",
-                            "mistral-large-latest" to "Mistral Large",
-                            "mistral-small-latest" to "Mistral Small",
-                            "ministral-8b-latest"   to "ministral-8b-latest"
-                        ),
-                        selected = mistralModel,
-                        onSelect = { mistralModel = it; saved = false }
+                    DynamicModelSelector(
+                        models          = filteredModels,
+                        selected        = mistralModel,
+                        loading         = loadingModels,
+                        error           = modelsError,
+                        onlyFree        = onlyFree,
+                        onlyRecommended = onlyRecommended,
+                        onlyVision      = onlyVision,
+                        onFreeChange        = { onlyFree = it },
+                        onRecommendedChange = { onlyRecommended = it },
+                        onVisionChange      = { onlyVision = it },
+                        onSelect        = { mistralModel = it; saved = false },
+                        onRefresh       = { refreshTrigger++ }
                     )
                 }
 
@@ -428,40 +405,80 @@ val filteredModels =
                         showKey       = showKeys,
                         placeholder   = "gsk_..."
                     )
+                    DynamicModelSelector(
+                        models          = filteredModels,
+                        selected        = groqModel,
+                        loading         = loadingModels,
+                        error           = modelsError,
+                        onlyFree        = onlyFree,
+                        onlyRecommended = onlyRecommended,
+                        onlyVision      = onlyVision,
+                        onFreeChange        = { onlyFree = it },
+                        onRecommendedChange = { onlyRecommended = it },
+                        onVisionChange      = { onlyVision = it },
+                        onSelect        = { groqModel = it; saved = false },
+                        onRefresh       = { refreshTrigger++ }
+                    )
                     OutlinedTextField(
                         value         = groqModel,
                         onValueChange = { groqModel = it; saved = false },
                         modifier      = Modifier.fillMaxWidth(),
-                        label         = { Text("اسم النموذج") },
-                        placeholder   = { Text("llama-3.3-70b-versatile") },
+                        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                "horde" -> {
+                    InfoCard(
+                        "AI Horde شبكة موزعة مجانية تماماً\n" +
+                        "المفتاح الافتراضي 0000000000 يعمل بدون تسجيل"
+                    )
+                    KeyField(
+                        label         = "Horde API Key",
+                        value         = hordeKey,
+                        onValueChange = { hordeKey = it; saved = false },
+                        showKey       = showKeys,
+                        placeholder   = "0000000000"
+                    )
+                    DynamicModelSelector(
+                        models          = filteredModels,
+                        selected        = hordeTextModel,
+                        loading         = loadingModels,
+                        error           = modelsError,
+                        onlyFree        = onlyFree,
+                        onlyRecommended = onlyRecommended,
+                        onlyVision      = onlyVision,
+                        onFreeChange        = { onlyFree = it },
+                        onRecommendedChange = { onlyRecommended = it },
+                        onVisionChange      = { onlyVision = it },
+                        onSelect        = { hordeTextModel = it; saved = false },
+                        onRefresh       = { refreshTrigger++ }
+                    )
+                    OutlinedTextField(
+                        value         = hordeTextModel,
+                        onValueChange = { hordeTextModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("أو اكتب اسم النموذج يدوياً") },
                         singleLine    = true,
                         shape         = RoundedCornerShape(12.dp)
                     )
                 }
 
                 "custom" -> {
-
-                    // ----------------------------------------
-                    // الحقول الثلاثة لـ Custom Chat
-                    // ----------------------------------------
-
                     InfoCard(
-                        "أدخل بيانات API المتوافق مع OpenAI\n" +
-                        "مثال: LM Studio أو Ollama أو أي خادم محلي"
+                        "API متوافق مع OpenAI\n" +
+                        "مثال NVIDIA: https://integrate.api.nvidia.com/v1/chat/completions"
                     )
-
                     OutlinedTextField(
                         value         = customUrl,
                         onValueChange = { customUrl = it; saved = false },
                         modifier      = Modifier.fillMaxWidth(),
                         label         = { Text("Server URL") },
-                        placeholder   = {
-                            Text("https://api.example.com/v1/chat/completions")
-                        },
+                        placeholder   = { Text("https://api.example.com/v1/chat/completions") },
                         singleLine    = true,
                         shape         = RoundedCornerShape(12.dp)
                     )
-
                     KeyField(
                         label         = "API Key",
                         value         = customKey,
@@ -469,55 +486,42 @@ val filteredModels =
                         showKey       = showKeys,
                         placeholder   = "key... (اتركه فارغاً إذا لم يكن مطلوباً)"
                     )
-
                     OutlinedTextField(
                         value         = customModel,
                         onValueChange = { customModel = it; saved = false },
                         modifier      = Modifier.fillMaxWidth(),
                         label         = { Text("اسم النموذج") },
-                        placeholder   = { Text("gpt-4o-mini") },
+                        placeholder   = { Text("nvidia/nemotron-3.5-lightning-30b-a3b") },
                         singleLine    = true,
                         shape         = RoundedCornerShape(12.dp)
                     )
                 }
             }
 
-            // ============================================================
-            // قسم توليد الصور
-            // ============================================================
-
+            // ---- قسم توليد الصور ----
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-            Text(
-                "🎨 إعدادات توليد الصور:",
-                fontWeight = FontWeight.Bold
-            )
+            Text("🎨 إعدادات توليد الصور:", fontWeight = FontWeight.Bold)
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape    = RoundedCornerShape(12.dp),
                 colors   = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        .copy(alpha = 0.5f)
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 )
             ) {
                 Column(Modifier.padding(12.dp)) {
-
                     Text(
                         "مزود توليد الصور:",
                         style      = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold
                     )
-
                     Spacer(Modifier.height(8.dp))
 
                     listOf(
-    "openrouter" to "OpenRouter ⭐ (نماذج مجانية)",
-    "openai"     to "OpenAI DALL-E (مدفوع)",
-    "horde"      to "AI Horde (مجاني تماماً)",
-    "custom"     to "Custom Image API"
-
-                
+                        "openrouter" to "OpenRouter ⭐ (نماذج مجانية)",
+                        "openai"     to "OpenAI DALL-E",
+                        "horde"      to "AI Horde (مجاني تماماً)",
+                        "custom"     to "Custom Image API"
                     ).forEach { (key, name) ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -527,8 +531,9 @@ val filteredModels =
                                 selected = imageProvider == key,
                                 onClick  = {
                                     imageProvider = key
-                                    imageModel = when (key) {
+                                    imageModel    = when (key) {
                                         "openai" -> "dall-e-3"
+                                        "horde"  -> hordeImageModel
                                         "custom" -> ""
                                         else     -> "black-forest-labs/flux-schnell:free"
                                     }
@@ -536,99 +541,57 @@ val filteredModels =
                                 }
                             )
                             Spacer(Modifier.width(4.dp))
-                            Text(
-                                name,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            Text(name, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
             }
 
-            // إعدادات مزود الصور
             when (imageProvider) {
-
                 "openrouter" -> {
-                    ModelDropdown(
-                        label    = "نموذج توليد الصور",
-                        models   = listOf(
-                            "black-forest-labs/flux-schnell:free"       to "FLUX Schnell (مجاني) ⭐",
-                            "black-forest-labs/flux-1-schnell:free"     to "FLUX 1 Schnell (مجاني)",
-                            "stabilityai/stable-diffusion-xl-base-1.0"  to "Stable Diffusion XL",
-                            "openai/dall-e-3"                           to "DALL-E 3 عبر OpenRouter"
-                        ),
-                        selected = imageModel,
-                        onSelect = { imageModel = it; saved = false }
-                    )
+                    InfoCard("يستخدم نفس مفتاح OpenRouter")
                     OutlinedTextField(
                         value         = imageModel,
                         onValueChange = { imageModel = it; saved = false },
                         modifier      = Modifier.fillMaxWidth(),
-                        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+                        label         = { Text("نموذج توليد الصور") },
+                        placeholder   = { Text("black-forest-labs/flux-schnell:free") },
                         singleLine    = true,
                         shape         = RoundedCornerShape(12.dp)
                     )
-                    InfoCard(
-                        "يستخدم نفس مفتاح OpenRouter الموجود أعلاه\n" +
-                        "تأكد من أن النموذج يدعم توليد الصور"
-                    )
                 }
                 "horde" -> {
-    InfoCard(
-        "AI Horde يولّد الصور مجاناً\n" +
-        "قد يستغرق من 30 ثانية إلى عدة دقائق\n" +
-        "حسب ازدحام الشبكة"
-    )
-    ModelDropdown(
-        label    = "نموذج الصور",
-        models   = listOf(
-            "Stable Diffusion XL"     to "SDXL ⭐",
-            "Deliberate"              to "Deliberate",
-            "Dreamshaper"             to "Dreamshaper",
-            "Realistic Vision"        to "Realistic Vision",
-            "AbsoluteReality"         to "Absolute Reality"
-        ),
-        selected = hordeImageModel,
-        onSelect = { hordeImageModel = it; saved = false }
-    )
-    OutlinedTextField(
-        value         = hordeImageModel,
-        onValueChange = { hordeImageModel = it; saved = false },
-        modifier      = Modifier.fillMaxWidth(),
-        label         = { Text("أو اكتب اسم النموذج يدوياً") },
-        singleLine    = true,
-        shape         = RoundedCornerShape(12.dp)
-    )
-    InfoCard("يستخدم نفس مفتاح Horde الموجود أعلاه")
+                    InfoCard("يستخدم نفس مفتاح Horde - قد يستغرق دقائق")
+                    OutlinedTextField(
+                        value         = hordeImageModel,
+                        onValueChange = { hordeImageModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("نموذج الصور") },
+                        placeholder   = { Text("Stable Diffusion XL") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
                 }
-
                 "openai" -> {
-                    ModelDropdown(
-                        label    = "نموذج توليد الصور",
-                        models   = listOf(
-                            "dall-e-3" to "DALL-E 3 ⭐ (الأفضل)",
-                            "dall-e-2" to "DALL-E 2"
-                        ),
-                        selected = imageModel,
-                        onSelect = { imageModel = it; saved = false }
+                    InfoCard("يستخدم نفس مفتاح OpenAI")
+                    OutlinedTextField(
+                        value         = imageModel,
+                        onValueChange = { imageModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("النموذج") },
+                        placeholder   = { Text("dall-e-3") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
                     )
-                    InfoCard("يستخدم نفس مفتاح OpenAI الموجود أعلاه")
                 }
-
                 "custom" -> {
-                    InfoCard(
-                        "أدخل رابط API الخاص بتوليد الصور\n" +
-                        "يجب أن يكون متوافقاً مع صيغة OpenAI Images API\n" +
-                        "مثال: https://api.example.com/v1/images/generations"
-                    )
+                    InfoCard("متوافق مع OpenAI Images API")
                     OutlinedTextField(
                         value         = customImageUrl,
                         onValueChange = { customImageUrl = it; saved = false },
                         modifier      = Modifier.fillMaxWidth(),
                         label         = { Text("Image API URL") },
-                        placeholder   = {
-                            Text("https://api.example.com/v1/images/generations")
-                        },
+                        placeholder   = { Text("https://api.example.com/v1/images/generations") },
                         singleLine    = true,
                         shape         = RoundedCornerShape(12.dp)
                     )
@@ -637,24 +600,21 @@ val filteredModels =
                         value         = customImageKey,
                         onValueChange = { customImageKey = it; saved = false },
                         showKey       = showKeys,
-                        placeholder   = "key... (اتركه فارغاً إذا لم يكن مطلوباً)"
+                        placeholder   = "key..."
                     )
                     OutlinedTextField(
                         value         = imageModel,
                         onValueChange = { imageModel = it; saved = false },
                         modifier      = Modifier.fillMaxWidth(),
                         label         = { Text("اسم النموذج") },
-                        placeholder   = { Text("dall-e-3 أو flux-schnell") },
+                        placeholder   = { Text("dall-e-3") },
                         singleLine    = true,
                         shape         = RoundedCornerShape(12.dp)
                     )
                 }
             }
 
-            // ============================================================
-            // زر الحفظ
-            // ============================================================
-
+            // ---- زر الحفظ ----
             Spacer(Modifier.height(8.dp))
 
             Button(
@@ -670,6 +630,9 @@ val filteredModels =
                     settings.mistralModel    = mistralModel
                     settings.groqKey         = groqKey
                     settings.groqModel       = groqModel
+                    settings.hordeKey        = hordeKey
+                    settings.hordeTextModel  = hordeTextModel
+                    settings.hordeImageModel = hordeImageModel
                     settings.customUrl       = customUrl
                     settings.customKey       = customKey
                     settings.customModel     = customModel
@@ -677,9 +640,6 @@ val filteredModels =
                     settings.imageModel      = imageModel
                     settings.customImageUrl  = customImageUrl
                     settings.customImageKey  = customImageKey
-                    settings.hordeKey        = hordeKey
-                    settings.hordeTextModel  = hordeTextModel
-                    settings.hordeImageModel = hordeImageModel
                     saved = true
                 },
                 modifier = Modifier
@@ -689,10 +649,7 @@ val filteredModels =
             ) {
                 Icon(Icons.Filled.Save, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "حفظ الإعدادات",
-                    fontWeight = FontWeight.Bold
-                )
+                Text("حفظ الإعدادات", fontWeight = FontWeight.Bold)
             }
 
             if (saved) {
@@ -727,6 +684,169 @@ val filteredModels =
 }
 
 // ============================================================
+// DynamicModelSelector
+// ============================================================
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun DynamicModelSelector(
+    models: List<ModelInfo>,
+    selected: String,
+    loading: Boolean,
+    error: String?,
+    onlyFree: Boolean,
+    onlyRecommended: Boolean,
+    onlyVision: Boolean,
+    onFreeChange: (Boolean) -> Unit,
+    onRecommendedChange: (Boolean) -> Unit,
+    onVisionChange: (Boolean) -> Unit,
+    onSelect: (String) -> Unit,
+    onRefresh: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    val selectedInfo = models.firstOrNull { it.id == selected }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+        // ---- عنوان + زر تحديث ----
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("النموذج", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier    = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "جاري التحميل...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "تحديث النماذج")
+                }
+                Text(
+                    "${models.size} نموذج",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // ---- فلاتر ----
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(
+                selected = onlyFree,
+                onClick  = { onFreeChange(!onlyFree) },
+                label    = { Text("🟢 مجاني") }
+            )
+            FilterChip(
+                selected = onlyRecommended,
+                onClick  = { onRecommendedChange(!onlyRecommended) },
+                label    = { Text("⭐ موصى به") }
+            )
+            FilterChip(
+                selected = onlyVision,
+                onClick  = { onVisionChange(!onlyVision) },
+                label    = { Text("🖼️ يدعم الصور") }
+            )
+        }
+
+        // ---- رسالة الخطأ ----
+        if (!error.isNullOrBlank()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors   = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text     = "⚠️ $error\nسيتم الاحتفاظ بالنموذج المحفوظ",
+                    modifier = Modifier.padding(12.dp),
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+
+        // ---- القائمة المنسدلة ----
+        ExposedDropdownMenuBox(
+            expanded         = expanded,
+            onExpandedChange = { expanded = !expanded }
+        ) {
+            OutlinedTextField(
+                value         = selectedInfo?.let { modelLabel(it) } ?: selected.ifBlank { "اختر نموذجاً" },
+                onValueChange = {},
+                readOnly      = true,
+                modifier      = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(),
+                trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                shape         = RoundedCornerShape(12.dp),
+                label         = { Text("النموذج المختار") }
+            )
+
+            ExposedDropdownMenu(
+                expanded         = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                if (models.isEmpty()) {
+                    DropdownMenuItem(
+                        text    = {
+                            Text(
+                                if (loading) "جاري التحميل..."
+                                else "اضغط 🔄 لتحميل النماذج"
+                            )
+                        },
+                        onClick = { expanded = false }
+                    )
+                } else {
+                    models.forEach { model ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text       = modelLabel(model),
+                                        fontWeight = if (model.recommended)
+                                            FontWeight.Bold else FontWeight.Normal
+                                    )
+                                    if (model.contextLength > 0) {
+                                        Text(
+                                            text  = "${model.contextLength / 1000}K context",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                onSelect(model.id)
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun modelLabel(model: ModelInfo): String = buildString {
+    if (model.name.contains("💾")) { append(model.name); return@buildString }
+    if (model.isFree)        append("🟢 ")
+    if (model.recommended)   append("⭐ ")
+    append(model.name)
+    if (model.supportsVision) append(" 🖼️")
+}
+
+// ============================================================
 // Composables مساعدة
 // ============================================================
 
@@ -734,8 +854,7 @@ val filteredModels =
 private fun InfoCard(text: String) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                .copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
@@ -763,51 +882,8 @@ private fun KeyField(
         label                = { Text(label) },
         placeholder          = { Text(placeholder) },
         singleLine           = true,
-        visualTransformation = if (showKey)
-            VisualTransformation.None
-        else
-            PasswordVisualTransformation(),
+        visualTransformation = if (showKey) VisualTransformation.None
+                               else PasswordVisualTransformation(),
         shape = RoundedCornerShape(12.dp)
     )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ModelDropdown(
-    label: String,
-    models: List<Pair<String, String>>,
-    selected: String,
-    onSelect: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    ExposedDropdownMenuBox(
-        expanded         = expanded,
-        onExpandedChange = { expanded = !expanded }
-    ) {
-        OutlinedTextField(
-            value         = models.find { it.first == selected }?.second ?: selected,
-            onValueChange = {},
-            readOnly      = true,
-            modifier      = Modifier
-                .fillMaxWidth()
-                .menuAnchor(),
-            trailingIcon  = {
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded)
-            },
-            shape = RoundedCornerShape(12.dp),
-            label = { Text(label) }
-        )
-        ExposedDropdownMenu(
-            expanded         = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            models.forEach { (id, name) ->
-                DropdownMenuItem(
-                    text    = { Text(name) },
-                    onClick = { onSelect(id); expanded = false }
-                )
-            }
-        }
-    }
 }
