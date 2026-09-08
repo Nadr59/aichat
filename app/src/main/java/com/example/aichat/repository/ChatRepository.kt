@@ -14,6 +14,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import com.example.aichat.data.model.ModelInfo
 
 class ChatRepository(context: Context) {
 
@@ -49,6 +50,603 @@ class ChatRepository(context: Context) {
         provider == "openrouter" && model.contains(":free") -> 2048
         else                                        -> 4096
     }
+    // ============================================================
+// جلب النماذج ديناميكيًا
+// ============================================================
+
+suspend fun getAvailableModels(
+    provider: String,
+    forImages: Boolean = false
+): List<ModelInfo> = withContext(Dispatchers.IO) {
+
+    when (provider.lowercase().trim()) {
+
+        "gemini" -> getGeminiModels()
+
+        "openrouter" -> getOpenRouterModels(forImages)
+
+        "openai" -> getOpenAIModels()
+
+        "mistral" -> getMistralModels()
+
+        "groq" -> getGroqModels()
+
+        "horde" -> getHordeModels(forImages)
+
+        else -> emptyList()
+    }
+}
+private fun getGeminiModels(): List<ModelInfo> {
+
+    val apiKey = settings.geminiKey.trim()
+
+    if (apiKey.isBlank()) {
+        throw IOException("Gemini: أدخل API Key أولاً")
+    }
+
+    val request = Request.Builder()
+        .url(
+            "https://generativelanguage.googleapis.com/v1beta/models" +
+                    "?key=$apiKey&pageSize=100"
+        )
+        .get()
+        .build()
+
+    client.newCall(request).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw IOException(
+                "Gemini ${response.code}: ${body.take(300)}"
+            )
+        }
+
+        val root = JSONObject(body)
+        val models = root.optJSONArray("models")
+            ?: return emptyList()
+
+        val result = mutableListOf<ModelInfo>()
+
+        for (i in 0 until models.length()) {
+
+            val obj = models.optJSONObject(i)
+                ?: continue
+
+            val name = obj.optString("name")
+                .removePrefix("models/")
+
+            val displayName =
+                obj.optString("displayName")
+                    .ifBlank { name }
+
+            val methods =
+                obj.optJSONArray("supportedGenerationMethods")
+
+            var supportsGenerateContent = false
+
+            if (methods != null) {
+                for (j in 0 until methods.length()) {
+                    if (
+                        methods.optString(j)
+                            .equals("generateContent", true)
+                    ) {
+                        supportsGenerateContent = true
+                        break
+                    }
+                }
+            }
+
+            if (!supportsGenerateContent) continue
+
+            val lower = name.lowercase()
+
+            val vision =
+                lower.contains("flash") ||
+                lower.contains("pro") ||
+                lower.contains("image")
+
+            result += ModelInfo(
+                id = name,
+                name = displayName,
+                provider = "gemini",
+                isFree =
+                    lower.contains("flash") ||
+                    lower.contains("lite"),
+                supportsVision = vision,
+                supportsImageGeneration =
+                    lower.contains("image"),
+                recommended =
+                    lower.contains("3.8") ||
+                    lower.contains("3.7") ||
+                    lower.contains("3.6"),
+                contextLength =
+                    obj.optLong("inputTokenLimit", 0L)
+            )
+        }
+
+        return result
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ModelInfo> { it.recommended }
+                    .thenByDescending { it.isFree }
+                    .thenBy { it.name }
+            )
+    }
+}
+private fun getOpenRouterModels(
+    forImages: Boolean
+): List<ModelInfo> {
+
+    val url = if (forImages) {
+        "https://openrouter.ai/api/v1/models?output_modalities=image"
+    } else {
+        "https://openrouter.ai/api/v1/models?output_modalities=text"
+    }
+
+    val requestBuilder = Request.Builder()
+        .url(url)
+        .get()
+
+    val apiKey = settings.openrouterKey.trim()
+
+    if (apiKey.isNotBlank()) {
+        requestBuilder.addHeader(
+            "Authorization",
+            "Bearer $apiKey"
+        )
+    }
+
+    client.newCall(requestBuilder.build()).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw IOException(
+                "OpenRouter ${response.code}: ${body.take(300)}"
+            )
+        }
+
+        val data = JSONObject(body)
+            .optJSONArray("data")
+            ?: return emptyList()
+
+        val result = mutableListOf<ModelInfo>()
+
+        for (i in 0 until data.length()) {
+
+            val obj = data.optJSONObject(i)
+                ?: continue
+
+            val id = obj.optString("id")
+                .trim()
+
+            if (id.isBlank()) continue
+
+            val name = obj.optString("name")
+                .ifBlank { id }
+
+            val architecture =
+                obj.optJSONObject("architecture")
+
+            val inputModalities =
+                architecture
+                    ?.optJSONArray("input_modalities")
+
+            val outputModalities =
+                architecture
+                    ?.optJSONArray("output_modalities")
+
+            val supportsVision =
+                jsonArrayContains(
+                    inputModalities,
+                    "image"
+                )
+
+            val supportsImageGeneration =
+                jsonArrayContains(
+                    outputModalities,
+                    "image"
+                )
+
+            val pricing =
+                obj.optJSONObject("pricing")
+
+            val promptPrice =
+                pricing?.optString("prompt", "1")
+                    ?: "1"
+
+            val completionPrice =
+                pricing?.optString("completion", "1")
+                    ?: "1"
+
+            val requestPrice =
+                pricing?.optString("request", "1")
+                    ?: "1"
+
+            val imagePrice =
+                pricing?.optString("image", "0")
+                    ?: "0"
+
+            val isFree =
+                isZeroPrice(promptPrice) &&
+                isZeroPrice(completionPrice) &&
+                isZeroPrice(requestPrice) &&
+                (
+                    !supportsImageGeneration ||
+                    isZeroPrice(imagePrice)
+                )
+
+            val lower = "$id $name".lowercase()
+
+            val recommended =
+                lower.contains("gemini-3") ||
+                lower.contains("gpt-5") ||
+                lower.contains("claude") ||
+                lower.contains("qwen3") ||
+                lower.contains("nemotron") ||
+                lower.contains("deepseek")
+
+            result += ModelInfo(
+                id = id,
+                name = name,
+                provider = "openrouter",
+                isFree = isFree,
+                supportsVision = supportsVision,
+                supportsImageGeneration =
+                    supportsImageGeneration,
+                recommended = recommended,
+                contextLength =
+                    obj.optLong("context_length", 0L)
+            )
+        }
+
+        return result
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ModelInfo> { it.recommended }
+                    .thenByDescending { it.isFree }
+                    .thenBy { it.name }
+            )
+    }
+}
+private fun jsonArrayContains(
+    array: JSONArray?,
+    value: String
+): Boolean {
+
+    if (array == null) return false
+
+    for (i in 0 until array.length()) {
+        if (
+            array.optString(i)
+                .equals(value, ignoreCase = true)
+        ) {
+            return true
+        }
+    }
+
+    return false
+}
+
+private fun isZeroPrice(value: String): Boolean {
+
+    return value.trim()
+        .toDoubleOrNull()
+        ?.let { it == 0.0 }
+        ?: false
+}
+private fun getMistralModels(): List<ModelInfo> {
+
+    val apiKey = settings.mistralKey.trim()
+
+    if (apiKey.isBlank()) {
+        throw IOException("Mistral: أدخل API Key أولاً")
+    }
+
+    val request = Request.Builder()
+        .url("https://api.mistral.ai/v1/models")
+        .get()
+        .addHeader(
+            "Authorization",
+            "Bearer $apiKey"
+        )
+        .build()
+
+    client.newCall(request).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw IOException(
+                "Mistral ${response.code}: ${body.take(300)}"
+            )
+        }
+
+        val data = JSONObject(body)
+            .optJSONArray("data")
+            ?: return emptyList()
+
+        val result = mutableListOf<ModelInfo>()
+
+        for (i in 0 until data.length()) {
+
+            val obj = data.optJSONObject(i)
+                ?: continue
+
+            val id = obj.optString("id")
+
+            if (id.isBlank()) continue
+
+            val capabilities =
+                obj.optJSONObject("capabilities")
+
+            val chat =
+                capabilities
+                    ?.optBoolean("completion_chat", false)
+                    ?: false
+
+            if (!chat) continue
+
+            val vision =
+                capabilities
+                    ?.optBoolean("vision", false)
+                    ?: false
+
+            val lower = id.lowercase()
+
+            result += ModelInfo(
+                id = id,
+                name = id,
+                provider = "mistral",
+                isFree =
+                    lower.contains("small") ||
+                    lower.contains("ministral"),
+                supportsVision = vision,
+                recommended =
+                    lower.contains("medium") ||
+                    lower.contains("small") ||
+                    lower.contains("ministral"),
+                contextLength =
+                    obj.optLong(
+                        "max_context_length",
+                        0L
+                    )
+            )
+        }
+
+        return result
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ModelInfo> { it.recommended }
+                    .thenByDescending { it.isFree }
+                    .thenBy { it.name }
+            )
+    }
+}
+private fun getGroqModels(): List<ModelInfo> {
+
+    val apiKey = settings.groqKey.trim()
+
+    if (apiKey.isBlank()) {
+        throw IOException("Groq: أدخل API Key أولاً")
+    }
+
+    val request = Request.Builder()
+        .url("https://api.groq.com/openai/v1/models")
+        .get()
+        .addHeader(
+            "Authorization",
+            "Bearer $apiKey"
+        )
+        .build()
+
+    client.newCall(request).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw IOException(
+                "Groq ${response.code}: ${body.take(300)}"
+            )
+        }
+
+        val data = JSONObject(body)
+            .optJSONArray("data")
+            ?: return emptyList()
+
+        val result = mutableListOf<ModelInfo>()
+
+        for (i in 0 until data.length()) {
+
+            val obj = data.optJSONObject(i)
+                ?: continue
+
+            val id = obj.optString("id")
+
+            if (id.isBlank()) continue
+
+            val lower = id.lowercase()
+
+            // نستبعد نماذج الصوت/المراقبة من قائمة الدردشة
+            if (
+                lower.contains("whisper") ||
+                lower.contains("guard")
+            ) {
+                continue
+            }
+
+            result += ModelInfo(
+                id = id,
+                name = id,
+                provider = "groq",
+                isFree = false,
+                supportsVision =
+                    lower.contains("vision") ||
+                    lower.contains("qwen3"),
+                recommended =
+                    lower.contains("gpt-oss") ||
+                    lower.contains("qwen3"),
+                contextLength =
+                    obj.optLong(
+                        "context_window",
+                        0L
+                    )
+            )
+        }
+
+        return result
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ModelInfo> { it.recommended }
+                    .thenBy { it.name }
+            )
+    }
+}
+private fun getHordeModels(
+    forImages: Boolean
+): List<ModelInfo> {
+
+    val request = Request.Builder()
+        .url("https://aihorde.net/api/v2/status/models")
+        .get()
+        .addHeader(
+            "Client-Agent",
+            "AiChat:1.0:anonymous"
+        )
+        .build()
+
+    client.newCall(request).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw IOException(
+                "Horde ${response.code}: ${body.take(300)}"
+            )
+        }
+
+        val array = JSONArray(body)
+
+        val result = mutableListOf<ModelInfo>()
+
+        for (i in 0 until array.length()) {
+
+            val obj = array.optJSONObject(i)
+                ?: continue
+
+            val name =
+                obj.optString("name").trim()
+
+            if (name.isBlank()) continue
+
+            val lower = name.lowercase()
+
+            val imageModel =
+                lower.contains("stable diffusion") ||
+                lower.contains("sdxl") ||
+                lower.contains("flux") ||
+                lower.contains("dreamshaper") ||
+                lower.contains("realistic")
+
+            if (forImages != imageModel) continue
+
+            result += ModelInfo(
+                id = name,
+                name = name,
+                provider = "horde",
+                isFree = true,
+                supportsVision = false,
+                supportsImageGeneration = imageModel,
+                recommended =
+                    lower.contains("flux") ||
+                    lower.contains("sdxl") ||
+                    lower.contains("stable diffusion")
+            )
+        }
+
+        return result
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ModelInfo> { it.recommended }
+                    .thenBy { it.name }
+            )
+    }
+}
+
+private fun getOpenAIModels(): List<ModelInfo> {
+
+    val apiKey = settings.openaiKey.trim()
+
+    if (apiKey.isBlank()) {
+        throw IOException("OpenAI: أدخل API Key أولاً")
+    }
+
+    val request = Request.Builder()
+        .url("https://api.openai.com/v1/models")
+        .get()
+        .addHeader(
+            "Authorization",
+            "Bearer $apiKey"
+        )
+        .build()
+
+    client.newCall(request).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw IOException(
+                "OpenAI ${response.code}: ${body.take(300)}"
+            )
+        }
+
+        val data = JSONObject(body)
+            .optJSONArray("data")
+            ?: return emptyList()
+
+        val result = mutableListOf<ModelInfo>()
+
+        for (i in 0 until data.length()) {
+
+            val obj = data.optJSONObject(i)
+                ?: continue
+
+            val id = obj.optString("id")
+
+            if (id.isBlank()) continue
+
+            val lower = id.lowercase()
+
+            val usable =
+                lower.startsWith("gpt-") ||
+                lower.startsWith("o")
+
+            if (!usable) continue
+
+            result += ModelInfo(
+                id = id,
+                name = id,
+                provider = "openai",
+                isFree = false,
+                supportsVision =
+                    lower.contains("gpt-5") ||
+                    lower.contains("gpt-4o") ||
+                    lower.contains("gpt-4.1"),
+                recommended =
+                    lower.contains("gpt-5") ||
+                    lower.contains("gpt-4.1")
+            )
+        }
+
+        return result
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ModelInfo> { it.recommended }
+                    .thenBy { it.name }
+            )
+    }
+}
 
     // ============================================================
     // إرسال رسالة نصية
