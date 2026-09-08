@@ -312,7 +312,8 @@ fun SettingsScreen(
                             "pixtral-large-2411"   to "Pixtral Large ⭐ (Vision)",
                             "pixtral-12b-2409"     to "Pixtral 12B (Vision)",
                             "mistral-large-latest" to "Mistral Large",
-                            "mistral-small-latest" to "Mistral Small"
+                            "mistral-small-latest" to "Mistral Small",
+                            "ministral-8b-latest"   to "ministral-8b-latest"
                         ),
                         selected = mistralModel,
                         onSelect = { mistralModel = it; saved = false }
