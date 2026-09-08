@@ -47,6 +47,16 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.aichat.data.local.AiSettings
+import android.content.Context
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AssistChip
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.platform.LocalContext
+import com.example.aichat.data.model.ModelInfo
+import com.example.aichat.repository.ChatRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,7 +87,86 @@ fun SettingsScreen(
     var hordeKey        by remember { mutableStateOf(settings.hordeKey) }
    var hordeTextModel  by remember { mutableStateOf(settings.hordeTextModel) }
    var hordeImageModel by remember { mutableStateOf(settings.hordeImageModel) }
+val context = LocalContext.current
 
+val repository = remember(context) {
+    ChatRepository(context)
+}
+
+var availableModels by remember {
+    mutableStateOf<List<ModelInfo>>(emptyList())
+}
+
+var loadingModels by remember {
+    mutableStateOf(false)
+}
+
+var modelsError by remember {
+    mutableStateOf<String?>(null)
+}
+
+var onlyFree by remember {
+    mutableStateOf(false)
+}
+
+var onlyRecommended by remember {
+    mutableStateOf(false)
+}
+
+var onlyVision by remember {
+    mutableStateOf(false)
+}
+
+LaunchedEffect(
+    provider,
+    geminiKey,
+    openrouterKey,
+    openaiKey,
+    mistralKey,
+    groqKey,
+    hordeKey
+) {
+
+    if (provider == "custom") {
+        availableModels = emptyList()
+        return@LaunchedEffect
+    }
+
+    loadingModels = true
+    modelsError = null
+
+    try {
+
+        availableModels =
+            repository.getAvailableModels(
+                provider = provider,
+                forImages = false
+            )
+
+    } catch (e: Exception) {
+
+        availableModels = emptyList()
+
+        modelsError =
+            e.message ?: "تعذر تحميل النماذج"
+
+    } finally {
+
+        loadingModels = false
+    }
+}
+val filteredModels =
+    availableModels
+        .filter {
+            !onlyFree || it.isFree
+        }
+        .filter {
+            !onlyRecommended || it.recommended
+        }
+        .filter {
+            !onlyVision || it.supportsVision
+        }
+        
     val providers = listOf(
     "gemini"     to "Google Gemini ⭐",
     "openrouter" to "OpenRouter",
@@ -124,7 +213,17 @@ fun SettingsScreen(
 
             providers.forEach { (key, name) ->
                 Card(
-                    onClick  = { provider = key; saved = false },
+                    onClick = {
+    provider = key
+    saved = false
+
+    onlyFree = false
+    onlyRecommended = false
+    onlyVision = false
+
+    availableModels = emptyList()
+    modelsError = null
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     colors   = CardDefaults.cardColors(
                         containerColor = if (provider == key)
