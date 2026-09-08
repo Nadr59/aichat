@@ -7,11 +7,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import androidx.core.view.WindowCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.ui.screens.ChatScreen
 import com.example.aichat.ui.screens.ConversationsScreen
@@ -20,52 +19,118 @@ import com.example.aichat.ui.theme.AiChatTheme
 import com.example.aichat.ui.viewmodel.ChatViewModel
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
+
+    override fun onCreate(
+        savedInstanceState: Bundle?
+    ) {
+
         super.onCreate(savedInstanceState)
+
         enableEdgeToEdge()
 
-        // ✅ يجعل الكيبورد يرفع المحتوى
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-
         setContent {
-            AiChatTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
 
-                    val navController = rememberNavController()
-                    val viewModel: ChatViewModel = viewModel()
-                    val settings = AiSettings(this)
+            AiChatTheme {
+
+                Surface(
+                    modifier =
+                        Modifier.fillMaxSize()
+                ) {
+
+                    val navController =
+                        rememberNavController()
+
+                    val viewModel: ChatViewModel =
+                        viewModel()
+
+                    val settings =
+                        AiSettings(this)
 
                     NavHost(
-                        navController    = navController,
-                        startDestination = "conversations"
+
+                        navController =
+                            navController,
+
+                        startDestination =
+                            "conversations"
+
                     ) {
-                        composable("conversations") {
+
+                        composable(
+                            "conversations"
+                        ) {
+
                             ConversationsScreen(
-                                viewModel  = viewModel,
-                                onOpenChat = { conversationId ->
-                                    viewModel.openConversation(conversationId)
-                                    navController.navigate("chat")
+
+                                viewModel =
+                                    viewModel,
+
+                                onOpenChat = {
+                                    conversationId ->
+
+                                    viewModel
+                                        .openConversation(
+                                            conversationId
+                                        )
+
+                                    navController.navigate(
+                                        "chat"
+                                    )
                                 },
-                                onNewChat  = {
-                                    viewModel.newConversation()
-                                    navController.navigate("chat")
+
+                                onNewChat = {
+
+                                    viewModel
+                                        .newConversation()
+
+                                    navController.navigate(
+                                        "chat"
+                                    )
                                 },
+
                                 onSettings = {
-                                    navController.navigate("settings")
+
+                                    navController.navigate(
+                                        "settings"
+                                    )
                                 }
                             )
                         }
-                        composable("chat") {
+
+                        composable(
+                            "chat"
+                        ) {
+
                             ChatScreen(
-                                viewModel = viewModel,
-                                settings  = settings,
-                                onBack    = { navController.popBackStack() }
+
+                                viewModel =
+                                    viewModel,
+
+                                settings =
+                                    settings,
+
+                                onBack = {
+
+                                    navController
+                                        .popBackStack()
+                                }
                             )
                         }
-                        composable("settings") {
+
+                        composable(
+                            "settings"
+                        ) {
+
                             SettingsScreen(
-                                settings = settings,
-                                onBack   = { navController.popBackStack() }
+
+                                settings =
+                                    settings,
+
+                                onBack = {
+
+                                    navController
+                                        .popBackStack()
+                                }
                             )
                         }
                     }
