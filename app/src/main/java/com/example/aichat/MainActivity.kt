@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -20,19 +21,12 @@ import com.example.aichat.ui.viewmodel.ChatViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
-    enableEdgeToEdge()
-
-    // ✅ هذا يجعل الكيبورد يرفع المحتوى بدلاً من تغطيته
-    WindowCompat.setDecorFitsSystemWindows(window, false)
-
-    setContent {
-        // ... باقي الكود
-    }
-    }
-    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // ✅ يجعل الكيبورد يرفع المحتوى
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         setContent {
             AiChatTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -47,12 +41,12 @@ class MainActivity : ComponentActivity() {
                     ) {
                         composable("conversations") {
                             ConversationsScreen(
-                                viewModel = viewModel,
+                                viewModel  = viewModel,
                                 onOpenChat = { conversationId ->
                                     viewModel.openConversation(conversationId)
                                     navController.navigate("chat")
                                 },
-                                onNewChat = {
+                                onNewChat  = {
                                     viewModel.newConversation()
                                     navController.navigate("chat")
                                 },
@@ -62,11 +56,11 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("chat") {
-                          ChatScreen(
-                           viewModel = viewModel,
-                             settings  = settings,
-                             onBack    = { navController.popBackStack() }
-                           )
+                            ChatScreen(
+                                viewModel = viewModel,
+                                settings  = settings,
+                                onBack    = { navController.popBackStack() }
+                            )
                         }
                         composable("settings") {
                             SettingsScreen(
