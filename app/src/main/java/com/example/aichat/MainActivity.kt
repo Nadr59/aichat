@@ -20,6 +20,17 @@ import com.example.aichat.ui.viewmodel.ChatViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    enableEdgeToEdge()
+
+    // ✅ هذا يجعل الكيبورد يرفع المحتوى بدلاً من تغطيته
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+
+    setContent {
+        // ... باقي الكود
+    }
+    }
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
