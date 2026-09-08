@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -28,6 +27,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val repository     = ChatRepository(application)
 
     private var messagesCollectJob: Job? = null
+
+    // ============================================================
+    // State
+    // ============================================================
 
     val conversations = dao.getAllConversations()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -51,17 +54,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val isImageGenerationMode: StateFlow<Boolean> = _isImageGenerationMode.asStateFlow()
 
     // ============================================================
-    // فتح محادثة - للعرض فقط
+    // محادثة
     // ============================================================
+
+    fun toggleImageGenerationMode() {
+        _isImageGenerationMode.value = !_isImageGenerationMode.value
+        _error.value = null
+    }
 
     fun openConversation(conversationId: Long) {
         _currentConversationId.value = conversationId
-        messagesCollectJob?.cancel()
-        messagesCollectJob = viewModelScope.launch {
-            dao.getMessages(conversationId).collect { msgs ->
-                _messages.value = msgs
-            }
-        }
+        startCollecting(conversationId)
     }
 
     fun newConversation() {
@@ -74,9 +77,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _error.value = null
     }
 
-    fun toggleImageGenerationMode() {
-        _isImageGenerationMode.value = !_isImageGenerationMode.value
-        _error.value = null
+    // ✅ دالة مركزية لتشغيل collect
+    private fun startCollecting(conversationId: Long) {
+        messagesCollectJob?.cancel()
+        messagesCollectJob = viewModelScope.launch {
+            dao.getMessages(conversationId).collect { msgs ->
+                _messages.value = msgs
+            }
+        }
     }
 
     // ============================================================
@@ -86,12 +94,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(userText: String) {
         if (_isLoading.value) return
         if (userText.isBlank() && _selectedImageBase64.value == null) return
-
-        if (_isImageGenerationMode.value) {
-            generateImage(userText)
-        } else {
-            sendChatMessage(userText)
-        }
+        if (_isImageGenerationMode.value) generateImage(userText)
+        else sendChatMessage(userText)
     }
 
     private fun sendChatMessage(userText: String) {
@@ -99,26 +103,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _isLoading.value = true
-            _error.value = null
+            _error.value     = null
 
-            // ✅ الخطوة 1: أوقف collect فوراً قبل أي شيء
+            // ✅ 1. أوقف collect فوراً
             messagesCollectJob?.cancel()
             messagesCollectJob = null
 
             try {
                 val imageBase64     = _selectedImageBase64.value
-                // ✅ الخطوة 2: خذ snapshot من الرسائل الحالية
+                // ✅ 2. snapshot قبل أي كتابة
                 val historySnapshot = _messages.value.toList()
 
-                // ✅ الخطوة 3: أنشئ محادثة بدون openConversation
+                // ✅ 3. أنشئ محادثة بدون openConversation
                 val convId = _currentConversationId.value ?: run {
-                    val title = userText.take(50).ifBlank { "محادثة جديدة" }
-                    val id    = dao.insertConversation(Conversation(title = title))
+                    val id = dao.insertConversation(
+                        Conversation(title = userText.take(50).ifBlank { "محادثة جديدة" })
+                    )
                     _currentConversationId.value = id
                     id
                 }
 
-                // ✅ الخطوة 4: اكتب في DB بدون collect نشط
+                // ✅ 4. اكتب رسالة المستخدم
                 dao.insertMessage(
                     Message(
                         conversationId = convId,
@@ -131,14 +136,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 _selectedImageBase64.value = null
 
-                // ✅ الخطوة 5: طلب API واحد فقط
+                // ✅ 5. طلب API واحد فقط
                 val response = repository.sendMessage(
                     history     = historySnapshot,
                     userMessage = userText,
                     imageBase64 = imageBase64
                 )
 
-                // ✅ الخطوة 6: اكتب الرد في DB
+                // ✅ 6. اكتب رد النموذج
                 dao.insertMessage(
                     Message(
                         conversationId = convId,
@@ -148,15 +153,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                // ✅ الخطوة 7: حدّث العنوان
-                val firstMsg = historySnapshot
-                    .firstOrNull { it.role == "user" }
-                    ?.content
+                // ✅ 7. حدّث العنوان
+                val title = historySnapshot
+                    .firstOrNull { it.role == "user" }?.content
                     ?: userText
                 dao.updateConversation(
                     Conversation(
                         id        = convId,
-                        title     = firstMsg.take(50),
+                        title     = title.take(50),
                         updatedAt = System.currentTimeMillis()
                     )
                 )
@@ -164,14 +168,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 _error.value = e.message ?: "خطأ غير معروف"
             } finally {
-                // ✅ الخطوة 8: أعد collect مرة واحدة فقط بعد الانتهاء
-                _currentConversationId.value?.let { id ->
-                    messagesCollectJob = viewModelScope.launch {
-                        dao.getMessages(id).collect { msgs ->
-                            _messages.value = msgs
-                        }
-                    }
-                }
+                // ✅ 8. أعد collect مرة واحدة فقط
+                _currentConversationId.value?.let { startCollecting(it) }
                 _isLoading.value = false
             }
         }
@@ -182,7 +180,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _isLoading.value = true
-            _error.value = null
+            _error.value     = null
 
             // ✅ أوقف collect فوراً
             messagesCollectJob?.cancel()
@@ -190,8 +188,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 val convId = _currentConversationId.value ?: run {
-                    val title = prompt.take(50).ifBlank { "توليد صورة" }
-                    val id    = dao.insertConversation(Conversation(title = title))
+                    val id = dao.insertConversation(
+                        Conversation(title = prompt.take(50).ifBlank { "توليد صورة" })
+                    )
                     _currentConversationId.value = id
                     id
                 }
@@ -222,13 +221,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _error.value = e.message ?: "خطأ غير معروف"
             } finally {
                 // ✅ أعد collect مرة واحدة فقط
-                _currentConversationId.value?.let { id ->
-                    messagesCollectJob = viewModelScope.launch {
-                        dao.getMessages(id).collect { msgs ->
-                            _messages.value = msgs
-                        }
-                    }
-                }
+                _currentConversationId.value?.let { startCollecting(it) }
                 _isLoading.value = false
             }
         }
@@ -242,9 +235,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             dao.deleteMessages(conversation.id)
             dao.deleteConversation(conversation)
-            if (_currentConversationId.value == conversation.id) {
-                newConversation()
-            }
+            if (_currentConversationId.value == conversation.id) newConversation()
         }
     }
 
@@ -286,9 +277,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (mimeType.startsWith("image/")) {
                     selectImage(uri)
                 } else {
-                    val fileName = uri.lastPathSegment
-                        ?.substringAfterLast("/") ?: "ملف"
-                    _error.value = "⚠️ الملفات غير الصورة غير مدعومة: $fileName"
+                    val name = uri.lastPathSegment?.substringAfterLast("/") ?: "ملف"
+                    _error.value = "⚠️ الملفات غير الصورة غير مدعومة: $name"
                 }
             } catch (e: Exception) {
                 _error.value = "فشل تحميل الملف: ${e.message}"
