@@ -34,6 +34,8 @@ class ModelCatalogRepository(private val settings: AiSettings) {
             "openai"     -> getOpenAIModels(apiKey)
             "mistral"    -> getMistralModels(apiKey)
             "groq"       -> getGroqModels(apiKey)
+            "huggingface" -> getHuggingFaceModels(apiKey)
+            
             "horde"      -> getHordeModels(forImages)
             else         -> emptyList()
         }
@@ -102,6 +104,85 @@ class ModelCatalogRepository(private val settings: AiSettings) {
                 )
         }
     }
+    
+
+
+// ============================================================
+// Hugging Face Models
+// ============================================================
+
+private fun getHuggingFaceModels(apiKey: String): List<ModelInfo> {
+
+    // ✅ قائمة النماذج المجانية والموصى بها
+    // HF لا يوفر API عام لسرد النماذج المجانية
+    // لذلك نستخدم قائمة محددة من أفضل النماذج المجانية
+    return listOf(
+        ModelInfo(
+            id          = "mistralai/Mistral-7B-Instruct-v0.3",
+            name        = "Mistral 7B Instruct v0.3",
+            provider    = "huggingface",
+            isFree      = true,
+            recommended = true,
+            contextLength = 32768
+        ),
+        ModelInfo(
+            id          = "meta-llama/Llama-3.1-8B-Instruct",
+            name        = "Llama 3.1 8B Instruct",
+            provider    = "huggingface",
+            isFree      = true,
+            recommended = true,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id          = "Qwen/Qwen2.5-7B-Instruct",
+            name        = "Qwen 2.5 7B Instruct",
+            provider    = "huggingface",
+            isFree      = true,
+            recommended = true,
+            contextLength = 32768
+        ),
+        ModelInfo(
+            id          = "HuggingFaceH4/zephyr-7b-beta",
+            name        = "Zephyr 7B Beta",
+            provider    = "huggingface",
+            isFree      = true,
+            recommended = false,
+            contextLength = 32768
+        ),
+        ModelInfo(
+            id          = "microsoft/Phi-3.5-mini-instruct",
+            name        = "Phi 3.5 Mini Instruct",
+            provider    = "huggingface",
+            isFree      = true,
+            recommended = true,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id          = "google/gemma-2-9b-it",
+            name        = "Gemma 2 9B Instruct",
+            provider    = "huggingface",
+            isFree      = true,
+            recommended = true,
+            contextLength = 8192
+        ),
+        ModelInfo(
+            id          = "NovaSky-AI/Sky-T1-32B-Preview",
+            name        = "Sky T1 32B",
+            provider    = "huggingface",
+            isFree      = true,
+            recommended = false,
+            contextLength = 32768
+        ),
+        ModelInfo(
+            id          = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+            name        = "DeepSeek R1 Distill 7B",
+            provider    = "huggingface",
+            isFree      = true,
+            recommended = true,
+            contextLength = 32768
+        )
+    )
+}
 
     // ============================================================
     // OpenRouter
