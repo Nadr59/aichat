@@ -82,6 +82,22 @@ class AiSettings(context: Context) {
             ?: "llama-3.3-70b-versatile"
         set(value) = prefs.edit().putString("groq_model", value.trim()).apply()
         // ============================================================
+// NVIDIA
+// ============================================================
+
+var nvidiaKey: String
+    get() = prefs.getString("nvidia_key", "") ?: ""
+    set(value) = prefs.edit().putString("nvidia_key", value).apply()
+
+var nvidiaModel: String
+    get() = prefs.getString(
+        "nvidia_model",
+        "nvidia/llama-3.3-nemotron-super-49b-v1"
+    )?.trim() ?: "nvidia/llama-3.3-nemotron-super-49b-v1"
+    set(value) = prefs.edit().putString("nvidia_model", value.trim()).apply()
+
+
+        // ============================================================
 // Hugging Face
 // ============================================================
 
@@ -160,6 +176,7 @@ var huggingfaceModel: String
         "openai"     -> openaiKey
         "mistral"    -> mistralKey
         "groq"       -> groqKey
+        "nvidia"       -> nvidiaKey
         "horde"      -> hordeKey
         "huggingface"  -> huggingfaceKey
         "custom"     -> customKey
@@ -172,6 +189,7 @@ var huggingfaceModel: String
         "openai"     -> openaiModel
         "mistral"    -> mistralModel
         "groq"       -> groqModel
+        "nvidia"       -> nvidiaModel
         "horde"      -> hordeTextModel
         "huggingface"  -> huggingfaceModel
         "custom"     -> customModel
