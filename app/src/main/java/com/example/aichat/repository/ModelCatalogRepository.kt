@@ -23,35 +23,25 @@ class ModelCatalogRepository(private val settings: AiSettings) {
     // ============================================================
 
     suspend fun getModels(
-        provider: String,
-        apiKey: String,
-        forImages: Boolean = false
-    ): List<ModelInfo> = withContext(Dispatchers.IO) {
+    provider: String,
+    apiKey: String,
+    forImages: Boolean = false
+): List<ModelInfo> = withContext(Dispatchers.IO) {
 
-        when (provider.lowercase().trim()) {
-            "gemini" -> getGeminiModels(apiKey)
-
-            "openrouter" -> getOpenRouterModels(
-                apiKey,
-                forImages
-            )
-
-            "openai" -> getOpenAIModels(apiKey)
-
-            "mistral" -> getMistralModels(apiKey)
-
-            "groq" -> getGroqModels(apiKey)
-            "nvidia" -> getNvidiaModels(apiKey)
-
-            "horde" -> getHordeModels(forImages)
-
-            // ✅ Hugging Face أصبح ديناميكيًا
-            "huggingface", "hugging face", "hf" ->
-                getHuggingFaceModels(apiKey, forImages)
-
-            else -> emptyList()
-        }
+    when (provider.lowercase().trim()) {
+        "gemini"      -> getGeminiModels(apiKey)
+        "openrouter"  -> getOpenRouterModels(apiKey, forImages)
+        "openai"      -> getOpenAIModels(apiKey)
+        "mistral"     -> getMistralModels(apiKey)
+        "groq"        -> getGroqModels(apiKey)
+        "huggingface" -> getHuggingFaceModels()
+        "nvidia"      -> getNvidiaModels(apiKey)  // ✅ يمرر المفتاح
+        "horde"       -> getHordeModels(forImages)
+        else          -> emptyList()
     }
+    }
+     
+            
 
     // ============================================================
     // Gemini
@@ -1129,201 +1119,196 @@ private data class HuggingFaceModel(
     // ============================================================
 // NVIDIA NIM - Dynamic Models
 // ============================================================
+private fun getNvidiaModels(apiKey: String): List<ModelInfo> {
 
-private fun getNvidiaModels(
-    apiKey: String
-): List<ModelInfo> {
-
+    // إذا لم يكن هناك مفتاح، أرجع قائمة أساسية
     if (apiKey.isBlank()) {
-        throw IOException(
-            "NVIDIA: أدخل API Key أولاً"
-        )
+        return getNvidiaFallbackModels()
     }
 
-    val request =
-        Request.Builder()
-            .url(
-                "https://integrate.api.nvidia.com/v1/models"
-            )
+    return try {
+        val request = Request.Builder()
+            .url("https://integrate.api.nvidia.com/v1/models")
             .get()
-            .addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
-            .addHeader(
-                "Accept",
-                "application/json"
-            )
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
             .build()
 
-    client.newCall(request)
-        .execute()
-        .use { response ->
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
 
-            val body =
-                response.body?.string()
-                    .orEmpty()
-
+            // ✅ إذا فشل الـ API أرجع القائمة الاحتياطية
             if (!response.isSuccessful) {
-                throw IOException(
-                    "NVIDIA ${response.code}: " +
-                        body.take(300)
-                )
+                return getNvidiaFallbackModels()
             }
 
-            val data =
-                JSONObject(body)
-                    .optJSONArray("data")
-                    ?: return emptyList()
+            val data = JSONObject(body).optJSONArray("data")
+                ?: return getNvidiaFallbackModels()
 
-            val result =
-                mutableListOf<ModelInfo>()
+            val result = mutableListOf<ModelInfo>()
 
             for (i in 0 until data.length()) {
+                val obj = data.optJSONObject(i) ?: continue
+                val id  = obj.optString("id").trim()
+                if (id.isBlank()) continue
 
-                val obj =
-                    data.optJSONObject(i)
-                        ?: continue
+                val lower = id.lowercase()
 
-                val id =
-                    obj.optString("id")
-                        .trim()
+                // ✅ فقط نماذج المحادثة
+                val isChat = lower.contains("instruct") ||
+                             lower.contains("chat")     ||
+                             lower.contains("nemotron") ||
+                             lower.contains("llama")    ||
+                             lower.contains("mistral")  ||
+                             lower.contains("gemma")    ||
+                             lower.contains("qwen")     ||
+                             lower.contains("deepseek") ||
+                             lower.contains("phi")
 
-                if (id.isBlank()) {
-                    continue
-                }
+                if (!isChat) continue
 
-                val name =
-                    obj.optString("name")
-                        .trim()
-                        .ifBlank { id }
+                // ✅ استبعاد نماذج الصور والصوت
+                val isMedia = lower.contains("stable-diffusion") ||
+                              lower.contains("whisper")           ||
+                              lower.contains("embed")             ||
+                              lower.contains("rerank")            ||
+                              lower.contains("vlm")               ||
+                              lower.contains("vision")
 
-                val lower =
-                    "$id $name".lowercase()
+                if (isMedia) continue
 
-                /*
-                 * NVIDIA يعيد أنواعًا مختلفة من النماذج
-                 * في /v1/models.
-                 *
-                 * نحن نريد نماذج المحادثة/الـ LLM
-                 * وليس نماذج الصوت أو Embeddings وغيرها.
-                 */
-                val isEmbedding =
-                    lower.contains("embed")
-
-                val isReranker =
-                    lower.contains("rerank")
-
-                val isSpeech =
-                    lower.contains("parakeet") ||
-                    lower.contains("canary") ||
-                    lower.contains("whisper")
-
-                val isGuard =
-                    lower.contains("guard")
-
-                if (
-                    isEmbedding ||
-                    isReranker ||
-                    isSpeech ||
-                    isGuard
-                ) {
-                    continue
-                }
-
-                /*
-                 * طول السياق إذا كانت NVIDIA ترسله
-                 * في استجابة النموذج.
-                 */
-                val contextLength =
-                    when {
-                        obj.has("context_length") ->
-                            obj.optLong(
-                                "context_length",
-                                0L
-                            )
-
-                        obj.has("max_context_length") ->
-                            obj.optLong(
-                                "max_context_length",
-                                0L
-                            )
-
-                        obj.has("max_model_len") ->
-                            obj.optLong(
-                                "max_model_len",
-                                0L
-                            )
-
-                        else -> 0L
-                    }
-
-                /*
-                 * نماذج نعتبرها Vision بناءً على اسم النموذج.
-                 * هذا لا يؤثر حاليًا على جلب النموذج نفسه،
-                 * لكنه يجعل ModelInfo صحيحًا عند استخدام الصور لاحقًا.
-                 */
-                val supportsVision =
-                    lower.contains("vision") ||
-                    lower.contains("-vl") ||
-                    lower.contains("vl-") ||
-                    lower.contains("multimodal") ||
-                    lower.contains("omni") ||
-                    lower.contains("vila") ||
-                    lower.contains("gemma-3") ||
-                    lower.contains("gemma-4")
-
-                /*
-                 * لا نفترض أن نماذج NVIDIA مجانية.
-                 */
-                val isFree = false
-
-                val recommended =
-                    lower.contains("nemotron") ||
-                    lower.contains("llama-3.2") ||
-                    lower.contains("llama-3.3") ||
-                    lower.contains("llama-4") ||
-                    lower.contains("gemma-3") ||
-                    lower.contains("gemma-4") ||
-                    lower.contains("deepseek") ||
-                    lower.contains("qwen")
+                val contextLength = obj.optLong("context_window", 0L)
+                    .takeIf { it > 0 }
+                    ?: obj.optLong("max_tokens", 0L)
 
                 result += ModelInfo(
-                    id = id,
-                    name = name,
-                    provider = "nvidia",
-
-                    isFree = isFree,
-
-                    supportsVision =
-                        supportsVision,
-
-                    supportsImageGeneration =
-                        false,
-
-                    recommended =
-                        recommended,
-
-                    contextLength =
-                        contextLength
+                    id            = id,
+                    name          = formatNvidiaName(id),
+                    provider      = "nvidia",
+                    isFree        = true,
+                    supportsVision = false,
+                    recommended   = lower.contains("nemotron") ||
+                                    lower.contains("deepseek") ||
+                                    lower.contains("qwen3"),
+                    contextLength = contextLength
                 )
             }
 
-            return result
+            // ✅ إذا كانت القائمة فارغة أرجع الاحتياطية
+            if (result.isEmpty()) {
+                return getNvidiaFallbackModels()
+            }
+
+            result
                 .distinctBy { it.id }
                 .sortedWith(
-                    compareByDescending<ModelInfo> {
-                        it.recommended
-                    }
-                        .thenByDescending {
-                            it.supportsVision
-                        }
-                        .thenBy {
-                            it.name
-                        }
+                    compareByDescending<ModelInfo> { it.recommended }
+                        .thenBy { it.name }
                 )
         }
+    } catch (e: Exception) {
+        // ✅ أي خطأ = أرجع القائمة الاحتياطية بدل رمي استثناء
+        getNvidiaFallbackModels()
+    }
 }
+
+// ✅ تنسيق اسم النموذج من ID
+private fun formatNvidiaName(id: String): String {
+    return id
+        .substringAfterLast("/")
+        .replace("-", " ")
+        .split(" ")
+        .joinToString(" ") { word ->
+            word.replaceFirstChar { it.uppercase() }
+        }
+}
+
+// ✅ قائمة احتياطية تظهر إذا فشل API
+private fun getNvidiaFallbackModels(): List<ModelInfo> {
+    return listOf(
+        ModelInfo(
+            id            = "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+            name          = "Nemotron Ultra 253B ⭐",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "nvidia/llama-3.3-nemotron-super-49b-v1",
+            name          = "Nemotron Super 49B",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "nvidia/llama-3.1-nemotron-70b-instruct",
+            name          = "Nemotron 70B",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "meta/llama-3.3-70b-instruct",
+            name          = "Llama 3.3 70B",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "meta/llama-3.1-405b-instruct",
+            name          = "Llama 3.1 405B",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = false,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "deepseek-ai/deepseek-r1-0528",
+            name          = "DeepSeek R1 0528",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "qwen/qwen3-235b-a22b",
+            name          = "Qwen3 235B",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 40960
+        ),
+        ModelInfo(
+            id            = "mistralai/mistral-large-2-instruct",
+            name          = "Mistral Large 2",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = false,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "google/gemma-3-27b-it",
+            name          = "Gemma 3 27B",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = false,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "microsoft/phi-4",
+            name          = "Phi 4",
+            provider      = "nvidia",
+            isFree        = true,
+            recommended   = false,
+            contextLength = 16384
+        )
+    )
+}
+
 
     // ============================================================
     // Helpers
