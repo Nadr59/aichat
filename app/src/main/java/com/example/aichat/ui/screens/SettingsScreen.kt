@@ -143,6 +143,7 @@ fun SettingsScreen(
     // تحميل النماذج عند تغيير المزود أو الضغط على تحديث
     // ✅ الحل: مرر المفتاح الحالي من المتغير مباشرة
 LaunchedEffect(provider, refreshTrigger) {
+
     if (provider == "custom") {
         models = emptyList()
         return@LaunchedEffect
@@ -150,8 +151,8 @@ LaunchedEffect(provider, refreshTrigger) {
 
     loadingModels = true
     modelsError   = null
+    models        = emptyList()
 
-    // ✅ استخدم المتغير المحلي مباشرة وليس settings
     val keyToUse = when (provider) {
         "gemini"      -> geminiKey
         "openrouter"  -> openrouterKey
@@ -163,14 +164,22 @@ LaunchedEffect(provider, refreshTrigger) {
         else          -> ""
     }
 
+    // ✅ HF يحمل القائمة حتى بدون مفتاح
+    val needsKey = provider != "huggingface" && provider != "horde"
+
+    if (needsKey && keyToUse.isBlank()) {
+        modelsError   = "أدخل API Key أولاً ثم اضغط تحديث 🔄"
+        loadingModels = false
+        return@LaunchedEffect
+    }
+
     try {
         models = catalog.getModels(
             provider  = provider,
-            apiKey    = keyToUse,  // ✅ المفتاح الحالي
+            apiKey    = keyToUse,
             forImages = false
         )
     } catch (e: Exception) {
-        models      = emptyList()
         modelsError = e.message ?: "تعذر تحميل النماذج"
     } finally {
         loadingModels = false
