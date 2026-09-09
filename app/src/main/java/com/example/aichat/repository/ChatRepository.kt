@@ -647,6 +647,102 @@ private fun getOpenAIModels(): List<ModelInfo> {
             )
     }
 }
+// ============================================================
+// Hugging Face Inference API
+// ============================================================
+
+private fun sendHuggingFace(
+    history: List<Message>,
+    userMessage: String
+): String {
+
+    val apiKey = settings.huggingfaceKey.trim()
+    val model  = settings.huggingfaceModel.trim()
+
+    if (apiKey.isBlank()) throw IOException("Hugging Face: أدخل API Token أولاً")
+    if (model.isBlank())  throw IOException("Hugging Face: اختر نموذجاً")
+
+    // ✅ بناء المحادثة بصيغة Instruct
+    val prompt = buildHFPrompt(history, userMessage)
+
+    val requestJson = JSONObject().apply {
+        put("inputs", prompt)
+        put("parameters", JSONObject().apply {
+            put("max_new_tokens", 1024)
+            put("temperature", 0.7)
+            put("top_p", 0.9)
+            put("do_sample", true)
+            put("return_full_text", false)  // ✅ مهم: لا يعيد الـ prompt
+        })
+    }
+
+    val request = Request.Builder()
+        .url("https://api-inference.huggingface.co/models/$model")
+        .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+        .addHeader("Authorization", "Bearer $apiKey")
+        .addHeader("Content-Type", "application/json")
+        .build()
+
+    client.newCall(request).execute().use { response ->
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            val msg = runCatching {
+                JSONObject(body).optString("error", body)
+            }.getOrDefault(body)
+
+            throw IOException(
+                when (response.code) {
+                    401  -> "❌ Hugging Face: التوكن غير صحيح"
+                    403  -> "❌ Hugging Face: لا توجد صلاحية لهذا النموذج"
+                    404  -> "❌ Hugging Face: النموذج غير موجود\n$model"
+                    503  -> "⏳ Hugging Face: النموذج يتم تحميله - انتظر دقيقة\n$msg"
+                    else -> "Hugging Face ${response.code}: $msg"
+                }
+            )
+        }
+
+        // ✅ الرد يأتي كـ Array
+        return runCatching {
+            JSONArray(body)
+                .optJSONObject(0)
+                ?.optString("generated_text", "")
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: throw IOException("Hugging Face: الرد فارغ")
+        }.getOrElse {
+            // بعض النماذج ترجع Object مباشرة
+            runCatching {
+                JSONObject(body)
+                    .optString("generated_text", "")
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+                    ?: throw IOException("Hugging Face: صيغة رد غير معروفة\n$body")
+            }.getOrThrow()
+        }
+    }
+}
+
+// ✅ بناء الـ prompt بصيغة Instruct
+private fun buildHFPrompt(
+    history: List<Message>,
+    userMessage: String
+): String {
+    val sb = StringBuilder()
+
+    // آخر 6 رسائل فقط
+    history.takeLast(6).forEach { msg ->
+        when (msg.role) {
+            "user" -> sb.append("<s>[INST] ${msg.content} [/INST]")
+            "assistant" -> sb.append(" ${msg.content} </s>")
+        }
+    }
+
+    // الرسالة الجديدة
+    sb.append("<s>[INST] $userMessage [/INST]")
+
+    return sb.toString()
+}
 
     // ============================================================
     // إرسال رسالة نصية
@@ -687,6 +783,7 @@ private fun getOpenAIModels(): List<ModelInfo> {
             )
 
             "mistral" -> sendMistral(history, userMessage, imageBase64)
+            "huggingface" -> sendHuggingFace(history, userMessage)
 
             "groq" -> sendOpenAICompatible(
                 baseUrl      = "https://api.groq.com/openai/v1/chat/completions",
