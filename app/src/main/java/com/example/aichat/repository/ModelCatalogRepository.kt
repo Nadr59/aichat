@@ -165,7 +165,7 @@ class ModelCatalogRepository(private val settings: AiSettings) {
     // Hugging Face - Dynamic Models
     // ============================================================
 
-// ============================================================
+// // ============================================================
 // Hugging Face - Dynamic Models
 // ============================================================
 
@@ -508,7 +508,10 @@ private data class HuggingFaceModel(
     val tags: List<String>,
     val contextLength: Long
 )
-     
+
+
+            
+
 
                     
             
