@@ -81,6 +81,18 @@ class AiSettings(context: Context) {
         get() = prefs.getString("groq_model", "llama-3.3-70b-versatile")?.trim()
             ?: "llama-3.3-70b-versatile"
         set(value) = prefs.edit().putString("groq_model", value.trim()).apply()
+        // ============================================================
+// Hugging Face
+// ============================================================
+
+var huggingfaceKey: String
+    get() = prefs.getString("hf_key", "") ?: ""
+    set(value) = prefs.edit().putString("hf_key", value).apply()
+
+var huggingfaceModel: String
+    get() = prefs.getString("hf_model", "mistralai/Mistral-7B-Instruct-v0.3")?.trim()
+        ?: "mistralai/Mistral-7B-Instruct-v0.3"
+    set(value) = prefs.edit().putString("hf_model", value.trim()).apply()
 
     // ============================================================
     // AI Horde
@@ -149,6 +161,7 @@ class AiSettings(context: Context) {
         "mistral"    -> mistralKey
         "groq"       -> groqKey
         "horde"      -> hordeKey
+        "huggingface"  -> huggingfaceKey
         "custom"     -> customKey
         else         -> ""
     }
@@ -160,6 +173,7 @@ class AiSettings(context: Context) {
         "mistral"    -> mistralModel
         "groq"       -> groqModel
         "horde"      -> hordeTextModel
+        "huggingface"  -> huggingfaceModel
         "custom"     -> customModel
         else         -> ""
     }
