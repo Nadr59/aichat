@@ -650,7 +650,6 @@ private fun getOpenAIModels(): List<ModelInfo> {
 // ============================================================
 // Hugging Face Inference API
 // ============================================================
-
 private fun sendHuggingFace(
     history: List<Message>,
     userMessage: String
@@ -662,7 +661,6 @@ private fun sendHuggingFace(
     if (apiKey.isBlank()) throw IOException("Hugging Face: أدخل API Token أولاً")
     if (model.isBlank())  throw IOException("Hugging Face: اختر نموذجاً")
 
-    // ✅ بناء المحادثة بصيغة Instruct
     val prompt = buildHFPrompt(history, userMessage)
 
     val requestJson = JSONObject().apply {
@@ -672,7 +670,12 @@ private fun sendHuggingFace(
             put("temperature", 0.7)
             put("top_p", 0.9)
             put("do_sample", true)
-            put("return_full_text", false)  // ✅ مهم: لا يعيد الـ prompt
+            put("return_full_text", false)
+        })
+        // ✅ انتظر حتى يتحمل النموذج
+        put("options", JSONObject().apply {
+            put("wait_for_model", true)
+            put("use_cache", true)
         })
     }
 
@@ -694,54 +697,70 @@ private fun sendHuggingFace(
             throw IOException(
                 when (response.code) {
                     401  -> "❌ Hugging Face: التوكن غير صحيح"
-                    403  -> "❌ Hugging Face: لا توجد صلاحية لهذا النموذج"
+                    403  -> "❌ Hugging Face: لا توجد صلاحية\nبعض النماذج تحتاج قبول شروط الاستخدام على huggingface.co"
                     404  -> "❌ Hugging Face: النموذج غير موجود\n$model"
-                    503  -> "⏳ Hugging Face: النموذج يتم تحميله - انتظر دقيقة\n$msg"
+                    503  -> "⏳ Hugging Face: النموذج يتم تحميله\nانتظر دقيقة ثم أعد المحاولة\n$msg"
+                    429  -> "⚠️ Hugging Face: تجاوزت الحد المجاني"
                     else -> "Hugging Face ${response.code}: $msg"
                 }
             )
         }
 
-        // ✅ الرد يأتي كـ Array
-        return runCatching {
-            JSONArray(body)
-                .optJSONObject(0)
+        // ✅ محاولة استخراج النص من صيغ مختلفة
+        val text = runCatching {
+            JSONArray(body).optJSONObject(0)
                 ?.optString("generated_text", "")
                 ?.trim()
-                ?.takeIf { it.isNotBlank() }
-                ?: throw IOException("Hugging Face: الرد فارغ")
-        }.getOrElse {
-            // بعض النماذج ترجع Object مباشرة
-            runCatching {
-                JSONObject(body)
-                    .optString("generated_text", "")
-                    .trim()
-                    .takeIf { it.isNotBlank() }
-                    ?: throw IOException("Hugging Face: صيغة رد غير معروفة\n$body")
-            }.getOrThrow()
-        }
+        }.getOrNull()
+            ?: runCatching {
+                JSONObject(body).optString("generated_text", "").trim()
+            }.getOrNull()
+
+        return text?.takeIf { it.isNotBlank() }
+            ?: throw IOException("Hugging Face: الرد فارغ\n${body.take(200)}")
     }
 }
 
+            
 // ✅ بناء الـ prompt بصيغة Instruct
+
 private fun buildHFPrompt(
     history: List<Message>,
     userMessage: String
 ): String {
-    val sb = StringBuilder()
 
-    // آخر 6 رسائل فقط
-    history.takeLast(6).forEach { msg ->
-        when (msg.role) {
-            "user" -> sb.append("<s>[INST] ${msg.content} [/INST]")
-            "assistant" -> sb.append(" ${msg.content} </s>")
+    val model = settings.huggingfaceModel.lowercase()
+
+    // ✅ Llama 3 / Phi / Qwen يستخدمون صيغة مختلفة
+    return if (model.contains("llama-3") ||
+               model.contains("phi-3")   ||
+               model.contains("qwen")    ||
+               model.contains("gemma")) {
+
+        // صيغة ChatML
+        buildString {
+            append("<|system|>\nYou are a helpful assistant.\n")
+            history.takeLast(6).forEach { msg ->
+                when (msg.role) {
+                    "user"      -> append("<|user|>\n${msg.content}\n")
+                    "assistant" -> append("<|assistant|>\n${msg.content}\n")
+                }
+            }
+            append("<|user|>\n$userMessage\n<|assistant|>\n")
+        }
+
+    } else {
+        // صيغة Mistral [INST]
+        buildString {
+            history.takeLast(6).forEach { msg ->
+                when (msg.role) {
+                    "user"      -> append("<s>[INST] ${msg.content} [/INST]")
+                    "assistant" -> append(" ${msg.content} </s>")
+                }
+            }
+            append("<s>[INST] $userMessage [/INST]")
         }
     }
-
-    // الرسالة الجديدة
-    sb.append("<s>[INST] $userMessage [/INST]")
-
-    return sb.toString()
 }
 
     // ============================================================
