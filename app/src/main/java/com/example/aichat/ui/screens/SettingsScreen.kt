@@ -123,6 +123,7 @@ fun SettingsScreen(
         "openai"     -> openaiKey
         "mistral"    -> mistralKey
         "groq"       -> groqKey
+        "huggingface"  -> huggingfaceKey
         "horde"      -> hordeKey
         else         -> ""
     }
@@ -134,6 +135,7 @@ fun SettingsScreen(
         "openai"     -> openaiModel
         "mistral"    -> mistralModel
         "groq"       -> groqModel
+        "huggingface"  -> huggingfaceModel
         "horde"      -> hordeTextModel
         else         -> customModel
     }
