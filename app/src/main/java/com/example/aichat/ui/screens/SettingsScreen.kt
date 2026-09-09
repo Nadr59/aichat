@@ -107,6 +107,8 @@ fun SettingsScreen(
     var loadingModels  by remember { mutableStateOf(false) }
     var modelsError    by remember { mutableStateOf<String?>(null) }
     var refreshTrigger by remember { mutableIntStateOf(0) }
+    var huggingfaceKey   by remember { mutableStateOf(settings.huggingfaceKey) }
+var huggingfaceModel by remember { mutableStateOf(settings.huggingfaceModel) }
 
     // فلاتر
     var onlyFree        by remember { mutableStateOf(false) }
@@ -193,6 +195,7 @@ fun SettingsScreen(
         "mistral"    to "Mistral AI",
         "groq"       to "Groq",
         "horde"      to "AI Horde (مجاني تماماً)",
+        "huggingface"  to "Hugging Face 🤗 (مجاني)",  
         "custom"     to "Custom API"
     )
 
@@ -560,6 +563,43 @@ fun SettingsScreen(
                         shape         = RoundedCornerShape(12.dp)
                     )
                 }
+                "huggingface" -> {
+    InfoCard(
+        "🤗 Hugging Face Inference API\n" +
+        "احصل على توكن مجاني من: huggingface.co/settings/tokens\n" +
+        "⚠️ النموذج قد يحتاج دقيقة للتحميل أول مرة"
+    )
+    KeyField(
+        label         = "HF Token",
+        value         = huggingfaceKey,
+        onValueChange = { huggingfaceKey = it; saved = false },
+        showKey       = showKeys,
+        placeholder   = "hf_..."
+    )
+    DynamicModelSelector(
+        models          = filteredModels,
+        selected        = huggingfaceModel,
+        loading         = loadingModels,
+        error           = modelsError,
+        onlyFree        = onlyFree,
+        onlyRecommended = onlyRecommended,
+        onlyVision      = onlyVision,
+        onFreeChange        = { onlyFree = it },
+        onRecommendedChange = { onlyRecommended = it },
+        onVisionChange      = { onlyVision = it },
+        onSelect        = { huggingfaceModel = it; saved = false },
+        onRefresh       = { refreshTrigger++ }
+    )
+    OutlinedTextField(
+        value         = huggingfaceModel,
+        onValueChange = { huggingfaceModel = it; saved = false },
+        modifier      = Modifier.fillMaxWidth(),
+        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+        placeholder   = { Text("username/model-name") },
+        singleLine    = true,
+        shape         = RoundedCornerShape(12.dp)
+    )
+                }
                 "horde" -> {
                     InfoCard("يستخدم نفس مفتاح Horde - قد يستغرق دقائق")
                     OutlinedTextField(
@@ -640,6 +680,8 @@ fun SettingsScreen(
                     settings.imageModel      = imageModel
                     settings.customImageUrl  = customImageUrl
                     settings.customImageKey  = customImageKey
+                    settings.huggingfaceKey   = huggingfaceKey
+settings.huggingfaceModel = huggingfaceModel
                     saved = true
                 },
                 modifier = Modifier
