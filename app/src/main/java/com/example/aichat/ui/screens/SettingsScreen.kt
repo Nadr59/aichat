@@ -123,6 +123,7 @@ fun SettingsScreen(
         "openai"     -> openaiKey
         "mistral"    -> mistralKey
         "groq"       -> groqKey
+        "nvidia"       -> nvidiaKey
         "huggingface"  -> huggingfaceKey
         "horde"      -> hordeKey
         else         -> ""
@@ -135,6 +136,7 @@ fun SettingsScreen(
         "openai"     -> openaiModel
         "mistral"    -> mistralModel
         "groq"       -> groqModel
+        "nvidia" -> getNvidiaModels()
         "huggingface"  -> huggingfaceModel
         "horde"      -> hordeTextModel
         else         -> customModel
@@ -159,6 +161,7 @@ LaunchedEffect(provider, refreshTrigger) {
         "openai"      -> openaiKey
         "mistral"     -> mistralKey
         "groq"        -> groqKey
+        "nvidia"       -> nvidiaKey
         "horde"       -> hordeKey
         "huggingface" -> huggingfaceKey
         else          -> ""
@@ -219,6 +222,7 @@ LaunchedEffect(provider, refreshTrigger) {
         "openai"     to "OpenAI",
         "mistral"    to "Mistral AI",
         "groq"       to "Groq",
+        "nvidia"       to "nvidia" ,
         "horde"      to "AI Horde (مجاني تماماً)",
         "huggingface"  to "Hugging Face 🤗 (مجاني)",  
         "custom"     to "Custom API"
