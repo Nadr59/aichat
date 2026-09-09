@@ -141,28 +141,41 @@ fun SettingsScreen(
     }
 
     // تحميل النماذج عند تغيير المزود أو الضغط على تحديث
-    LaunchedEffect(provider, refreshTrigger) {
-        if (provider == "custom") {
-            models = emptyList()
-            return@LaunchedEffect
-        }
-
-        loadingModels = true
-        modelsError   = null
-
-        try {
-            models = catalog.getModels(
-                provider  = provider,
-                apiKey    = currentKey,
-                forImages = false
-            )
-        } catch (e: Exception) {
-            models      = emptyList()
-            modelsError = e.message ?: "تعذر تحميل النماذج"
-        } finally {
-            loadingModels = false
-        }
+    // ✅ الحل: مرر المفتاح الحالي من المتغير مباشرة
+LaunchedEffect(provider, refreshTrigger) {
+    if (provider == "custom") {
+        models = emptyList()
+        return@LaunchedEffect
     }
+
+    loadingModels = true
+    modelsError   = null
+
+    // ✅ استخدم المتغير المحلي مباشرة وليس settings
+    val keyToUse = when (provider) {
+        "gemini"      -> geminiKey
+        "openrouter"  -> openrouterKey
+        "openai"      -> openaiKey
+        "mistral"     -> mistralKey
+        "groq"        -> groqKey
+        "horde"       -> hordeKey
+        "huggingface" -> huggingfaceKey
+        else          -> ""
+    }
+
+    try {
+        models = catalog.getModels(
+            provider  = provider,
+            apiKey    = keyToUse,  // ✅ المفتاح الحالي
+            forImages = false
+        )
+    } catch (e: Exception) {
+        models      = emptyList()
+        modelsError = e.message ?: "تعذر تحميل النماذج"
+    } finally {
+        loadingModels = false
+    }
+}
 
     // القائمة مع إضافة النموذج المحفوظ إذا لم يكن موجوداً
     val modelsWithSaved = remember(models, currentModel) {
