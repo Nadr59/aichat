@@ -658,29 +658,43 @@ private fun sendHuggingFace(
     val apiKey = settings.huggingfaceKey.trim()
     val model  = settings.huggingfaceModel.trim()
 
-    if (apiKey.isBlank()) throw IOException("Hugging Face: أدخل API Token أولاً")
-    if (model.isBlank())  throw IOException("Hugging Face: اختر نموذجاً")
+    if (apiKey.isBlank()) throw IOException(
+        "Hugging Face: أدخل API Token\n" +
+        "من: huggingface.co/settings/tokens"
+    )
+    if (model.isBlank()) throw IOException("Hugging Face: اختر نموذجاً")
 
-    val prompt = buildHFPrompt(history, userMessage)
+    // ✅ بناء messages بصيغة OpenAI المتوافقة
+    val messages = JSONArray()
 
-    val requestJson = JSONObject().apply {
-        put("inputs", prompt)
-        put("parameters", JSONObject().apply {
-            put("max_new_tokens", 1024)
-            put("temperature", 0.7)
-            put("top_p", 0.9)
-            put("do_sample", true)
-            put("return_full_text", false)
-        })
-        // ✅ انتظر حتى يتحمل النموذج
-        put("options", JSONObject().apply {
-            put("wait_for_model", true)
-            put("use_cache", true)
+    messages.put(JSONObject().apply {
+        put("role", "system")
+        put("content", "You are a helpful AI assistant.")
+    })
+
+    history.takeLast(6).forEach { msg ->
+        messages.put(JSONObject().apply {
+            put("role", msg.role)
+            put("content", msg.content)
         })
     }
 
+    messages.put(JSONObject().apply {
+        put("role", "user")
+        put("content", userMessage)
+    })
+
+    val requestJson = JSONObject().apply {
+        put("model", model)
+        put("messages", messages)
+        put("max_tokens", 1024)
+        put("temperature", 0.7)
+        put("stream", false)
+    }
+
+    // ✅ Serverless Inference API - متوافق مع OpenAI
     val request = Request.Builder()
-        .url("https://api-inference.huggingface.co/models/$model")
+        .url("https://api-inference.huggingface.co/v1/chat/completions")
         .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
         .addHeader("Authorization", "Bearer $apiKey")
         .addHeader("Content-Type", "application/json")
@@ -691,33 +705,36 @@ private fun sendHuggingFace(
 
         if (!response.isSuccessful) {
             val msg = runCatching {
-                JSONObject(body).optString("error", body)
+                val j = JSONObject(body)
+                j.optJSONObject("error")?.optString("message")
+                    ?: j.optString("error", body)
+                    ?: j.optString("message", body)
             }.getOrDefault(body)
 
             throw IOException(
                 when (response.code) {
-                    401  -> "❌ Hugging Face: التوكن غير صحيح"
-                    403  -> "❌ Hugging Face: لا توجد صلاحية\nبعض النماذج تحتاج قبول شروط الاستخدام على huggingface.co"
-                    404  -> "❌ Hugging Face: النموذج غير موجود\n$model"
-                    503  -> "⏳ Hugging Face: النموذج يتم تحميله\nانتظر دقيقة ثم أعد المحاولة\n$msg"
-                    429  -> "⚠️ Hugging Face: تجاوزت الحد المجاني"
-                    else -> "Hugging Face ${response.code}: $msg"
+                    401  -> "❌ HuggingFace: التوكن غير صحيح"
+                    403  -> "❌ HuggingFace: لا توجد صلاحية\n" +
+                            "تأكد من قبول شروط النموذج على huggingface.co/$model"
+                    404  -> "❌ HuggingFace: النموذج غير موجود\n$model"
+                    422  -> "❌ HuggingFace: النموذج لا يدعم المحادثة\nجرب نموذجاً آخر"
+                    429  -> "⚠️ HuggingFace: تجاوزت الحد المجاني"
+                    503  -> "⏳ HuggingFace: الخادم مشغول - حاول لاحقاً"
+                    else -> "HuggingFace ${response.code}: $msg"
                 }
             )
         }
 
-        // ✅ محاولة استخراج النص من صيغ مختلفة
-        val text = runCatching {
-            JSONArray(body).optJSONObject(0)
-                ?.optString("generated_text", "")
-                ?.trim()
-        }.getOrNull()
-            ?: runCatching {
-                JSONObject(body).optString("generated_text", "").trim()
-            }.getOrNull()
+        // ✅ نفس صيغة OpenAI
+        val text = JSONObject(body)
+            .optJSONArray("choices")
+            ?.optJSONObject(0)
+            ?.optJSONObject("message")
+            ?.optString("content", "")
+            ?.trim()
 
         return text?.takeIf { it.isNotBlank() }
-            ?: throw IOException("Hugging Face: الرد فارغ\n${body.take(200)}")
+            ?: throw IOException("HuggingFace: الرد فارغ\n${body.take(200)}")
     }
 }
 
