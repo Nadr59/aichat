@@ -82,6 +82,8 @@ fun SettingsScreen(
     var mistralModel    by remember { mutableStateOf(settings.mistralModel) }
     var groqKey         by remember { mutableStateOf(settings.groqKey) }
     var groqModel       by remember { mutableStateOf(settings.groqModel) }
+    var huggingfaceKey   by remember { mutableStateOf(settings.huggingfaceKey) }
+    var huggingfaceModel by remember { mutableStateOf(settings.huggingfaceModel) }
     var hordeKey        by remember { mutableStateOf(settings.hordeKey) }
     var hordeTextModel  by remember { mutableStateOf(settings.hordeTextModel) }
     var hordeImageModel by remember { mutableStateOf(settings.hordeImageModel) }
@@ -107,8 +109,7 @@ fun SettingsScreen(
     var loadingModels  by remember { mutableStateOf(false) }
     var modelsError    by remember { mutableStateOf<String?>(null) }
     var refreshTrigger by remember { mutableIntStateOf(0) }
-    var huggingfaceKey   by remember { mutableStateOf(settings.huggingfaceKey) }
-var huggingfaceModel by remember { mutableStateOf(settings.huggingfaceModel) }
+    
 
     // فلاتر
     var onlyFree        by remember { mutableStateOf(false) }
