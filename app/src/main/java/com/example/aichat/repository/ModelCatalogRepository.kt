@@ -41,6 +41,7 @@ class ModelCatalogRepository(private val settings: AiSettings) {
             "mistral" -> getMistralModels(apiKey)
 
             "groq" -> getGroqModels(apiKey)
+            "nvidia" -> getNvidiaModels(apiKey)
 
             "horde" -> getHordeModels(forImages)
 
@@ -161,9 +162,6 @@ class ModelCatalogRepository(private val settings: AiSettings) {
         }
     }
 
-    // ============================================================
-    // Hugging Face - Dynamic Models
-    // ============================================================
 
 // // ============================================================
 // Hugging Face - Dynamic Models
@@ -1129,10 +1127,203 @@ private data class HuggingFaceModel(
     }
 
     // ============================================================
-    // Hugging Face Internal Model
-    // ============================================================
+// NVIDIA NIM - Dynamic Models
+// ============================================================
 
-    
+private fun getNvidiaModels(
+    apiKey: String
+): List<ModelInfo> {
+
+    if (apiKey.isBlank()) {
+        throw IOException(
+            "NVIDIA: أدخل API Key أولاً"
+        )
+    }
+
+    val request =
+        Request.Builder()
+            .url(
+                "https://integrate.api.nvidia.com/v1/models"
+            )
+            .get()
+            .addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
+            .addHeader(
+                "Accept",
+                "application/json"
+            )
+            .build()
+
+    client.newCall(request)
+        .execute()
+        .use { response ->
+
+            val body =
+                response.body?.string()
+                    .orEmpty()
+
+            if (!response.isSuccessful) {
+                throw IOException(
+                    "NVIDIA ${response.code}: " +
+                        body.take(300)
+                )
+            }
+
+            val data =
+                JSONObject(body)
+                    .optJSONArray("data")
+                    ?: return emptyList()
+
+            val result =
+                mutableListOf<ModelInfo>()
+
+            for (i in 0 until data.length()) {
+
+                val obj =
+                    data.optJSONObject(i)
+                        ?: continue
+
+                val id =
+                    obj.optString("id")
+                        .trim()
+
+                if (id.isBlank()) {
+                    continue
+                }
+
+                val name =
+                    obj.optString("name")
+                        .trim()
+                        .ifBlank { id }
+
+                val lower =
+                    "$id $name".lowercase()
+
+                /*
+                 * NVIDIA يعيد أنواعًا مختلفة من النماذج
+                 * في /v1/models.
+                 *
+                 * نحن نريد نماذج المحادثة/الـ LLM
+                 * وليس نماذج الصوت أو Embeddings وغيرها.
+                 */
+                val isEmbedding =
+                    lower.contains("embed")
+
+                val isReranker =
+                    lower.contains("rerank")
+
+                val isSpeech =
+                    lower.contains("parakeet") ||
+                    lower.contains("canary") ||
+                    lower.contains("whisper")
+
+                val isGuard =
+                    lower.contains("guard")
+
+                if (
+                    isEmbedding ||
+                    isReranker ||
+                    isSpeech ||
+                    isGuard
+                ) {
+                    continue
+                }
+
+                /*
+                 * طول السياق إذا كانت NVIDIA ترسله
+                 * في استجابة النموذج.
+                 */
+                val contextLength =
+                    when {
+                        obj.has("context_length") ->
+                            obj.optLong(
+                                "context_length",
+                                0L
+                            )
+
+                        obj.has("max_context_length") ->
+                            obj.optLong(
+                                "max_context_length",
+                                0L
+                            )
+
+                        obj.has("max_model_len") ->
+                            obj.optLong(
+                                "max_model_len",
+                                0L
+                            )
+
+                        else -> 0L
+                    }
+
+                /*
+                 * نماذج نعتبرها Vision بناءً على اسم النموذج.
+                 * هذا لا يؤثر حاليًا على جلب النموذج نفسه،
+                 * لكنه يجعل ModelInfo صحيحًا عند استخدام الصور لاحقًا.
+                 */
+                val supportsVision =
+                    lower.contains("vision") ||
+                    lower.contains("-vl") ||
+                    lower.contains("vl-") ||
+                    lower.contains("multimodal") ||
+                    lower.contains("omni") ||
+                    lower.contains("vila") ||
+                    lower.contains("gemma-3") ||
+                    lower.contains("gemma-4")
+
+                /*
+                 * لا نفترض أن نماذج NVIDIA مجانية.
+                 */
+                val isFree = false
+
+                val recommended =
+                    lower.contains("nemotron") ||
+                    lower.contains("llama-3.2") ||
+                    lower.contains("llama-3.3") ||
+                    lower.contains("llama-4") ||
+                    lower.contains("gemma-3") ||
+                    lower.contains("gemma-4") ||
+                    lower.contains("deepseek") ||
+                    lower.contains("qwen")
+
+                result += ModelInfo(
+                    id = id,
+                    name = name,
+                    provider = "nvidia",
+
+                    isFree = isFree,
+
+                    supportsVision =
+                        supportsVision,
+
+                    supportsImageGeneration =
+                        false,
+
+                    recommended =
+                        recommended,
+
+                    contextLength =
+                        contextLength
+                )
+            }
+
+            return result
+                .distinctBy { it.id }
+                .sortedWith(
+                    compareByDescending<ModelInfo> {
+                        it.recommended
+                    }
+                        .thenByDescending {
+                            it.supportsVision
+                        }
+                        .thenBy {
+                            it.name
+                        }
+                )
+        }
+}
 
     // ============================================================
     // Helpers
