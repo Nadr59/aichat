@@ -694,7 +694,7 @@ private fun sendHuggingFace(
 
     // ✅ Serverless Inference API - متوافق مع OpenAI
     val request = Request.Builder()
-        .url("https://api-inference.huggingface.co/v1/chat/completions")
+        .url("https://router.huggingface.co/v1/chat/completions")
         .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
         .addHeader("Authorization", "Bearer $apiKey")
         .addHeader("Content-Type", "application/json")
