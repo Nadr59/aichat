@@ -70,6 +70,7 @@ suspend fun getAvailableModels(
         "mistral" -> getMistralModels()
 
         "groq" -> getGroqModels()
+        "nvidia" -> getNvidiaModels()
 
         "horde" -> getHordeModels(forImages)
 
@@ -421,6 +422,139 @@ private fun getMistralModels(): List<ModelInfo> {
                 compareByDescending<ModelInfo> { it.recommended }
                     .thenByDescending { it.isFree }
                     .thenBy { it.name }
+            )
+    }
+}
+// ============================================================
+// NVIDIA - Dynamic Models
+// ============================================================
+
+private fun getNvidiaModels(): List<ModelInfo> {
+
+    val apiKey = settings.nvidiaKey.trim()
+
+    if (apiKey.isBlank()) {
+        throw IOException(
+            "NVIDIA: أدخل API Key أولاً"
+        )
+    }
+
+    val request = Request.Builder()
+        .url(
+            "https://integrate.api.nvidia.com/v1/models"
+        )
+        .get()
+        .addHeader(
+            "Authorization",
+            "Bearer $apiKey"
+        )
+        .addHeader(
+            "Accept",
+            "application/json"
+        )
+        .build()
+
+    client.newCall(request).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw IOException(
+                "NVIDIA ${response.code}: ${body.take(300)}"
+            )
+        }
+
+        val data = JSONObject(body)
+            .optJSONArray("data")
+            ?: return emptyList()
+
+        val result = mutableListOf<ModelInfo>()
+
+        for (i in 0 until data.length()) {
+
+            val obj = data.optJSONObject(i)
+                ?: continue
+
+            val id = obj.optString("id")
+                .trim()
+
+            if (id.isBlank()) continue
+
+            val name = obj.optString("name")
+                .ifBlank { id }
+
+            val lower =
+                "$id $name".lowercase()
+
+            // نستبعد نماذج الحماية/التصنيف
+            // لأنها ليست نماذج محادثة مناسبة للمستخدم.
+            if (
+                lower.contains("guard") ||
+                lower.contains("safety") ||
+                lower.contains("pii") ||
+                lower.contains("jailbreak")
+            ) {
+                continue
+            }
+
+            val supportsVision =
+                lower.contains("vision") ||
+                lower.contains("vl") ||
+                lower.contains("visual") ||
+                lower.contains("multimodal") ||
+                lower.contains("nemotron-nano-v2-vl") ||
+                lower.contains("llama-3.2-11b-vision") ||
+                lower.contains("llama-3.2-90b-vision")
+
+            val recommended =
+                lower.contains("nemotron") ||
+                lower.contains("qwen3") ||
+                lower.contains("deepseek") ||
+                lower.contains("kimi") ||
+                lower.contains("llama-3.3") ||
+                lower.contains("llama-3.1") ||
+                lower.contains("mistral")
+
+            val contextLength =
+                obj.optLong(
+                    "context_length",
+                    0L
+                )
+
+            result += ModelInfo(
+                id = id,
+                name = name,
+                provider = "nvidia",
+
+                // لا نفترض أن النموذج مجاني
+                isFree = false,
+
+                supportsVision =
+                    supportsVision,
+
+                supportsImageGeneration =
+                    false,
+
+                recommended =
+                    recommended,
+
+                contextLength =
+                    contextLength
+            )
+        }
+
+        return result
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ModelInfo> {
+                    it.recommended
+                }
+                    .thenByDescending {
+                        it.supportsVision
+                    }
+                    .thenBy {
+                        it.name
+                    }
             )
     }
 }
@@ -830,6 +964,15 @@ private fun buildHFPrompt(
                 imageBase64  = imageBase64,
                 providerName = "Groq"
             )
+            "nvidia" -> sendOpenAICompatible(
+    baseUrl = "https://integrate.api.nvidia.com/v1/chat/completions",
+    apiKey = settings.nvidiaKey,
+    model = settings.nvidiaModel,
+    history = history,
+    userMessage = userMessage,
+    imageBase64 = imageBase64,
+    providerName = "NVIDIA"
+)
 
             "horde" -> sendHordeText(history, userMessage)
 
