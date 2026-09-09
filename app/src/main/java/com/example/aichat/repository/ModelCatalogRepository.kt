@@ -1132,14 +1132,7 @@ private data class HuggingFaceModel(
     // Hugging Face Internal Model
     // ============================================================
 
-    private data class HuggingFaceModel(
-        val id: String,
-        val pipelineTag: String,
-        val downloads: Long,
-        val likes: Long,
-        val tags: List<String>,
-        val contextLength: Long
-    )
+    
 
     // ============================================================
     // Helpers
