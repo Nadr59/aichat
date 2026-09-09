@@ -23,22 +23,22 @@ class ModelCatalogRepository(private val settings: AiSettings) {
     // ============================================================
 
     suspend fun getModels(
-        provider: String,
-        apiKey: String,
-        forImages: Boolean = false
-    ): List<ModelInfo> = withContext(Dispatchers.IO) {
+    provider: String,
+    apiKey: String,
+    forImages: Boolean = false
+): List<ModelInfo> = withContext(Dispatchers.IO) {
 
-        when (provider.lowercase().trim()) {
-            "gemini"     -> getGeminiModels(apiKey)
-            "openrouter" -> getOpenRouterModels(apiKey, forImages)
-            "openai"     -> getOpenAIModels(apiKey)
-            "mistral"    -> getMistralModels(apiKey)
-            "groq"       -> getGroqModels(apiKey)
-            "huggingface" -> getHuggingFaceModels(apiKey)
-            
-            "horde"      -> getHordeModels(forImages)
-            else         -> emptyList()
-        }
+    when (provider.lowercase().trim()) {
+        "gemini"      -> getGeminiModels(apiKey)
+        "openrouter"  -> getOpenRouterModels(apiKey, forImages)
+        "openai"      -> getOpenAIModels(apiKey)
+        "mistral"     -> getMistralModels(apiKey)
+        "groq"        -> getGroqModels(apiKey)
+        "horde"       -> getHordeModels(forImages)
+        // ✅ HF لا يحتاج مفتاح للقائمة
+        "huggingface" -> getHuggingFaceModels(apiKey)
+        else          -> emptyList()
+    }
     }
 
     // ============================================================
@@ -110,79 +110,93 @@ class ModelCatalogRepository(private val settings: AiSettings) {
 // ============================================================
 // Hugging Face Models
 // ============================================================
-
+// ✅ HF لا يحتاج مفتاح لعرض القائمة الثابتة
 private fun getHuggingFaceModels(apiKey: String): List<ModelInfo> {
-
-    // ✅ قائمة النماذج المجانية والموصى بها
-    // HF لا يوفر API عام لسرد النماذج المجانية
-    // لذلك نستخدم قائمة محددة من أفضل النماذج المجانية
     return listOf(
         ModelInfo(
-            id          = "mistralai/Mistral-7B-Instruct-v0.3",
-            name        = "Mistral 7B Instruct v0.3",
-            provider    = "huggingface",
-            isFree      = true,
-            recommended = true,
+            id            = "mistralai/Mistral-7B-Instruct-v0.3",
+            name          = "Mistral 7B Instruct",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = true,
             contextLength = 32768
         ),
         ModelInfo(
-            id          = "meta-llama/Llama-3.1-8B-Instruct",
-            name        = "Llama 3.1 8B Instruct",
-            provider    = "huggingface",
-            isFree      = true,
-            recommended = true,
+            id            = "mistralai/Mistral-Nemo-Instruct-2407",
+            name          = "Mistral Nemo 12B",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = true,
             contextLength = 128000
         ),
         ModelInfo(
-            id          = "Qwen/Qwen2.5-7B-Instruct",
-            name        = "Qwen 2.5 7B Instruct",
-            provider    = "huggingface",
-            isFree      = true,
-            recommended = true,
-            contextLength = 32768
-        ),
-        ModelInfo(
-            id          = "HuggingFaceH4/zephyr-7b-beta",
-            name        = "Zephyr 7B Beta",
-            provider    = "huggingface",
-            isFree      = true,
-            recommended = false,
-            contextLength = 32768
-        ),
-        ModelInfo(
-            id          = "microsoft/Phi-3.5-mini-instruct",
-            name        = "Phi 3.5 Mini Instruct",
-            provider    = "huggingface",
-            isFree      = true,
-            recommended = true,
+            id            = "microsoft/Phi-3.5-mini-instruct",
+            name          = "Phi 3.5 Mini",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = true,
             contextLength = 128000
         ),
         ModelInfo(
-            id          = "google/gemma-2-9b-it",
-            name        = "Gemma 2 9B Instruct",
-            provider    = "huggingface",
-            isFree      = true,
-            recommended = true,
+            id            = "Qwen/Qwen2.5-7B-Instruct",
+            name          = "Qwen 2.5 7B",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 32768
+        ),
+        ModelInfo(
+            id            = "Qwen/Qwen2.5-72B-Instruct",
+            name          = "Qwen 2.5 72B",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 32768
+        ),
+        ModelInfo(
+            id            = "meta-llama/Llama-3.1-8B-Instruct",
+            name          = "Llama 3.1 8B",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = true,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "meta-llama/Llama-3.2-3B-Instruct",
+            name          = "Llama 3.2 3B",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = false,
+            contextLength = 128000
+        ),
+        ModelInfo(
+            id            = "google/gemma-2-9b-it",
+            name          = "Gemma 2 9B",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = true,
             contextLength = 8192
         ),
         ModelInfo(
-            id          = "NovaSky-AI/Sky-T1-32B-Preview",
-            name        = "Sky T1 32B",
-            provider    = "huggingface",
-            isFree      = true,
-            recommended = false,
+            id            = "HuggingFaceH4/zephyr-7b-beta",
+            name          = "Zephyr 7B Beta",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = false,
             contextLength = 32768
         ),
         ModelInfo(
-            id          = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-            name        = "DeepSeek R1 Distill 7B",
-            provider    = "huggingface",
-            isFree      = true,
-            recommended = true,
+            id            = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+            name          = "DeepSeek R1 Distill 7B",
+            provider      = "huggingface",
+            isFree        = true,
+            recommended   = true,
             contextLength = 32768
         )
     )
 }
+
+            
 
     // ============================================================
     // OpenRouter
