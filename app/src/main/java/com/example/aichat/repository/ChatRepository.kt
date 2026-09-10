@@ -421,7 +421,7 @@ private fun getMistralModels(): List<ModelInfo> {
             )
         }
 
-        return result
+                return result
             .distinctBy { it.id }
             .sortedWith(
                 compareByDescending<ModelInfo> { it.recommended }
@@ -429,7 +429,11 @@ private fun getMistralModels(): List<ModelInfo> {
                     .thenBy { it.name }
             )
     }
-    private fun getHuggingFaceModels(): List<ModelInfo> {
+} // ← إغلاق getMistralModels()
+
+private fun getHuggingFaceModels(): List<ModelInfo> {
+        
+        
 
     val apiKey = settings.huggingfaceKey.trim()
 
