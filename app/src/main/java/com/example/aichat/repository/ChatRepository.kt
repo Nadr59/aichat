@@ -428,8 +428,13 @@ private fun getMistralModels(): List<ModelInfo> {
 // ============================================================
 // NVIDIA - Dynamic Models
 // ============================================================
+// ============================================================
+// NVIDIA NIM - Dynamic Models
+// ============================================================
 
-private fun getNvidiaModels(): List<ModelInfo> {
+private fun getNvidiaModels(
+    forImages: Boolean = false
+): List<ModelInfo> {
 
     val apiKey = settings.nvidiaKey.trim()
 
@@ -441,7 +446,7 @@ private fun getNvidiaModels(): List<ModelInfo> {
 
     val request = Request.Builder()
         .url(
-            "https://integrate.api.nvidia.com/v1/chat/completions"
+            "https://integrate.api.nvidia.com/v1/models"
         )
         .get()
         .addHeader(
@@ -481,65 +486,97 @@ private fun getNvidiaModels(): List<ModelInfo> {
             if (id.isBlank()) continue
 
             val name = obj.optString("name")
+                .trim()
                 .ifBlank { id }
 
             val lower =
                 "$id $name".lowercase()
 
-            // نستبعد نماذج الحماية/التصنيف
-            // لأنها ليست نماذج محادثة مناسبة للمستخدم.
+            // ------------------------------------------------
+            // استبعاد نماذج الحماية والتصنيف
+            // ------------------------------------------------
+
             if (
                 lower.contains("guard") ||
                 lower.contains("safety") ||
-                lower.contains("pii") ||
-                lower.contains("jailbreak")
+                lower.contains("jailbreak") ||
+                lower.contains("content-safety") ||
+                lower.contains("moderation") ||
+                lower.contains("pii")
             ) {
                 continue
             }
 
+            // ------------------------------------------------
+            // نماذج الرؤية / الصور
+            // ------------------------------------------------
+
             val supportsVision =
                 lower.contains("vision") ||
-                lower.contains("vl") ||
+                lower.contains("-vl") ||
+                lower.contains("vl-") ||
                 lower.contains("visual") ||
                 lower.contains("multimodal") ||
-                lower.contains("nemotron-nano-v2-vl") ||
+                lower.contains("image-text") ||
+                lower.contains("image_text") ||
+                lower.contains("nemotron-nano-12b-v2-vl") ||
+                lower.contains("gemma-3") ||
+                lower.contains("gemma-3n") ||
+                lower.contains("gemma-4") ||
+                lower.contains("qwen3-vl") ||
+                lower.contains("qwen2-vl") ||
                 lower.contains("llama-3.2-11b-vision") ||
                 lower.contains("llama-3.2-90b-vision")
+
+            // ------------------------------------------------
+            // لا توجد عند NVIDIA هنا خاصية توليد صور
+            // مثل DALL-E / Flux.
+            // هذه نماذج فهم/تحليل الصور.
+            // ------------------------------------------------
+
+            val supportsImageGeneration = false
+
+            // ------------------------------------------------
+            // النماذج المقترحة
+            // ------------------------------------------------
 
             val recommended =
                 lower.contains("nemotron") ||
                 lower.contains("qwen3") ||
-                lower.contains("deepseek") ||
-                lower.contains("kimi") ||
+                lower.contains("qwen2.5") ||
                 lower.contains("llama-3.3") ||
                 lower.contains("llama-3.1") ||
-                lower.contains("mistral")
+                lower.contains("gemma-4") ||
+                lower.contains("gemma-3") ||
+                lower.contains("mistral") ||
+                lower.contains("deepseek")
+
+            // ------------------------------------------------
+            // إذا كانت الشاشة تطلب نماذج الصور/الرؤية فقط
+            // ------------------------------------------------
+
+            if (forImages && !supportsVision) {
+                continue
+            }
 
             val contextLength =
                 obj.optLong(
                     "context_length",
-                    0L
+                    obj.optLong(
+                        "context_window",
+                        0L
+                    )
                 )
 
             result += ModelInfo(
                 id = id,
                 name = name,
                 provider = "nvidia",
-
-                // لا نفترض أن النموذج مجاني
                 isFree = false,
-
-                supportsVision =
-                    supportsVision,
-
-                supportsImageGeneration =
-                    false,
-
-                recommended =
-                    recommended,
-
-                contextLength =
-                    contextLength
+                supportsVision = supportsVision,
+                supportsImageGeneration = supportsImageGeneration,
+                recommended = recommended,
+                contextLength = contextLength
             )
         }
 
@@ -558,6 +595,10 @@ private fun getNvidiaModels(): List<ModelInfo> {
             )
     }
 }
+
+        
+
+    
 private fun getGroqModels(): List<ModelInfo> {
 
     val apiKey = settings.groqKey.trim()
