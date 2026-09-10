@@ -14,9 +14,13 @@ class AiSettings(context: Context) {
     // ============================================================
 
     var provider: String
-        get() = prefs.getString("provider", "gemini")?.trim() ?: "gemini"
+        get() = prefs.getString("provider", "gemini")
+            ?.trim()
+            ?.lowercase()
+            ?: "gemini"
+
         set(value) = prefs.edit()
-            .putString("provider", value.trim())
+            .putString("provider", value.trim().lowercase())
             .apply()
 
     // ============================================================
@@ -34,6 +38,7 @@ class AiSettings(context: Context) {
             "gemini_model",
             "gemini-3.6-flash"
         )?.trim() ?: "gemini-3.6-flash"
+
         set(value) = prefs.edit()
             .putString("gemini_model", value.trim())
             .apply()
@@ -53,6 +58,7 @@ class AiSettings(context: Context) {
             "openrouter_model",
             "google/gemini-2.5-flash:free"
         )?.trim() ?: "google/gemini-2.5-flash:free"
+
         set(value) = prefs.edit()
             .putString("openrouter_model", value.trim())
             .apply()
@@ -64,7 +70,7 @@ class AiSettings(context: Context) {
     var openaiKey: String
         get() = prefs.getString("openai_key", "") ?: ""
         set(value) = prefs.edit()
-            .putString("openai_key", value)
+            .putString("openai_key", value.trim())
             .apply()
 
     var openaiModel: String
@@ -72,6 +78,7 @@ class AiSettings(context: Context) {
             "openai_model",
             "gpt-4o-mini"
         )?.trim() ?: "gpt-4o-mini"
+
         set(value) = prefs.edit()
             .putString("openai_model", value.trim())
             .apply()
@@ -83,7 +90,7 @@ class AiSettings(context: Context) {
     var mistralKey: String
         get() = prefs.getString("mistral_key", "") ?: ""
         set(value) = prefs.edit()
-            .putString("mistral_key", value)
+            .putString("mistral_key", value.trim())
             .apply()
 
     var mistralModel: String
@@ -91,6 +98,7 @@ class AiSettings(context: Context) {
             "mistral_model",
             "pixtral-12b-2409"
         )?.trim() ?: "pixtral-12b-2409"
+
         set(value) = prefs.edit()
             .putString("mistral_model", value.trim())
             .apply()
@@ -102,7 +110,7 @@ class AiSettings(context: Context) {
     var groqKey: String
         get() = prefs.getString("groq_key", "") ?: ""
         set(value) = prefs.edit()
-            .putString("groq_key", value)
+            .putString("groq_key", value.trim())
             .apply()
 
     var groqModel: String
@@ -110,6 +118,7 @@ class AiSettings(context: Context) {
             "groq_model",
             "llama-3.3-70b-versatile"
         )?.trim() ?: "llama-3.3-70b-versatile"
+
         set(value) = prefs.edit()
             .putString("groq_model", value.trim())
             .apply()
@@ -121,16 +130,60 @@ class AiSettings(context: Context) {
     var nvidiaKey: String
         get() = prefs.getString("nvidia_key", "") ?: ""
         set(value) = prefs.edit()
-            .putString("nvidia_key", value)
+            .putString("nvidia_key", value.trim())
             .apply()
 
+    /*
+     * مهم:
+     *
+     * النموذج القديم:
+     * nvidia/nemotron-3-nano-30b-a3b
+     *
+     * انتهى عمره في 2026-09-01.
+     *
+     * لذلك لا نستخدمه كقيمة افتراضية.
+     */
     var nvidiaModel: String
-        get() = prefs.getString(
-            "nvidia_model",
-            "nvidia/nemotron-3-nano-30b-a3b"
-        )?.trim() ?: "nvidia/nemotron-3-nano-30b-a3b"
+        get() {
+            val saved = prefs.getString(
+                "nvidia_model",
+                ""
+            )?.trim().orEmpty()
+
+            /*
+             * ترحيل تلقائي من النموذج المنتهي.
+             *
+             * لا نحذف مفتاح المستخدم ولا نغيره،
+             * فقط نغير النموذج المحفوظ إذا كان هو النموذج القديم.
+             */
+            if (
+                saved.isBlank() ||
+                saved.equals(
+                    "nvidia/nemotron-3-nano-30b-a3b",
+                    ignoreCase = true
+                )
+            ) {
+                val replacement =
+                    "nvidia/llama-3.3-nemotron-super-49b-v1"
+
+                prefs.edit()
+                    .putString(
+                        "nvidia_model",
+                        replacement
+                    )
+                    .apply()
+
+                return replacement
+            }
+
+            return saved
+        }
+
         set(value) = prefs.edit()
-            .putString("nvidia_model", value.trim())
+            .putString(
+                "nvidia_model",
+                value.trim()
+            )
             .apply()
 
     // ============================================================
@@ -140,7 +193,7 @@ class AiSettings(context: Context) {
     var huggingfaceKey: String
         get() = prefs.getString("hf_key", "") ?: ""
         set(value) = prefs.edit()
-            .putString("hf_key", value)
+            .putString("hf_key", value.trim())
             .apply()
 
     var huggingfaceModel: String
@@ -148,6 +201,7 @@ class AiSettings(context: Context) {
             "hf_model",
             "mistralai/Mistral-7B-Instruct-v0.3"
         )?.trim() ?: "mistralai/Mistral-7B-Instruct-v0.3"
+
         set(value) = prefs.edit()
             .putString("hf_model", value.trim())
             .apply()
@@ -161,8 +215,9 @@ class AiSettings(context: Context) {
             "horde_key",
             "0000000000"
         ) ?: "0000000000"
+
         set(value) = prefs.edit()
-            .putString("horde_key", value)
+            .putString("horde_key", value.trim())
             .apply()
 
     var hordeTextModel: String
@@ -170,8 +225,12 @@ class AiSettings(context: Context) {
             "horde_text_model",
             "mistralai/Mistral-7B-Instruct-v0.2"
         )?.trim() ?: "mistralai/Mistral-7B-Instruct-v0.2"
+
         set(value) = prefs.edit()
-            .putString("horde_text_model", value.trim())
+            .putString(
+                "horde_text_model",
+                value.trim()
+            )
             .apply()
 
     var hordeImageModel: String
@@ -179,8 +238,12 @@ class AiSettings(context: Context) {
             "horde_image_model",
             "Stable Diffusion XL"
         )?.trim() ?: "Stable Diffusion XL"
+
         set(value) = prefs.edit()
-            .putString("horde_image_model", value.trim())
+            .putString(
+                "horde_image_model",
+                value.trim()
+            )
             .apply()
 
     // ============================================================
@@ -190,7 +253,7 @@ class AiSettings(context: Context) {
     var customUrl: String
         get() = prefs.getString("custom_url", "") ?: ""
         set(value) = prefs.edit()
-            .putString("custom_url", value)
+            .putString("custom_url", value.trim())
             .apply()
 
     var customKey: String
@@ -200,7 +263,10 @@ class AiSettings(context: Context) {
             .apply()
 
     var customModel: String
-        get() = prefs.getString("custom_model", "")?.trim() ?: ""
+        get() = prefs.getString("custom_model", "")
+            ?.trim()
+            ?: ""
+
         set(value) = prefs.edit()
             .putString("custom_model", value.trim())
             .apply()
@@ -214,8 +280,12 @@ class AiSettings(context: Context) {
             "image_provider",
             "openai"
         )?.trim() ?: "openai"
+
         set(value) = prefs.edit()
-            .putString("image_provider", value.trim())
+            .putString(
+                "image_provider",
+                value.trim()
+            )
             .apply()
 
     var imageModel: String
@@ -223,8 +293,12 @@ class AiSettings(context: Context) {
             "image_model",
             "dall-e-3"
         )?.trim() ?: "dall-e-3"
+
         set(value) = prefs.edit()
-            .putString("image_model", value.trim())
+            .putString(
+                "image_model",
+                value.trim()
+            )
             .apply()
 
     var customImageUrl: String
@@ -232,8 +306,12 @@ class AiSettings(context: Context) {
             "custom_image_url",
             ""
         )?.trim() ?: ""
+
         set(value) = prefs.edit()
-            .putString("custom_image_url", value.trim())
+            .putString(
+                "custom_image_url",
+                value.trim()
+            )
             .apply()
 
     var customImageKey: String
@@ -241,8 +319,12 @@ class AiSettings(context: Context) {
             "custom_image_key",
             ""
         ) ?: ""
+
         set(value) = prefs.edit()
-            .putString("custom_image_key", value)
+            .putString(
+                "custom_image_key",
+                value
+            )
             .apply()
 
     // ============================================================
@@ -257,7 +339,9 @@ class AiSettings(context: Context) {
             "mistral" -> mistralKey
             "groq" -> groqKey
             "nvidia" -> nvidiaKey
-            "huggingface" -> huggingfaceKey
+            "huggingface",
+            "hugging face",
+            "hf" -> huggingfaceKey
             "horde" -> hordeKey
             "custom" -> customKey
             else -> ""
@@ -272,7 +356,9 @@ class AiSettings(context: Context) {
             "mistral" -> mistralModel
             "groq" -> groqModel
             "nvidia" -> nvidiaModel
-            "huggingface" -> huggingfaceModel
+            "huggingface",
+            "hugging face",
+            "hf" -> huggingfaceModel
             "horde" -> hordeTextModel
             "custom" -> customModel
             else -> ""
@@ -282,8 +368,12 @@ class AiSettings(context: Context) {
     fun isConfigured(): Boolean {
         return when (provider) {
             "horde" -> true
-            "custom" -> customUrl.isNotBlank()
-            else -> getActiveKey().isNotBlank()
+
+            "custom" ->
+                customUrl.isNotBlank()
+
+            else ->
+                getActiveKey().isNotBlank()
         }
     }
 }
