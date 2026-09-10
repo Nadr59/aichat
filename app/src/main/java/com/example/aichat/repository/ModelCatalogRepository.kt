@@ -50,7 +50,7 @@ class ModelCatalogRepository(
             "groq" ->
                 getGroqModels(apiKey)
 
-            "huggingface",
+            
             "hugging face",
             "hf" ->
                 getHuggingFaceModels(
