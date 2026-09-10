@@ -441,7 +441,7 @@ private fun getNvidiaModels(): List<ModelInfo> {
 
     val request = Request.Builder()
         .url(
-            "https://integrate.api.nvidia.com/v1/models"
+            "https://integrate.api.nvidia.com/v1/chat/completions"
         )
         .get()
         .addHeader(
