@@ -71,6 +71,11 @@ suspend fun getAvailableModels(
 
         "groq" -> getGroqModels()
         "nvidia" -> getNvidiaModels()
+        
+        "huggingface",
+        "hugging face",
+        "hf" -> getHuggingFaceModels()
+        
 
         "horde" -> getHordeModels(forImages)
 
@@ -423,6 +428,188 @@ private fun getMistralModels(): List<ModelInfo> {
                     .thenByDescending { it.isFree }
                     .thenBy { it.name }
             )
+    }
+    private fun getHuggingFaceModels(): List<ModelInfo> {
+
+    val apiKey = settings.huggingfaceKey.trim()
+
+    if (apiKey.isBlank()) {
+        throw IOException(
+            "Hugging Face: أدخل API Token أولاً"
+        )
+    }
+
+    val request = Request.Builder()
+        .url("https://router.huggingface.co/v1/models")
+        .get()
+        .addHeader("Authorization", "Bearer $apiKey")
+        .addHeader("Accept", "application/json")
+        .build()
+
+    client.newCall(request).execute().use { response ->
+
+        val body = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+
+            val message = runCatching {
+                val json = JSONObject(body)
+
+                json.optJSONObject("error")
+                    ?.optString("message")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: json.optString("message")
+                        .takeIf { it.isNotBlank() }
+                    ?: body
+            }.getOrDefault(body)
+
+            throw IOException(
+                when (response.code) {
+
+                    401 ->
+                        "❌ Hugging Face: التوكن غير صحيح"
+
+                    403 ->
+                        "❌ Hugging Face: لا توجد صلاحية لاستخدام Inference Providers"
+
+                    429 ->
+                        "⚠️ Hugging Face: تجاوزت الحد المسموح"
+
+                    else ->
+                        "Hugging Face ${response.code}: $message"
+                }
+            )
+        }
+
+        val data = JSONObject(body)
+            .optJSONArray("data")
+            ?: return emptyList()
+
+        val models = mutableListOf<ModelInfo>()
+
+        for (i in 0 until data.length()) {
+
+            val model = data.optJSONObject(i)
+                ?: continue
+
+            val id = model
+                .optString("id")
+                .trim()
+
+            if (id.isBlank()) continue
+
+            val name = model
+                .optString("name")
+                .trim()
+                .ifBlank { id }
+
+            val architecture =
+                model.optJSONObject("architecture")
+
+            val inputModalities =
+                architecture?.optJSONArray("input_modalities")
+
+            val outputModalities =
+                architecture?.optJSONArray("output_modalities")
+
+            val supportsVision =
+                jsonArrayContains(
+                    inputModalities,
+                    "image"
+                )
+
+            val supportsImageGeneration =
+                jsonArrayContains(
+                    outputModalities,
+                    "image"
+                )
+
+            val providers =
+                model.optJSONArray("providers")
+
+            var hasLiveProvider = false
+            var isFree = false
+
+            var contextLength =
+                model.optLong("context_length", 0L)
+
+            if (providers != null) {
+
+                for (j in 0 until providers.length()) {
+
+                    val provider =
+                        providers.optJSONObject(j)
+                            ?: continue
+
+                    val status =
+                        provider.optString("status")
+
+                    if (status.equals("live", ignoreCase = true)) {
+
+                        hasLiveProvider = true
+
+                        if (provider.optBoolean(
+                                "is_free",
+                                false
+                            )
+                        ) {
+                            isFree = true
+                        }
+
+                        if (contextLength <= 0L) {
+                            contextLength =
+                                provider.optLong(
+                                    "context_length",
+                                    0L
+                                )
+                        }
+                    }
+                }
+            }
+
+            // نعرض فقط النماذج التي لديها مزود حي
+            if (!hasLiveProvider) continue
+
+            val lowerName =
+                "$id $name".lowercase()
+
+            val recommended =
+                lowerName.contains("qwen3") ||
+                lowerName.contains("qwen2.5") ||
+                lowerName.contains("deepseek") ||
+                lowerName.contains("llama") ||
+                lowerName.contains("gemma") ||
+                lowerName.contains("mistral") ||
+                lowerName.contains("kimi") ||
+                lowerName.contains("glm")
+
+            models += ModelInfo(
+                id = id,
+                name = name,
+                provider = "huggingface",
+                isFree = isFree,
+                supportsVision = supportsVision,
+                supportsImageGeneration =
+                    supportsImageGeneration,
+                recommended = recommended,
+                contextLength = contextLength
+            )
+        }
+
+        return models
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ModelInfo> {
+                    it.recommended
+                }
+                    .thenByDescending {
+                        it.isFree
+                    }
+                    .thenBy {
+                        it.name
+                    }
+            )
+    }
     }
 }
 // ============================================================
