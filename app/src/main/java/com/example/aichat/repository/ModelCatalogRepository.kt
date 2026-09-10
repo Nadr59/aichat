@@ -50,7 +50,11 @@ class ModelCatalogRepository(
             "groq" ->
                 getGroqModels(apiKey)
 
-            
+            // ====================================================
+            // Hugging Face
+            // ====================================================
+
+            "huggingface",
             "hugging face",
             "hf" ->
                 getHuggingFaceModels(
@@ -196,60 +200,312 @@ class ModelCatalogRepository(
     // Hugging Face
     // ============================================================
 
+    /*
+     * مهم:
+     *
+     * لا نستخدم هنا:
+     *
+     *     pipeline_tag=text-generation
+     *
+     * لأن هذا قد يعيد نماذج نصية لا تعمل مع
+     * Chat Completions.
+     *
+     * في وضع المحادثة نستخدم endpoint الرسمي:
+     *
+     *     GET https://router.huggingface.co/v1/models
+     *
+     * وهو يعرض نماذج Chat Completion التي يوفرها
+     * Hugging Face Inference Providers.
+     *
+     * أما توليد الصور فيبقى عبر Hub API
+     * باستخدام pipeline_tag=text-to-image.
+     */
+
     private fun getHuggingFaceModels(
         apiKey: String,
         forImages: Boolean
     ): List<ModelInfo> {
 
-        val result =
-            mutableListOf<HuggingFaceModel>()
+        return if (forImages) {
 
-        if (forImages) {
-
-            val imageUrl =
-                "https://huggingface.co/api/models" +
-                    "?inference_provider=all" +
-                    "&pipeline_tag=text-to-image" +
-                    "&sort=downloads" +
-                    "&direction=-1" +
-                    "&limit=100"
-
-            fetchHuggingFaceModels(
-                url = imageUrl,
-                apiKey = apiKey,
-                target = result
+            getHuggingFaceImageModels(
+                apiKey
             )
 
         } else {
 
-            val textUrl =
-                "https://huggingface.co/api/models" +
-                    "?inference_provider=all" +
-                    "&pipeline_tag=text-generation" +
-                    "&sort=downloads" +
-                    "&direction=-1" +
-                    "&limit=100"
-
-            fetchHuggingFaceModels(
-                url = textUrl,
-                apiKey = apiKey,
-                target = result
-            )
-
-            val visionUrl =
-                "https://huggingface.co/api/models" +
-                    "?inference_provider=all" +
-                    "&pipeline_tag=image-text-to-text" +
-                    "&sort=downloads" +
-                    "&direction=-1" +
-                    "&limit=100"
-
-            fetchHuggingFaceModels(
-                url = visionUrl,
-                apiKey = apiKey,
-                target = result
+            getHuggingFaceChatModels(
+                apiKey
             )
         }
+    }
+
+    // ============================================================
+    // Hugging Face Chat Models
+    // ============================================================
+
+    private fun getHuggingFaceChatModels(
+        apiKey: String
+    ): List<ModelInfo> {
+
+        val requestBuilder =
+            Request.Builder()
+                .url(
+                    "https://router.huggingface.co/v1/models"
+                )
+                .get()
+                .addHeader(
+                    "User-Agent",
+                    "AiChat/1.0 Android"
+                )
+
+        if (apiKey.isNotBlank()) {
+            requestBuilder.addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
+        }
+
+        client.newCall(
+            requestBuilder.build()
+        )
+            .execute()
+            .use { response ->
+
+                val body =
+                    response.body?.string().orEmpty()
+
+                if (!response.isSuccessful) {
+                    throw IOException(
+                        "Hugging Face ${response.code}: " +
+                            body.take(500)
+                    )
+                }
+
+                val data =
+                    JSONObject(body)
+                        .optJSONArray("data")
+                        ?: return emptyList()
+
+                val result =
+                    mutableListOf<ModelInfo>()
+
+                for (i in 0 until data.length()) {
+
+                    val obj =
+                        data.optJSONObject(i)
+                            ?: continue
+
+                    val id =
+                        obj.optString("id")
+                            .trim()
+
+                    if (id.isBlank()) {
+                        continue
+                    }
+
+                    val architecture =
+                        obj.optJSONObject(
+                            "architecture"
+                        )
+
+                    val inputModalities =
+                        architecture?.optJSONArray(
+                            "input_modalities"
+                        )
+
+                    val outputModalities =
+                        architecture?.optJSONArray(
+                            "output_modalities"
+                        )
+
+                    val supportsVision =
+                        jsonArrayContains(
+                            inputModalities,
+                            "image"
+                        )
+
+                    /*
+                     * في endpoint /v1/models الخاص بـ Hugging Face
+                     * يمكن أن تظهر image ضمن output_modalities
+                     * لبعض نماذج المحادثة.
+                     *
+                     * لا نعتبر ذلك Text-to-Image تلقائيًا.
+                     * هذا الحقل هنا فقط للمحافظة على معلومات
+                     * النموذج إن كانت موجودة.
+                     */
+                    val supportsImageGeneration =
+                        jsonArrayContains(
+                            outputModalities,
+                            "image"
+                        )
+
+                    val contextLength =
+                        obj.optLong(
+                            "context_length",
+                            0L
+                        )
+
+                    val providers =
+                        obj.optJSONArray(
+                            "providers"
+                        )
+
+                    var isFree = false
+                    var hasLiveProvider = false
+                    var bestContextLength =
+                        contextLength
+
+                    if (providers != null) {
+
+                        for (
+                            j in 0 until providers.length()
+                        ) {
+
+                            val provider =
+                                providers.optJSONObject(j)
+                                    ?: continue
+
+                            val status =
+                                provider.optString(
+                                    "status"
+                                )
+                                    .trim()
+                                    .lowercase()
+
+                            if (
+                                status == "live" ||
+                                status.isBlank()
+                            ) {
+                                hasLiveProvider = true
+                            }
+
+                            if (
+                                provider.optBoolean(
+                                    "is_free",
+                                    false
+                                )
+                            ) {
+                                isFree = true
+                            }
+
+                            val providerContext =
+                                provider.optLong(
+                                    "context_length",
+                                    0L
+                                )
+
+                            if (
+                                providerContext >
+                                    bestContextLength
+                            ) {
+                                bestContextLength =
+                                    providerContext
+                            }
+                        }
+                    }
+
+                    /*
+                     * نتأكد أن النموذج لديه مزود صالح.
+                     *
+                     * في حال لم ترجع HF معلومات providers
+                     * لبعض النماذج، لا نحذف النموذج.
+                     */
+                    if (
+                        providers != null &&
+                        providers.length() > 0 &&
+                        !hasLiveProvider
+                    ) {
+                        continue
+                    }
+
+                    val lower =
+                        id.lowercase()
+
+                    val recommended =
+                        lower.contains("qwen") ||
+                        lower.contains("deepseek") ||
+                        lower.contains("llama") ||
+                        lower.contains("gemma") ||
+                        lower.contains("mistral") ||
+                        lower.contains("phi") ||
+                        lower.contains("kimi") ||
+                        lower.contains("glm") ||
+                        lower.contains("nemotron") ||
+                        lower.contains("minimax") ||
+                        lower.contains("gpt-oss") ||
+                        lower.contains("command") ||
+                        lower.contains("granite")
+
+                    result += ModelInfo(
+                        id = id,
+
+                        name =
+                            createHuggingFaceDisplayName(
+                                id
+                            ),
+
+                        provider = "huggingface",
+
+                        isFree = isFree,
+
+                        supportsVision =
+                            supportsVision,
+
+                        supportsImageGeneration =
+                            supportsImageGeneration,
+
+                        recommended =
+                            recommended,
+
+                        contextLength =
+                            bestContextLength
+                    )
+                }
+
+                return result
+                    .distinctBy { it.id }
+                    .sortedWith(
+                        compareByDescending<ModelInfo> {
+                            it.recommended
+                        }
+                            .thenByDescending {
+                                it.isFree
+                            }
+                            .thenByDescending {
+                                it.supportsVision
+                            }
+                            .thenBy {
+                                it.name
+                            }
+                    )
+            }
+    }
+
+    // ============================================================
+    // Hugging Face Image Models
+    // ============================================================
+
+    private fun getHuggingFaceImageModels(
+        apiKey: String
+    ): List<ModelInfo> {
+
+        val result =
+            mutableListOf<HuggingFaceModel>()
+
+        val imageUrl =
+            "https://huggingface.co/api/models" +
+                "?inference_provider=all" +
+                "&pipeline_tag=text-to-image" +
+                "&sort=downloads" +
+                "&direction=-1" +
+                "&limit=200"
+
+        fetchHuggingFaceModels(
+            url = imageUrl,
+            apiKey = apiKey,
+            target = result
+        )
 
         return result
             .distinctBy { it.id }
@@ -262,50 +518,31 @@ class ModelCatalogRepository(
                             model.tags.joinToString(" ")
                         ).lowercase()
 
-                val isVision =
-                    model.pipelineTag.equals(
-                        "image-text-to-text",
-                        ignoreCase = true
-                    ) ||
-                    lower.contains("vision") ||
-                    lower.contains("visual") ||
-                    lower.contains("multimodal") ||
-                    lower.contains("vl")
-
-                val isImageGeneration =
-                    model.pipelineTag.equals(
-                        "text-to-image",
-                        ignoreCase = true
-                    )
-
                 val recommended =
+                    lower.contains("flux") ||
+                    lower.contains("stable-diffusion") ||
+                    lower.contains("sdxl") ||
+                    lower.contains("sd3") ||
+                    lower.contains("ideogram") ||
                     lower.contains("qwen") ||
-                    lower.contains("deepseek") ||
-                    lower.contains("llama") ||
-                    lower.contains("gemma") ||
-                    lower.contains("mistral") ||
-                    lower.contains("phi") ||
-                    lower.contains("kimi") ||
-                    lower.contains("glm") ||
-                    lower.contains("nemotron") ||
-                    lower.contains("pixtral") ||
-                    lower.contains("ministral") ||
-                    lower.contains("flux")
+                    lower.contains("wan") ||
+                    lower.contains("hunyuan")
 
                 ModelInfo(
                     id = model.id,
+
                     name =
                         createHuggingFaceDisplayName(
                             model.id
                         ),
+
                     provider = "huggingface",
 
                     isFree = false,
 
-                    supportsVision = isVision,
+                    supportsVision = false,
 
-                    supportsImageGeneration =
-                        isImageGeneration,
+                    supportsImageGeneration = true,
 
                     recommended = recommended,
 
@@ -317,9 +554,6 @@ class ModelCatalogRepository(
                 compareByDescending<ModelInfo> {
                     it.recommended
                 }
-                    .thenByDescending {
-                        it.supportsVision
-                    }
                     .thenBy {
                         it.name
                     }
@@ -327,7 +561,7 @@ class ModelCatalogRepository(
     }
 
     // ============================================================
-    // Fetch Hugging Face
+    // Fetch Hugging Face Hub Models
     // ============================================================
 
     private fun fetchHuggingFaceModels(
@@ -403,7 +637,8 @@ class ModelCatalogRepository(
                     val pipelineTag =
                         obj.optString(
                             "pipeline_tag"
-                        ).trim()
+                        )
+                            .trim()
 
                     val downloads =
                         obj.optLong(
@@ -441,14 +676,25 @@ class ModelCatalogRepository(
                     }
 
                     val contextLength =
-                        extractContextLength(obj)
+                        extractContextLength(
+                            obj
+                        )
 
                     target += HuggingFaceModel(
                         id = id,
-                        pipelineTag = pipelineTag,
-                        downloads = downloads,
-                        likes = likes,
-                        tags = tags,
+
+                        pipelineTag =
+                            pipelineTag,
+
+                        downloads =
+                            downloads,
+
+                        likes =
+                            likes,
+
+                        tags =
+                            tags,
+
                         contextLength =
                             contextLength
                     )
