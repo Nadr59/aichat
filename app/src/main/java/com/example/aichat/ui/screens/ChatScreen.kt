@@ -149,37 +149,63 @@ val customRequestCount by
 
                 title = {
 
-                    Column {
+    Column {
 
-                        Text(
-                            text =
-                                if (isImageMode)
-                                    "توليد الصور"
-                                else
-                                    "المحادثة",
+        Text(
+            text =
+                if (isImageMode)
+                    "توليد الصور"
+                else
+                    "المحادثة",
 
-                            fontWeight =
-                                FontWeight.SemiBold
-                        )
+            fontWeight =
+                FontWeight.SemiBold
+        )
 
-                        Text(
-                            text =
-                                settings
-                                    .getActiveModel()
-                                    .take(35),
+        Text(
+            text =
+                settings
+                    .getActiveModel()
+                    .take(35),
 
-                            style =
-                                MaterialTheme
-                                    .typography
-                                    .labelSmall,
+            style =
+                MaterialTheme
+                    .typography
+                    .labelSmall,
 
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onSurfaceVariant
-                        )
-                    }
-                },
+            color =
+                MaterialTheme
+                    .colorScheme
+                    .onSurfaceVariant
+        )
+
+        // ----------------------------------------------------
+        // عداد Custom فقط
+        // ----------------------------------------------------
+
+        if (
+            settings.provider
+                .trim()
+                .lowercase() == "custom"
+        ) {
+
+            Text(
+                text =
+                    "الطلبات: $customRequestCount",
+
+                style =
+                    MaterialTheme
+                        .typography
+                        .labelSmall,
+
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .primary
+            )
+        }
+    }
+                }
 
                 navigationIcon = {
 
