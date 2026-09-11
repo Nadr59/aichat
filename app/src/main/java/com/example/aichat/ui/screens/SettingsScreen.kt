@@ -1898,4 +1898,299 @@ private fun DynamicModelSelector(
                         "⚠️ $error\n" +
                             "سيتم الاحتفاظ بالنموذج المحفوظ.",
 
-                    modifier
+                    modifier =
+                        Modifier.padding(12.dp),
+
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodySmall,
+
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onErrorContainer
+                )
+            }
+        }
+
+        // ========================================================
+        // القائمة المنسدلة
+        // ========================================================
+
+        ExposedDropdownMenuBox(
+
+            expanded = expanded,
+
+            onExpandedChange = {
+                expanded = !expanded
+            }
+        ) {
+
+            OutlinedTextField(
+
+                value =
+                    selectedInfo
+                        ?.let {
+                            modelLabel(it)
+                        }
+                        ?: selected.ifBlank {
+                            "اختر نموذجاً"
+                        },
+
+                onValueChange = {},
+
+                readOnly = true,
+
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(),
+
+                trailingIcon = {
+
+                    ExposedDropdownMenuDefaults
+                        .TrailingIcon(
+                            expanded = expanded
+                        )
+                },
+
+                shape =
+                    RoundedCornerShape(12.dp),
+
+                label = {
+                    Text("النموذج المختار")
+                }
+            )
+
+            ExposedDropdownMenu(
+
+                expanded = expanded,
+
+                onDismissRequest = {
+                    expanded = false
+                }
+            ) {
+
+                if (models.isEmpty()) {
+
+                    DropdownMenuItem(
+
+                        text = {
+
+                            Text(
+
+                                if (loading)
+                                    "جاري التحميل..."
+                                else
+                                    "اضغط 🔄 لتحميل النماذج"
+                            )
+                        },
+
+                        onClick = {
+                            expanded = false
+                        }
+                    )
+
+                } else {
+
+                    models.forEach { model ->
+
+                        DropdownMenuItem(
+
+                            text = {
+
+                                Column {
+
+                                    Text(
+
+                                        text =
+                                            modelLabel(
+                                                model
+                                            ),
+
+                                        fontWeight =
+                                            if (
+                                                model.recommended
+                                            )
+                                                FontWeight.Bold
+                                            else
+                                                FontWeight.Normal
+                                    )
+
+                                    if (
+                                        model.contextLength > 0
+                                    ) {
+
+                                        Text(
+
+                                            text =
+                                                formatContextLength(
+                                                    model.contextLength
+                                                ),
+
+                                            style =
+                                                MaterialTheme
+                                                    .typography
+                                                    .labelSmall,
+
+                                            color =
+                                                MaterialTheme
+                                                    .colorScheme
+                                                    .onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            },
+
+                            onClick = {
+
+                                onSelect(model.id)
+
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =================================================================
+// Model label
+// =================================================================
+
+private fun modelLabel(
+    model: ModelInfo
+): String = buildString {
+
+    if (model.name.contains("💾")) {
+
+        append(model.name)
+
+        return@buildString
+    }
+
+    if (model.isFree) {
+        append("🟢 ")
+    }
+
+    if (model.recommended) {
+        append("⭐ ")
+    }
+
+    append(model.name)
+
+    if (model.supportsVision) {
+        append(" 🖼️")
+    }
+}
+
+// =================================================================
+// Context length
+// =================================================================
+
+private fun formatContextLength(
+    contextLength: Long
+): String {
+
+    return when {
+
+        contextLength >= 1_000_000 ->
+            "${contextLength / 1_000_000}M context"
+
+        contextLength >= 1_000 ->
+            "${contextLength / 1_000}K context"
+
+        else ->
+            "$contextLength context"
+    }
+}
+
+// =================================================================
+// InfoCard
+// =================================================================
+
+@Composable
+private fun InfoCard(
+    text: String
+) {
+
+    Card(
+
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    MaterialTheme
+                        .colorScheme
+                        .secondaryContainer
+                        .copy(alpha = 0.5f)
+            ),
+
+        shape =
+            RoundedCornerShape(12.dp)
+    ) {
+
+        Text(
+
+            text = text,
+
+            modifier =
+                Modifier.padding(12.dp),
+
+            style =
+                MaterialTheme
+                    .typography
+                    .bodySmall,
+
+            color =
+                MaterialTheme
+                    .colorScheme
+                    .onSecondaryContainer
+        )
+    }
+}
+
+// =================================================================
+// KeyField
+// =================================================================
+
+@Composable
+private fun KeyField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    showKey: Boolean,
+    placeholder: String
+) {
+
+    OutlinedTextField(
+
+        value = value,
+
+        onValueChange = onValueChange,
+
+        modifier =
+            Modifier.fillMaxWidth(),
+
+        label = {
+            Text(label)
+        },
+
+        placeholder = {
+            Text(placeholder)
+        },
+
+        singleLine = true,
+
+        visualTransformation =
+            if (showKey)
+                VisualTransformation.None
+            else
+                PasswordVisualTransformation(),
+
+        shape =
+            RoundedCornerShape(12.dp)
+    )
+}
