@@ -158,6 +158,14 @@ fun SettingsScreen(
     }
 
     // ============================================================
+    // Ollama
+    // ============================================================
+
+    var ollamaModel by remember {
+        mutableStateOf(settings.ollamaModel)
+    }
+
+    // ============================================================
     // Custom
     // ============================================================
 
@@ -269,6 +277,8 @@ fun SettingsScreen(
 
         "horde" -> hordeTextModel
 
+        "ollama" -> ollamaModel
+
         "custom" -> customModel
 
         else -> ""
@@ -283,10 +293,15 @@ fun SettingsScreen(
         refreshTrigger
     ) {
 
-        if (provider == "custom") {
+        if (
+            provider == "custom" ||
+            provider == "ollama"
+        ) {
+
             models = emptyList()
             loadingModels = false
             modelsError = null
+
             return@LaunchedEffect
         }
 
@@ -421,6 +436,8 @@ fun SettingsScreen(
         "horde" to "AI Horde (مجاني تماماً)",
 
         "huggingface" to "Hugging Face 🤗",
+
+        "ollama" to "Ollama 🦙 (محلي)",
 
         "custom" to "Custom API"
     )
@@ -1110,6 +1127,38 @@ fun SettingsScreen(
                 }
 
                 // ==================================================
+                // Ollama
+                // ==================================================
+
+                "ollama" -> {
+
+                    InfoCard(
+                        "🦙 Ollama يعمل محلياً على الهاتف عبر Termux.\n" +
+                            "لا يحتاج API Key ولا اتصالاً بالإنترنت أثناء التشغيل.\n" +
+                            "عنوان الخادم المحلي: 127.0.0.1:11434"
+                    )
+
+                    OutlinedTextField(
+                        value = ollamaModel,
+                        onValueChange = {
+                            ollamaModel = it
+                            saved = false
+                        },
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                        label = {
+                            Text("اسم نموذج Ollama")
+                        },
+                        placeholder = {
+                            Text("qwen2.5:1.5b")
+                        },
+                        singleLine = true,
+                        shape =
+                            RoundedCornerShape(12.dp)
+                    )
+                }
+
+                // ==================================================
                 // Custom
                 // ==================================================
 
@@ -1536,6 +1585,13 @@ fun SettingsScreen(
                         hordeImageModel
 
                     // -------------------------------
+                    // Ollama
+                    // -------------------------------
+
+                    settings.ollamaModel =
+                        ollamaModel
+
+                    // -------------------------------
                     // Custom
                     // -------------------------------
 
@@ -1842,299 +1898,4 @@ private fun DynamicModelSelector(
                         "⚠️ $error\n" +
                             "سيتم الاحتفاظ بالنموذج المحفوظ.",
 
-                    modifier =
-                        Modifier.padding(12.dp),
-
-                    style =
-                        MaterialTheme
-                            .typography
-                            .bodySmall,
-
-                    color =
-                        MaterialTheme
-                            .colorScheme
-                            .onErrorContainer
-                )
-            }
-        }
-
-        // ========================================================
-        // القائمة المنسدلة
-        // ========================================================
-
-        ExposedDropdownMenuBox(
-
-            expanded = expanded,
-
-            onExpandedChange = {
-                expanded = !expanded
-            }
-        ) {
-
-            OutlinedTextField(
-
-                value =
-                    selectedInfo
-                        ?.let {
-                            modelLabel(it)
-                        }
-                        ?: selected.ifBlank {
-                            "اختر نموذجاً"
-                        },
-
-                onValueChange = {},
-
-                readOnly = true,
-
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-
-                trailingIcon = {
-
-                    ExposedDropdownMenuDefaults
-                        .TrailingIcon(
-                            expanded = expanded
-                        )
-                },
-
-                shape =
-                    RoundedCornerShape(12.dp),
-
-                label = {
-                    Text("النموذج المختار")
-                }
-            )
-
-            ExposedDropdownMenu(
-
-                expanded = expanded,
-
-                onDismissRequest = {
-                    expanded = false
-                }
-            ) {
-
-                if (models.isEmpty()) {
-
-                    DropdownMenuItem(
-
-                        text = {
-
-                            Text(
-
-                                if (loading)
-                                    "جاري التحميل..."
-                                else
-                                    "اضغط 🔄 لتحميل النماذج"
-                            )
-                        },
-
-                        onClick = {
-                            expanded = false
-                        }
-                    )
-
-                } else {
-
-                    models.forEach { model ->
-
-                        DropdownMenuItem(
-
-                            text = {
-
-                                Column {
-
-                                    Text(
-
-                                        text =
-                                            modelLabel(
-                                                model
-                                            ),
-
-                                        fontWeight =
-                                            if (
-                                                model.recommended
-                                            )
-                                                FontWeight.Bold
-                                            else
-                                                FontWeight.Normal
-                                    )
-
-                                    if (
-                                        model.contextLength > 0
-                                    ) {
-
-                                        Text(
-
-                                            text =
-                                                formatContextLength(
-                                                    model.contextLength
-                                                ),
-
-                                            style =
-                                                MaterialTheme
-                                                    .typography
-                                                    .labelSmall,
-
-                                            color =
-                                                MaterialTheme
-                                                    .colorScheme
-                                                    .onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            },
-
-                            onClick = {
-
-                                onSelect(model.id)
-
-                                expanded = false
-                            }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// =================================================================
-// Model label
-// =================================================================
-
-private fun modelLabel(
-    model: ModelInfo
-): String = buildString {
-
-    if (model.name.contains("💾")) {
-
-        append(model.name)
-
-        return@buildString
-    }
-
-    if (model.isFree) {
-        append("🟢 ")
-    }
-
-    if (model.recommended) {
-        append("⭐ ")
-    }
-
-    append(model.name)
-
-    if (model.supportsVision) {
-        append(" 🖼️")
-    }
-}
-
-// =================================================================
-// Context length
-// =================================================================
-
-private fun formatContextLength(
-    contextLength: Long
-): String {
-
-    return when {
-
-        contextLength >= 1_000_000 ->
-            "${contextLength / 1_000_000}M context"
-
-        contextLength >= 1_000 ->
-            "${contextLength / 1_000}K context"
-
-        else ->
-            "$contextLength context"
-    }
-}
-
-// =================================================================
-// InfoCard
-// =================================================================
-
-@Composable
-private fun InfoCard(
-    text: String
-) {
-
-    Card(
-
-        colors =
-            CardDefaults.cardColors(
-                containerColor =
-                    MaterialTheme
-                        .colorScheme
-                        .secondaryContainer
-                        .copy(alpha = 0.5f)
-            ),
-
-        shape =
-            RoundedCornerShape(12.dp)
-    ) {
-
-        Text(
-
-            text = text,
-
-            modifier =
-                Modifier.padding(12.dp),
-
-            style =
-                MaterialTheme
-                    .typography
-                    .bodySmall,
-
-            color =
-                MaterialTheme
-                    .colorScheme
-                    .onSecondaryContainer
-        )
-    }
-}
-
-// =================================================================
-// KeyField
-// =================================================================
-
-@Composable
-private fun KeyField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    showKey: Boolean,
-    placeholder: String
-) {
-
-    OutlinedTextField(
-
-        value = value,
-
-        onValueChange = onValueChange,
-
-        modifier =
-            Modifier.fillMaxWidth(),
-
-        label = {
-            Text(label)
-        },
-
-        placeholder = {
-            Text(placeholder)
-        },
-
-        singleLine = true,
-
-        visualTransformation =
-            if (showKey)
-                VisualTransformation.None
-            else
-                PasswordVisualTransformation(),
-
-        shape =
-            RoundedCornerShape(12.dp)
-    )
-}
+                    modifier
