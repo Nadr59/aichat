@@ -872,7 +872,9 @@ class ChatRepository(context: Context) {
                     history      = history,
                     userMessage  = userMessage,
                     imageBase64  = imageBase64,
-                    providerName = "Custom"
+                    providerName = "Custom",
+                    // ✅ الإصلاح الأساسي: Custom يرسل الصورة دائماً إذا كانت موجودة
+                    forceVision  = true
                 )
             }
 
@@ -1109,6 +1111,7 @@ class ChatRepository(context: Context) {
 
     // ============================================================
     // OpenAI Compatible - Send
+    // ✅ أضفنا معامل forceVision لحل مشكلة Custom
     // ============================================================
 
     private fun sendOpenAICompatible(
@@ -1119,7 +1122,8 @@ class ChatRepository(context: Context) {
         userMessage: String,
         imageBase64: String?,
         providerName: String,
-        extraHeaders: Map<String, String> = emptyMap()
+        extraHeaders: Map<String, String> = emptyMap(),
+        forceVision: Boolean = false          // ✅ جديد
     ): String {
 
         val cleanModel = model.trim()
@@ -1144,7 +1148,9 @@ class ChatRepository(context: Context) {
             })
         }
 
-        val hasImage = imageBase64 != null && supportsVision(cleanModel)
+        // ✅ الإصلاح: forceVision يتجاوز قائمة الأسماء المحددة
+        val hasImage = imageBase64 != null && (forceVision || supportsVision(cleanModel))
+
         if (hasImage) {
             messages.put(JSONObject().apply {
                 put("role", "user")
@@ -1184,7 +1190,6 @@ class ChatRepository(context: Context) {
 
         extraHeaders.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
 
-        // ✅ إصلاح: إغلاق use { } بشكل صحيح مع return
         client.newCall(requestBuilder.build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
 
@@ -1216,25 +1221,27 @@ class ChatRepository(context: Context) {
             val result = text?.takeIf { it.isNotBlank() }
                 ?: throw IOException("$providerName: الرد فارغ")
 
-            // ✅ زيادة العداد فقط بعد نجاح طلب Custom
+            // ✅ العداد يزيد فقط بعد نجاح Custom النصي
             if (providerName.equals("Custom", ignoreCase = true)) {
                 _customRequestCount.update { it + 1 }
             }
 
             return result
-        } // ✅ إغلاق use { response -> }
-    }   // ✅ إغلاق sendOpenAICompatible()
+        }
+    }
 
     // ============================================================
-    // supportsVision - ✅ دالة مستقلة خارج sendOpenAICompatible
+    // supportsVision - للمزودات التي تحتاج تحقق بالاسم
     // ============================================================
 
     private fun supportsVision(model: String): Boolean {
         val m = model.lowercase()
         return listOf(
-            "gpt-4o", "gpt-4-turbo", "gpt-4-vision",
-            "gemini", "claude-3", "pixtral",
-            "llava", "vision", "qwen-vl", "qwen2-vl"
+            "gpt-4o", "gpt-4-turbo", "gpt-4-vision", "gpt-4.1", "gpt-5",
+            "gemini", "claude-3", "claude-3.5", "claude-3.7",
+            "pixtral", "llava", "vision", "qwen-vl", "qwen2-vl", "qwen2.5-vl",
+            "minicpm-v", "internvl", "phi-3-vision", "phi-4-vision",
+            "moondream", "bakllava", "cogvlm", "yi-vl"
         ).any { m.contains(it) }
     }
 
