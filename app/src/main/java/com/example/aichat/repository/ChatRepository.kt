@@ -36,7 +36,14 @@ class ChatRepository(context: Context) {
     )
 
     // ============================================================
-    // حدود النماذج المجانية
+    // عداد طلبات Custom
+    // ============================================================
+
+    private val _customRequestCount = MutableStateFlow(0)
+    val customRequestCount: StateFlow<Int> = _customRequestCount.asStateFlow()
+
+    // ============================================================
+    // حدود النماذج
     // ============================================================
 
     private fun getMaxHistory(provider: String, model: String): Int = when {
@@ -65,15 +72,15 @@ class ChatRepository(context: Context) {
     ): List<ModelInfo> = withContext(Dispatchers.IO) {
 
         when (provider.lowercase().trim()) {
-            "gemini"                          -> getGeminiModels()
-            "openrouter"                      -> getOpenRouterModels(forImages)
-            "openai"                          -> getOpenAIModels()
-            "mistral"                         -> getMistralModels()
-            "groq"                            -> getGroqModels()
-            "nvidia"                          -> getNvidiaModels()
+            "gemini"                             -> getGeminiModels()
+            "openrouter"                         -> getOpenRouterModels(forImages)
+            "openai"                             -> getOpenAIModels()
+            "mistral"                            -> getMistralModels()
+            "groq"                               -> getGroqModels()
+            "nvidia"                             -> getNvidiaModels()
             "huggingface", "hugging face", "hf" -> getHuggingFaceModels()
-            "horde"                           -> getHordeModels(forImages)
-            else                              -> emptyList()
+            "horde"                              -> getHordeModels(forImages)
+            else                                 -> emptyList()
         }
     }
 
@@ -107,13 +114,10 @@ class ChatRepository(context: Context) {
 
             for (i in 0 until models.length()) {
 
-                val obj = models.optJSONObject(i) ?: continue
-
-                val name = obj.optString("name").removePrefix("models/")
-
+                val obj         = models.optJSONObject(i) ?: continue
+                val name        = obj.optString("name").removePrefix("models/")
                 val displayName = obj.optString("displayName").ifBlank { name }
-
-                val methods = obj.optJSONArray("supportedGenerationMethods")
+                val methods     = obj.optJSONArray("supportedGenerationMethods")
 
                 var supportsGenerateContent = false
                 if (methods != null) {
@@ -130,20 +134,20 @@ class ChatRepository(context: Context) {
                 val lower = name.lowercase()
 
                 result += ModelInfo(
-                    id          = name,
-                    name        = displayName,
-                    provider    = "gemini",
-                    isFree      = lower.contains("flash") || lower.contains("lite"),
-                    supportsVision =
+                    id                      = name,
+                    name                    = displayName,
+                    provider                = "gemini",
+                    isFree                  = lower.contains("flash") || lower.contains("lite"),
+                    supportsVision          =
                         lower.contains("flash") ||
                         lower.contains("pro")   ||
                         lower.contains("image"),
                     supportsImageGeneration = lower.contains("image"),
-                    recommended =
+                    recommended             =
                         lower.contains("3.8") ||
                         lower.contains("3.7") ||
                         lower.contains("3.6"),
-                    contextLength = obj.optLong("inputTokenLimit", 0L)
+                    contextLength           = obj.optLong("inputTokenLimit", 0L)
                 )
             }
 
@@ -188,8 +192,8 @@ class ChatRepository(context: Context) {
 
             for (i in 0 until data.length()) {
 
-                val obj = data.optJSONObject(i) ?: continue
-                val id  = obj.optString("id").trim()
+                val obj          = data.optJSONObject(i) ?: continue
+                val id           = obj.optString("id").trim()
                 if (id.isBlank()) continue
 
                 val name         = obj.optString("name").ifBlank { id }
@@ -198,8 +202,8 @@ class ChatRepository(context: Context) {
                 val inputModalities  = architecture?.optJSONArray("input_modalities")
                 val outputModalities = architecture?.optJSONArray("output_modalities")
 
-                val supportsVision           = jsonArrayContains(inputModalities, "image")
-                val supportsImageGeneration  = jsonArrayContains(outputModalities, "image")
+                val supportsVision          = jsonArrayContains(inputModalities, "image")
+                val supportsImageGeneration = jsonArrayContains(outputModalities, "image")
 
                 val pricing         = obj.optJSONObject("pricing")
                 val promptPrice     = pricing?.optString("prompt", "1")     ?: "1"
@@ -208,19 +212,19 @@ class ChatRepository(context: Context) {
                 val imagePrice      = pricing?.optString("image", "0")      ?: "0"
 
                 val isFree =
-                    isZeroPrice(promptPrice) &&
+                    isZeroPrice(promptPrice)     &&
                     isZeroPrice(completionPrice) &&
-                    isZeroPrice(requestPrice) &&
+                    isZeroPrice(requestPrice)    &&
                     (!supportsImageGeneration || isZeroPrice(imagePrice))
 
                 val lower = "$id $name".lowercase()
 
                 val recommended =
-                    lower.contains("gemini-3")   ||
-                    lower.contains("gpt-5")      ||
-                    lower.contains("claude")     ||
-                    lower.contains("qwen3")      ||
-                    lower.contains("nemotron")   ||
+                    lower.contains("gemini-3")  ||
+                    lower.contains("gpt-5")     ||
+                    lower.contains("claude")    ||
+                    lower.contains("qwen3")     ||
+                    lower.contains("nemotron")  ||
                     lower.contains("deepseek")
 
                 result += ModelInfo(
@@ -272,8 +276,8 @@ class ChatRepository(context: Context) {
 
             for (i in 0 until data.length()) {
 
-                val obj = data.optJSONObject(i) ?: continue
-                val id  = obj.optString("id")
+                val obj  = data.optJSONObject(i) ?: continue
+                val id   = obj.optString("id")
                 if (id.isBlank()) continue
 
                 val capabilities = obj.optJSONObject("capabilities")
@@ -284,16 +288,16 @@ class ChatRepository(context: Context) {
                 val lower  = id.lowercase()
 
                 result += ModelInfo(
-                    id          = id,
-                    name        = id,
-                    provider    = "mistral",
-                    isFree      = lower.contains("small") || lower.contains("ministral"),
+                    id             = id,
+                    name           = id,
+                    provider       = "mistral",
+                    isFree         = lower.contains("small") || lower.contains("ministral"),
                     supportsVision = vision,
-                    recommended =
-                        lower.contains("medium")    ||
-                        lower.contains("small")     ||
+                    recommended    =
+                        lower.contains("medium")   ||
+                        lower.contains("small")    ||
                         lower.contains("ministral"),
-                    contextLength = obj.optLong("max_context_length", 0L)
+                    contextLength  = obj.optLong("max_context_length", 0L)
                 )
             }
 
@@ -330,7 +334,9 @@ class ChatRepository(context: Context) {
             if (!response.isSuccessful) {
                 val message = runCatching {
                     val json = JSONObject(body)
-                    json.optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() }
+                    json.optJSONObject("error")
+                        ?.optString("message")
+                        ?.takeIf { it.isNotBlank() }
                         ?: json.optString("message").takeIf { it.isNotBlank() }
                         ?: body
                 }.getOrDefault(body)
@@ -386,13 +392,13 @@ class ChatRepository(context: Context) {
                 val lowerName = "$id $name".lowercase()
 
                 val recommended =
-                    lowerName.contains("qwen3")   ||
-                    lowerName.contains("qwen2.5") ||
-                    lowerName.contains("deepseek")||
-                    lowerName.contains("llama")   ||
-                    lowerName.contains("gemma")   ||
-                    lowerName.contains("mistral") ||
-                    lowerName.contains("kimi")    ||
+                    lowerName.contains("qwen3")    ||
+                    lowerName.contains("qwen2.5")  ||
+                    lowerName.contains("deepseek") ||
+                    lowerName.contains("llama")    ||
+                    lowerName.contains("gemma")    ||
+                    lowerName.contains("mistral")  ||
+                    lowerName.contains("kimi")     ||
                     lowerName.contains("glm")
 
                 models += ModelInfo(
@@ -445,49 +451,48 @@ class ChatRepository(context: Context) {
 
             for (i in 0 until data.length()) {
 
-                val obj = data.optJSONObject(i) ?: continue
-                val id  = obj.optString("id").trim()
+                val obj  = data.optJSONObject(i) ?: continue
+                val id   = obj.optString("id").trim()
                 if (id.isBlank()) continue
 
                 val name  = obj.optString("name").trim().ifBlank { id }
                 val lower = "$id $name".lowercase()
 
-                // استبعاد نماذج الحماية والتصنيف
                 if (
-                    lower.contains("guard")         ||
-                    lower.contains("safety")        ||
-                    lower.contains("jailbreak")     ||
-                    lower.contains("content-safety")||
-                    lower.contains("moderation")    ||
+                    lower.contains("guard")          ||
+                    lower.contains("safety")         ||
+                    lower.contains("jailbreak")      ||
+                    lower.contains("content-safety") ||
+                    lower.contains("moderation")     ||
                     lower.contains("pii")
                 ) continue
 
                 val supportsVision =
-                    lower.contains("vision")              ||
-                    lower.contains("-vl")                 ||
-                    lower.contains("vl-")                 ||
-                    lower.contains("visual")              ||
-                    lower.contains("multimodal")          ||
-                    lower.contains("image-text")          ||
-                    lower.contains("image_text")          ||
+                    lower.contains("vision")               ||
+                    lower.contains("-vl")                  ||
+                    lower.contains("vl-")                  ||
+                    lower.contains("visual")               ||
+                    lower.contains("multimodal")           ||
+                    lower.contains("image-text")           ||
+                    lower.contains("image_text")           ||
                     lower.contains("nemotron-nano-12b-v2-vl") ||
-                    lower.contains("gemma-3")             ||
-                    lower.contains("gemma-3n")            ||
-                    lower.contains("gemma-4")             ||
-                    lower.contains("qwen3-vl")            ||
-                    lower.contains("qwen2-vl")            ||
-                    lower.contains("llama-3.2-11b-vision")||
+                    lower.contains("gemma-3")              ||
+                    lower.contains("gemma-3n")             ||
+                    lower.contains("gemma-4")              ||
+                    lower.contains("qwen3-vl")             ||
+                    lower.contains("qwen2-vl")             ||
+                    lower.contains("llama-3.2-11b-vision") ||
                     lower.contains("llama-3.2-90b-vision")
 
                 val recommended =
-                    lower.contains("nemotron")   ||
-                    lower.contains("qwen3")      ||
-                    lower.contains("qwen2.5")    ||
-                    lower.contains("llama-3.3")  ||
-                    lower.contains("llama-3.1")  ||
-                    lower.contains("gemma-4")    ||
-                    lower.contains("gemma-3")    ||
-                    lower.contains("mistral")    ||
+                    lower.contains("nemotron")  ||
+                    lower.contains("qwen3")     ||
+                    lower.contains("qwen2.5")   ||
+                    lower.contains("llama-3.3") ||
+                    lower.contains("llama-3.1") ||
+                    lower.contains("gemma-4")   ||
+                    lower.contains("gemma-3")   ||
+                    lower.contains("mistral")   ||
                     lower.contains("deepseek")
 
                 if (forImages && !supportsVision) continue
@@ -550,19 +555,18 @@ class ChatRepository(context: Context) {
 
                 val lower = id.lowercase()
 
-                // استبعاد نماذج الصوت والمراقبة
                 if (lower.contains("whisper") || lower.contains("guard")) continue
 
                 result += ModelInfo(
-                    id          = id,
-                    name        = id,
-                    provider    = "groq",
-                    isFree      = false,
+                    id             = id,
+                    name           = id,
+                    provider       = "groq",
+                    isFree         = false,
                     supportsVision =
                         lower.contains("vision") || lower.contains("qwen3"),
-                    recommended =
+                    recommended    =
                         lower.contains("gpt-oss") || lower.contains("qwen3"),
-                    contextLength = obj.optLong("context_window", 0L)
+                    contextLength  = obj.optLong("context_window", 0L)
                 )
             }
 
@@ -673,15 +677,15 @@ class ChatRepository(context: Context) {
                 if (!usable) continue
 
                 result += ModelInfo(
-                    id          = id,
-                    name        = id,
-                    provider    = "openai",
-                    isFree      = false,
+                    id             = id,
+                    name           = id,
+                    provider       = "openai",
+                    isFree         = false,
                     supportsVision =
                         lower.contains("gpt-5")  ||
                         lower.contains("gpt-4o") ||
                         lower.contains("gpt-4.1"),
-                    recommended =
+                    recommended    =
                         lower.contains("gpt-5") || lower.contains("gpt-4.1")
                 )
             }
@@ -889,15 +893,6 @@ class ChatRepository(context: Context) {
             else -> throw IOException("مزود صور غير معروف: ${settings.imageProvider}")
         }
     }
-    // ============================================================
-// عداد طلبات Custom فقط
-// ============================================================
-
-private val _customRequestCount =
-    MutableStateFlow(0)
-
-val customRequestCount: StateFlow<Int> =
-    _customRequestCount.asStateFlow()
 
     // ============================================================
     // Gemini - Send
@@ -989,7 +984,8 @@ val customRequestCount: StateFlow<Int> =
 
             val candidates = JSONObject(body).optJSONArray("candidates")
             if (candidates == null || candidates.length() == 0) {
-                val reason = JSONObject(body).optJSONObject("promptFeedback")
+                val reason = JSONObject(body)
+                    .optJSONObject("promptFeedback")
                     ?.optString("blockReason", "غير معروف")
                 throw IOException("Gemini: محجوب ($reason)")
             }
@@ -1188,6 +1184,7 @@ val customRequestCount: StateFlow<Int> =
 
         extraHeaders.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
 
+        // ✅ إصلاح: إغلاق use { } بشكل صحيح مع return
         client.newCall(requestBuilder.build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
 
@@ -1210,21 +1207,27 @@ val customRequestCount: StateFlow<Int> =
             }
 
             val text = JSONObject(body)
-    .optJSONArray("choices")
-    ?.optJSONObject(0)
-    ?.optJSONObject("message")
-    ?.optString("content", "")
-    ?.trim()
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content", "")
+                ?.trim()
 
-val result = text?.takeIf { it.isNotBlank() }
-    ?: throw IOException("$providerName: الرد فارغ")
+            val result = text?.takeIf { it.isNotBlank() }
+                ?: throw IOException("$providerName: الرد فارغ")
 
-// زيادة العداد فقط بعد نجاح طلب Custom
-if (providerName.equals("Custom", ignoreCase = true)) {
-    _customRequestCount.update { it + 1 }
-}
+            // ✅ زيادة العداد فقط بعد نجاح طلب Custom
+            if (providerName.equals("Custom", ignoreCase = true)) {
+                _customRequestCount.update { it + 1 }
+            }
 
-return result
+            return result
+        } // ✅ إغلاق use { response -> }
+    }   // ✅ إغلاق sendOpenAICompatible()
+
+    // ============================================================
+    // supportsVision - ✅ دالة مستقلة خارج sendOpenAICompatible
+    // ============================================================
 
     private fun supportsVision(model: String): Boolean {
         val m = model.lowercase()
@@ -1409,7 +1412,7 @@ return result
             return when {
                 img.startsWith("http") -> ImageResult(url = img)
                 img.isNotBlank()       -> ImageResult(base64 = img)
-                else -> throw IOException("Horde: الصورة فارغة")
+                else                   -> throw IOException("Horde: الصورة فارغة")
             }
         }
         throw IOException("Horde: انتهى الوقت بدون صورة")
@@ -1450,7 +1453,8 @@ return result
                 throw IOException("OpenAI Image ${response.code}: $msg")
             }
             val url = JSONObject(body).optJSONArray("data")
-                ?.optJSONObject(0)?.optString("url", "")
+                ?.optJSONObject(0)
+                ?.optString("url", "")
                 ?.takeIf { it.isNotBlank() }
                 ?: throw IOException("OpenAI: لم يُرجع رابط الصورة")
             return ImageResult(url = url)
@@ -1543,4 +1547,5 @@ return result
             throw IOException("Custom Image: لم يُرجع صورة\n${body.take(200)}")
         }
     }
+
 } // ← نهاية الـ class
