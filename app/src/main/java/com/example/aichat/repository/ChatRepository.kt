@@ -15,6 +15,10 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import com.example.aichat.data.model.ModelInfo
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 class ChatRepository(context: Context) {
 
@@ -885,6 +889,15 @@ class ChatRepository(context: Context) {
             else -> throw IOException("مزود صور غير معروف: ${settings.imageProvider}")
         }
     }
+    // ============================================================
+// عداد طلبات Custom فقط
+// ============================================================
+
+private val _customRequestCount =
+    MutableStateFlow(0)
+
+val customRequestCount: StateFlow<Int> =
+    _customRequestCount.asStateFlow()
 
     // ============================================================
     // Gemini - Send
@@ -1197,16 +1210,21 @@ class ChatRepository(context: Context) {
             }
 
             val text = JSONObject(body)
-                .optJSONArray("choices")
-                ?.optJSONObject(0)
-                ?.optJSONObject("message")
-                ?.optString("content", "")
-                ?.trim()
+    .optJSONArray("choices")
+    ?.optJSONObject(0)
+    ?.optJSONObject("message")
+    ?.optString("content", "")
+    ?.trim()
 
-            return text?.takeIf { it.isNotBlank() }
-                ?: throw IOException("$providerName: الرد فارغ")
-        }
-    }
+val result = text?.takeIf { it.isNotBlank() }
+    ?: throw IOException("$providerName: الرد فارغ")
+
+// زيادة العداد فقط بعد نجاح طلب Custom
+if (providerName.equals("Custom", ignoreCase = true)) {
+    _customRequestCount.update { it + 1 }
+}
+
+return result
 
     private fun supportsVision(model: String): Boolean {
         val m = model.lowercase()
