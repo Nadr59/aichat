@@ -26,7 +26,7 @@ private val db = ChatDatabase.getInstance(application)
 private val dao = db.chatDao()
 
 val repository = ChatRepository(application)
-val repository = ChatRepository(application)
+
 
 // عداد طلبات Custom فقط
 val customRequestCount: StateFlow<Int> =
