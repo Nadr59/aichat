@@ -3,6 +3,7 @@ package com.example.aichat.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -29,13 +30,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -56,13 +61,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,11 +78,11 @@ fun ChatScreen(
     settings: AiSettings,
     onBack: () -> Unit
 ) {
-    val messages          by viewModel.messages.collectAsState()
-    val isLoading         by viewModel.isLoading.collectAsState()
-    val error             by viewModel.error.collectAsState()
-    val isImageMode       by viewModel.isImageGenerationMode.collectAsState()
-    val selectedImage     by viewModel.selectedImageBase64.collectAsState()
+    val messages           by viewModel.messages.collectAsState()
+    val isLoading          by viewModel.isLoading.collectAsState()
+    val error              by viewModel.error.collectAsState()
+    val isImageMode        by viewModel.isImageGenerationMode.collectAsState()
+    val selectedImage      by viewModel.selectedImageBase64.collectAsState()
     val customRequestCount by viewModel.customRequestCount.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
@@ -84,13 +91,59 @@ fun ChatScreen(
     val context   = LocalContext.current
 
     // ----------------------------------------------------------------
-    // اختيار صورة
+    // URI مؤقت للكاميرا
     // ----------------------------------------------------------------
 
-    val imagePicker = rememberLauncherForActivityResult(
+    var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    // ----------------------------------------------------------------
+    // Launchers
+    // ----------------------------------------------------------------
+
+    // ① معرض الصور
+    val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { viewModel.selectImage(it) }
+    }
+
+    // ② الكاميرا
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            cameraImageUri?.let { viewModel.selectImage(it) }
+        }
+    }
+
+    // ③ اختيار ملف
+    val fileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.selectFile(it) }
+    }
+
+    // ----------------------------------------------------------------
+    // دالة فتح الكاميرا مع إنشاء URI مؤقت
+    // ----------------------------------------------------------------
+
+    fun openCamera() {
+        try {
+            val photoFile = File.createTempFile(
+                "camera_photo_",
+                ".jpg",
+                context.cacheDir
+            )
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.provider",
+                photoFile
+            )
+            cameraImageUri = uri
+            cameraLauncher.launch(uri)
+        } catch (e: Exception) {
+            // FileProvider غير مهيأ أو خطأ آخر
+        }
     }
 
     // ----------------------------------------------------------------
@@ -117,29 +170,21 @@ fun ChatScreen(
     Scaffold(
 
         topBar = {
-
             TopAppBar(
-
-                // ✅ إصلاح 1: إضافة الفاصلة المفقودة بعد title
                 title = {
                     Column {
-
                         Text(
                             text =
                                 if (isImageMode) "توليد الصور"
                                 else "المحادثة",
                             fontWeight = FontWeight.SemiBold
                         )
-
                         Text(
                             text  = settings.getActiveModel().take(35),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-
-                        if (
-                            settings.provider.trim().lowercase() == "custom"
-                        ) {
+                        if (settings.provider.trim().lowercase() == "custom") {
                             Text(
                                 text  = "الطلبات: $customRequestCount",
                                 style = MaterialTheme.typography.labelSmall,
@@ -147,8 +192,7 @@ fun ChatScreen(
                             )
                         }
                     }
-                }, // ✅ الفاصلة كانت مفقودة هنا
-
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -157,11 +201,8 @@ fun ChatScreen(
                         )
                     }
                 },
-
                 actions = {
-                    IconButton(
-                        onClick = { viewModel.toggleImageGenerationMode() }
-                    ) {
+                    IconButton(onClick = { viewModel.toggleImageGenerationMode() }) {
                         Icon(
                             imageVector =
                                 if (isImageMode) Icons.Filled.Chat
@@ -177,7 +218,6 @@ fun ChatScreen(
                         )
                     }
                 },
-
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -185,13 +225,14 @@ fun ChatScreen(
         },
 
         bottomBar = {
-
             InputBar(
                 inputText        = inputText,
                 isLoading        = isLoading,
                 isImageMode      = isImageMode,
                 hasSelectedImage = selectedImage != null,
-                onAttach         = { imagePicker.launch("image/*") },
+                onOpenGallery    = { galleryLauncher.launch("image/*") },
+                onOpenCamera     = { openCamera() },
+                onOpenFile       = { fileLauncher.launch("*/*") },
                 onRemoveImage    = { viewModel.clearSelectedImage() },
                 onTextChange     = { inputText = it },
                 onSend = {
@@ -213,16 +254,9 @@ fun ChatScreen(
                 .padding(padding)
         ) {
 
-            // ----------------------------------------------------
-            // الرسائل
-            // ----------------------------------------------------
-
             if (messages.isEmpty()) {
-
                 EmptyChatView(isImageMode = isImageMode)
-
             } else {
-
                 LazyColumn(
                     state          = listState,
                     modifier       = Modifier
@@ -234,7 +268,6 @@ fun ChatScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-
                     items(
                         items = messages,
                         key   = { it.id }
@@ -253,15 +286,10 @@ fun ChatScreen(
                 }
             }
 
-            // ----------------------------------------------------
-            // الخطأ
-            // ----------------------------------------------------
-
             error?.let { err ->
                 ErrorMessage(
                     error     = err,
                     onDismiss = { viewModel.clearError() },
-                    // ✅ إصلاح 2: تمرير الـ lambda بشكل صحيح
                     onCopy    = { copyToClipboard(err) }
                 )
             }
@@ -275,15 +303,11 @@ fun ChatScreen(
 
 @Composable
 private fun EmptyChatView(isImageMode: Boolean) {
-
     Box(
-        modifier          = Modifier.fillMaxSize(),
-        contentAlignment  = Alignment.Center
+        modifier         = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
-
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
 
             Surface(
                 modifier = Modifier.size(64.dp),
@@ -335,11 +359,15 @@ private fun InputBar(
     isLoading: Boolean,
     isImageMode: Boolean,
     hasSelectedImage: Boolean,
-    onAttach: () -> Unit,
+    onOpenGallery: () -> Unit,
+    onOpenCamera: () -> Unit,
+    onOpenFile: () -> Unit,
     onRemoveImage: () -> Unit,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit
 ) {
+    // ✅ حالة فتح/إغلاق القائمة
+    var showAttachMenu by remember { mutableStateOf(false) }
 
     Surface(
         modifier = Modifier
@@ -348,7 +376,6 @@ private fun InputBar(
             .navigationBarsPadding(),
         color = MaterialTheme.colorScheme.background
     ) {
-
         Column(
             modifier = Modifier.padding(
                 horizontal = 10.dp,
@@ -357,17 +384,15 @@ private fun InputBar(
         ) {
 
             // ------------------------------------------------
-            // معاينة الصورة
+            // معاينة الصورة المرفقة
             // ------------------------------------------------
 
             if (hasSelectedImage) {
-
                 Surface(
                     modifier = Modifier.padding(bottom = 6.dp),
                     shape    = RoundedCornerShape(12.dp),
                     color    = MaterialTheme.colorScheme.secondaryContainer
                 ) {
-
                     Row(
                         modifier = Modifier.padding(
                             horizontal = 10.dp,
@@ -375,23 +400,19 @@ private fun InputBar(
                         ),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-
                         Icon(
                             imageVector        = Icons.Filled.Image,
                             contentDescription = null,
                             modifier           = Modifier.size(20.dp),
                             tint               = MaterialTheme.colorScheme.onSecondaryContainer
                         )
-
                         Spacer(Modifier.width(8.dp))
-
                         Text(
-                            text     = "تم إرفاق صورة",
+                            text     = "✅ صورة جاهزة للإرسال",
                             modifier = Modifier.weight(1f),
                             style    = MaterialTheme.typography.bodySmall,
                             color    = MaterialTheme.colorScheme.onSecondaryContainer
                         )
-
                         IconButton(
                             onClick  = onRemoveImage,
                             modifier = Modifier.size(28.dp)
@@ -416,25 +437,88 @@ private fun InputBar(
             ) {
 
                 Surface(
-                    modifier      = Modifier.weight(1f),
-                    shape         = RoundedCornerShape(26.dp),
+                    modifier       = Modifier.weight(1f),
+                    shape          = RoundedCornerShape(26.dp),
                     tonalElevation = 2.dp,
-                    color         = MaterialTheme.colorScheme.surfaceVariant
+                    color          = MaterialTheme.colorScheme.surfaceVariant
                 ) {
-
                     Row(
                         modifier          = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Bottom
                     ) {
 
-                        IconButton(
-                            onClick  = onAttach,
-                            enabled  = !isLoading
-                        ) {
-                            Icon(
-                                imageVector        = Icons.Filled.AttachFile,
-                                contentDescription = "إرفاق صورة"
-                            )
+                        // ✅ زر الإرفاق مع القائمة المنسدلة
+                        Box {
+                            IconButton(
+                                onClick  = { showAttachMenu = true },
+                                enabled  = !isLoading
+                            ) {
+                                Icon(
+                                    imageVector        = Icons.Filled.AttachFile,
+                                    contentDescription = "إرفاق"
+                                )
+                            }
+
+                            // ✅ القائمة المنسدلة
+                            DropdownMenu(
+                                expanded        = showAttachMenu,
+                                onDismissRequest = { showAttachMenu = false }
+                            ) {
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector        = Icons.Filled.Camera,
+                                                contentDescription = null,
+                                                modifier           = Modifier.size(20.dp)
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text("📷 التقاط صورة بالكاميرا")
+                                        }
+                                    },
+                                    onClick = {
+                                        showAttachMenu = false
+                                        onOpenCamera()
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector        = Icons.Filled.Image,
+                                                contentDescription = null,
+                                                modifier           = Modifier.size(20.dp)
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text("🖼️ اختيار صورة من المعرض")
+                                        }
+                                    },
+                                    onClick = {
+                                        showAttachMenu = false
+                                        onOpenGallery()
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector        = Icons.Filled.Description,
+                                                contentDescription = null,
+                                                modifier           = Modifier.size(20.dp)
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text("📄 اختيار ملف")
+                                        }
+                                    },
+                                    onClick = {
+                                        showAttachMenu = false
+                                        onOpenFile()
+                                    }
+                                )
+                            }
                         }
 
                         OutlinedTextField(
@@ -448,10 +532,10 @@ private fun InputBar(
                                         else "اكتب رسالة..."
                                 )
                             },
-                            enabled   = !isLoading,
-                            maxLines  = 5,
-                            shape     = RoundedCornerShape(26.dp),
-                            colors    = androidx.compose.material3
+                            enabled  = !isLoading,
+                            maxLines = 5,
+                            shape    = RoundedCornerShape(26.dp),
+                            colors   = androidx.compose.material3
                                 .OutlinedTextFieldDefaults.colors(
                                     unfocusedContainerColor =
                                         androidx.compose.ui.graphics.Color.Transparent,
@@ -482,7 +566,6 @@ private fun InputBar(
                         else
                             MaterialTheme.colorScheme.surfaceVariant
                 ) {
-
                     if (isLoading) {
                         CircularProgressIndicator(
                             modifier    = Modifier.size(21.dp),
@@ -507,6 +590,8 @@ private fun InputBar(
                 text     =
                     if (isImageMode)
                         "يمكنك إرفاق صورة أو كتابة وصف"
+                    else if (hasSelectedImage)
+                        "الصورة ستُرسل مع رسالتك للتحليل"
                     else
                         "اضغط مطولاً على الرسالة لنسخها",
                 modifier = Modifier
@@ -525,12 +610,10 @@ private fun InputBar(
 
 @Composable
 private fun ThinkingBubble() {
-
     Row(
         modifier              = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start
     ) {
-
         Surface(
             shape = RoundedCornerShape(
                 topStart    = 6.dp,
@@ -540,7 +623,6 @@ private fun ThinkingBubble() {
             ),
             color = MaterialTheme.colorScheme.surfaceVariant
         ) {
-
             Row(
                 modifier = Modifier.padding(
                     horizontal = 16.dp,
@@ -548,14 +630,11 @@ private fun ThinkingBubble() {
                 ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-
                 CircularProgressIndicator(
                     modifier    = Modifier.size(16.dp),
                     strokeWidth = 2.dp
                 )
-
                 Spacer(Modifier.width(9.dp))
-
                 Text(
                     text  = "جاري التفكير...",
                     style = MaterialTheme.typography.bodySmall,
@@ -576,9 +655,7 @@ private fun MessageBubble(
     message: Message,
     onCopy: (String) -> Unit
 ) {
-
     val isUser = message.role == "user"
-
     var showCopied by remember { mutableStateOf(false) }
 
     LaunchedEffect(showCopied) {
@@ -594,12 +671,9 @@ private fun MessageBubble(
             if (isUser) Alignment.End
             else Alignment.Start
     ) {
-
         Surface(
             modifier = Modifier
-                .widthIn(
-                    max = if (isUser) 320.dp else 360.dp
-                )
+                .widthIn(max = if (isUser) 320.dp else 360.dp)
                 .combinedClickable(
                     onClick     = {},
                     onLongClick = {
@@ -617,14 +691,12 @@ private fun MessageBubble(
                 if (isUser) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant
         ) {
-
             Column(
                 modifier = Modifier.padding(
                     horizontal = 14.dp,
                     vertical   = 11.dp
                 )
             ) {
-
                 Text(
                     text  = message.content,
                     style = MaterialTheme.typography.bodyLarge,
@@ -634,9 +706,7 @@ private fun MessageBubble(
                 )
 
                 if (showCopied) {
-
                     Spacer(Modifier.size(5.dp))
-
                     Text(
                         text  = "✓ تم النسخ",
                         style = MaterialTheme.typography.labelSmall,
@@ -661,11 +731,8 @@ private fun MessageBubble(
 private fun ErrorMessage(
     error: String,
     onDismiss: () -> Unit,
-    // ✅ إصلاح 2: تغيير النوع من () -> Unit إلى () -> Unit (يبقى نفسه)
-    // لكن الاستدعاء في ChatScreen كان خاطئاً - تم تصحيحه أعلاه
     onCopy: () -> Unit
 ) {
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -679,19 +746,16 @@ private fun ErrorMessage(
         ),
         shape = RoundedCornerShape(14.dp)
     ) {
-
         Row(
             modifier          = Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-
             Text(
                 text     = error,
                 modifier = Modifier.weight(1f),
                 style    = MaterialTheme.typography.bodySmall,
                 color    = MaterialTheme.colorScheme.onErrorContainer
             )
-
             IconButton(onClick = onDismiss) {
                 Icon(
                     imageVector        = Icons.Filled.Close,
