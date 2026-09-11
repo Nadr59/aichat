@@ -78,7 +78,8 @@ fun ChatScreen(
     val error by viewModel.error.collectAsState()
     val isImageMode by viewModel.isImageGenerationMode.collectAsState()
     val selectedImage by viewModel.selectedImageBase64.collectAsState()
-
+val customRequestCount by
+    viewModel.customRequestCount.collectAsState()
     var inputText by remember {
         mutableStateOf("")
     }
