@@ -247,6 +247,23 @@ class AiSettings(context: Context) {
             .apply()
 
     // ============================================================
+    // Ollama (محلي)
+    // ============================================================
+
+    var ollamaModel: String
+        get() = prefs.getString(
+            "ollama_model",
+            "qwen2.5:1.5b"
+        )?.trim() ?: "qwen2.5:1.5b"
+
+        set(value) = prefs.edit()
+            .putString(
+                "ollama_model",
+                value.trim()
+            )
+            .apply()
+
+    // ============================================================
     // Custom
     // ============================================================
 
@@ -339,11 +356,17 @@ class AiSettings(context: Context) {
             "mistral" -> mistralKey
             "groq" -> groqKey
             "nvidia" -> nvidiaKey
+
             "huggingface",
             "hugging face",
             "hf" -> huggingfaceKey
+
             "horde" -> hordeKey
+
+            "ollama" -> ""
+
             "custom" -> customKey
+
             else -> ""
         }
     }
@@ -356,11 +379,17 @@ class AiSettings(context: Context) {
             "mistral" -> mistralModel
             "groq" -> groqModel
             "nvidia" -> nvidiaModel
+
             "huggingface",
             "hugging face",
             "hf" -> huggingfaceModel
+
             "horde" -> hordeTextModel
+
+            "ollama" -> ollamaModel
+
             "custom" -> customModel
+
             else -> ""
         }
     }
@@ -368,6 +397,8 @@ class AiSettings(context: Context) {
     fun isConfigured(): Boolean {
         return when (provider) {
             "horde" -> true
+
+            "ollama" -> ollamaModel.isNotBlank()
 
             "custom" ->
                 customUrl.isNotBlank()
