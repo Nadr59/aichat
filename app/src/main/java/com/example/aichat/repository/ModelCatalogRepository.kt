@@ -139,33 +139,36 @@ class ModelCatalogRepository(
                 var hasLiveProvider = false
                 var bestContextLength = obj.optLong("context_length", 0L)
 
-                obj.optJSONArray("providers")?.let { providers ->
-                    for (j in 0 until providers.length()) {
-                        val provider = providers.optJSONObject(j) ?: continue
-                        val status = provider.optString("status")
-                            .trim()
-                            .lowercase()
+                val providers = obj.optJSONArray("providers")
 
-                        if (status == "live" || status.isBlank()) {
-                            hasLiveProvider = true
-                        }
+if (providers != null) {
+    for (j in 0 until providers.length()) {
+        val provider = providers.optJSONObject(j) ?: continue
 
-                        if (provider.optBoolean("is_free", false)) {
-                            isFree = true
-                        }
+        val status = provider.optString("status")
+            .trim()
+            .lowercase()
 
-                        val providerContext =
-                            provider.optLong("context_length", 0L)
+        if (status == "live" || status.isBlank()) {
+            hasLiveProvider = true
+        }
 
-                        if (providerContext > bestContextLength) {
-                            bestContextLength = providerContext
-                        }
-                    }
+        if (provider.optBoolean("is_free", false)) {
+            isFree = true
+        }
 
-                    if (providers.length() > 0 && !hasLiveProvider) {
-                        continue
-                    }
-                }
+        val providerContext =
+            provider.optLong("context_length", 0L)
+
+        if (providerContext > bestContextLength) {
+            bestContextLength = providerContext
+        }
+    }
+
+    if (providers.length() > 0 && !hasLiveProvider) {
+        continue
+    }
+}
 
                 val lower = id.lowercase()
                 val recommended =
