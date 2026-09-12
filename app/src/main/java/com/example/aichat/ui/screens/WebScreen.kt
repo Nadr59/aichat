@@ -151,9 +151,10 @@ data class WebPlatformInfo(
 
 val webPlatforms = mapOf(
     "chatgpt" to WebPlatformInfo(
-        title = "ChatGPT",
-        url = "https://www.google.com"
-    ),
+    title = "Perplexity",
+    url = "https://www.perplexity.ai"
+),
+    
     "gemini_web" to WebPlatformInfo(
         title = "Gemini Web",
         url = "https://gemini.google.com"
