@@ -78,36 +78,25 @@ fun ChatScreen(
     settings: AiSettings,
     onBack: () -> Unit
 ) {
-    val messages           by viewModel.messages.collectAsState()
-    val isLoading          by viewModel.isLoading.collectAsState()
-    val error              by viewModel.error.collectAsState()
-    val isImageMode        by viewModel.isImageGenerationMode.collectAsState()
-    val selectedImage      by viewModel.selectedImageBase64.collectAsState()
+    val messages by viewModel.messages.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+    val selectedImage by viewModel.selectedImageBase64.collectAsState()
     val customRequestCount by viewModel.customRequestCount.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
 
     val listState = rememberLazyListState()
-    val context   = LocalContext.current
-
-    // ----------------------------------------------------------------
-    // URI مؤقت للكاميرا
-    // ----------------------------------------------------------------
+    val context = LocalContext.current
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
 
-    // ----------------------------------------------------------------
-    // Launchers
-    // ----------------------------------------------------------------
-
-    // ① معرض الصور
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { viewModel.selectImage(it) }
     }
 
-    // ② الكاميرا
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -116,16 +105,11 @@ fun ChatScreen(
         }
     }
 
-    // ③ اختيار ملف
     val fileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { viewModel.selectFile(it) }
     }
-
-    // ----------------------------------------------------------------
-    // دالة فتح الكاميرا مع إنشاء URI مؤقت
-    // ----------------------------------------------------------------
 
     fun openCamera() {
         try {
@@ -134,34 +118,32 @@ fun ChatScreen(
                 ".jpg",
                 context.cacheDir
             )
+
             val uri = FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.provider",
                 photoFile
             )
+
             cameraImageUri = uri
             cameraLauncher.launch(uri)
-        } catch (e: Exception) {
-            // FileProvider غير مهيأ أو خطأ آخر
+
+        } catch (_: Exception) {
         }
     }
-
-    // ----------------------------------------------------------------
-    // نسخ النص
-    // ----------------------------------------------------------------
 
     fun copyToClipboard(text: String) {
         val clipboard =
             context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("message", text))
-    }
 
-    // ----------------------------------------------------------------
-    // التمرير لآخر رسالة
-    // ----------------------------------------------------------------
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText("message", text)
+        )
+    }
 
     LaunchedEffect(messages.size, isLoading) {
         val totalItems = messages.size + if (isLoading) 1 else 0
+
         if (totalItems > 0) {
             listState.animateScrollToItem(totalItems - 1)
         }
@@ -174,50 +156,44 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text(
-                            text =
-                                if (isImageMode) "توليد الصور"
-                                else "المحادثة",
+                            text = "المحادثة",
                             fontWeight = FontWeight.SemiBold
                         )
+
                         Text(
-                            text  = settings.getActiveModel().take(35),
+                            text = settings.getActiveModel().take(35),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
                         if (settings.provider.trim().lowercase() == "custom") {
                             Text(
-                                text  = "الطلبات: $customRequestCount",
+                                text = "الطلبات: $customRequestCount",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
                 },
+
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            imageVector        = Icons.Filled.ArrowBack,
+                            imageVector = Icons.Filled.ArrowBack,
                             contentDescription = "رجوع"
                         )
                     }
                 },
+
                 actions = {
-                    IconButton(onClick = { viewModel.toggleImageGenerationMode() }) {
-                        Icon(
-                            imageVector =
-                                if (isImageMode) Icons.Filled.Chat
-                                else Icons.Filled.Image,
-                            contentDescription =
-                                if (isImageMode) "وضع المحادثة"
-                                else "وضع الصور",
-                            tint =
-                                if (isImageMode)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Filled.Chat,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
                 },
+
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -226,17 +202,27 @@ fun ChatScreen(
 
         bottomBar = {
             InputBar(
-                inputText        = inputText,
-                isLoading        = isLoading,
-                isImageMode      = isImageMode,
+                inputText = inputText,
+                isLoading = isLoading,
                 hasSelectedImage = selectedImage != null,
-                onOpenGallery    = { galleryLauncher.launch("image/*") },
-                onOpenCamera     = { openCamera() },
-                onOpenFile       = { fileLauncher.launch("*/*") },
-                onRemoveImage    = { viewModel.clearSelectedImage() },
-                onTextChange     = { inputText = it },
+                onOpenGallery = {
+                    galleryLauncher.launch("image/*")
+                },
+                onOpenCamera = {
+                    openCamera()
+                },
+                onOpenFile = {
+                    fileLauncher.launch("*/*")
+                },
+                onRemoveImage = {
+                    viewModel.clearSelectedImage()
+                },
+                onTextChange = {
+                    inputText = it
+                },
                 onSend = {
-                    if (!isLoading &&
+                    if (
+                        !isLoading &&
                         (inputText.isNotBlank() || selectedImage != null)
                     ) {
                         viewModel.sendMessage(inputText.trim())
@@ -255,26 +241,26 @@ fun ChatScreen(
         ) {
 
             if (messages.isEmpty()) {
-                EmptyChatView(isImageMode = isImageMode)
+                EmptyChatView()
             } else {
                 LazyColumn(
-                    state          = listState,
-                    modifier       = Modifier
+                    state = listState,
+                    modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
                     contentPadding = PaddingValues(
                         horizontal = 12.dp,
-                        vertical   = 16.dp
+                        vertical = 16.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     items(
                         items = messages,
-                        key   = { it.id }
+                        key = { it.id }
                     ) { message ->
                         MessageBubble(
                             message = message,
-                            onCopy  = { copyToClipboard(it) }
+                            onCopy = { copyToClipboard(it) }
                         )
                     }
 
@@ -288,40 +274,41 @@ fun ChatScreen(
 
             error?.let { err ->
                 ErrorMessage(
-                    error     = err,
-                    onDismiss = { viewModel.clearError() },
-                    onCopy    = { copyToClipboard(err) }
+                    error = err,
+                    onDismiss = {
+                        viewModel.clearError()
+                    },
+                    onCopy = {
+                        copyToClipboard(err)
+                    }
                 )
             }
         }
     }
 }
 
-// ============================================================
-// شاشة البداية
-// ============================================================
-
 @Composable
-private fun EmptyChatView(isImageMode: Boolean) {
+private fun EmptyChatView() {
     Box(
-        modifier         = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Surface(
                 modifier = Modifier.size(64.dp),
-                shape    = CircleShape,
-                color    = MaterialTheme.colorScheme.primaryContainer
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                Box(
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
-                        imageVector        =
-                            if (isImageMode) Icons.Filled.Image
-                            else Icons.Filled.Chat,
+                        imageVector = Icons.Filled.Chat,
                         contentDescription = null,
-                        modifier           = Modifier.size(30.dp),
-                        tint               = MaterialTheme.colorScheme.onPrimaryContainer
+                        modifier = Modifier.size(30.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
@@ -329,19 +316,15 @@ private fun EmptyChatView(isImageMode: Boolean) {
             Spacer(Modifier.size(16.dp))
 
             Text(
-                text       =
-                    if (isImageMode) "ماذا تريد أن تصنع؟"
-                    else "كيف يمكنني مساعدتك؟",
-                style      = MaterialTheme.typography.titleLarge,
+                text = "كيف يمكنني مساعدتك؟",
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
             )
 
             Spacer(Modifier.size(6.dp))
 
             Text(
-                text  =
-                    if (isImageMode) "اكتب وصف الصورة التي تريد توليدها"
-                    else "اكتب رسالتك لبدء المحادثة",
+                text = "اكتب رسالتك لبدء المحادثة",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -349,15 +332,10 @@ private fun EmptyChatView(isImageMode: Boolean) {
     }
 }
 
-// ============================================================
-// شريط الإدخال
-// ============================================================
-
 @Composable
 private fun InputBar(
     inputText: String,
     isLoading: Boolean,
-    isImageMode: Boolean,
     hasSelectedImage: Boolean,
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
@@ -366,7 +344,6 @@ private fun InputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit
 ) {
-    // ✅ حالة فتح/إغلاق القائمة
     var showAttachMenu by remember { mutableStateOf(false) }
 
     Surface(
@@ -379,101 +356,102 @@ private fun InputBar(
         Column(
             modifier = Modifier.padding(
                 horizontal = 10.dp,
-                vertical   = 8.dp
+                vertical = 8.dp
             )
         ) {
-
-            // ------------------------------------------------
-            // معاينة الصورة المرفقة
-            // ------------------------------------------------
 
             if (hasSelectedImage) {
                 Surface(
                     modifier = Modifier.padding(bottom = 6.dp),
-                    shape    = RoundedCornerShape(12.dp),
-                    color    = MaterialTheme.colorScheme.secondaryContainer
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer
                 ) {
                     Row(
                         modifier = Modifier.padding(
                             horizontal = 10.dp,
-                            vertical   = 6.dp
+                            vertical = 6.dp
                         ),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector        = Icons.Filled.Image,
+                            imageVector = Icons.Filled.Image,
                             contentDescription = null,
-                            modifier           = Modifier.size(20.dp),
-                            tint               = MaterialTheme.colorScheme.onSecondaryContainer
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
                         )
+
                         Spacer(Modifier.width(8.dp))
+
                         Text(
-                            text     = "✅ صورة جاهزة للإرسال",
+                            text = "✅ صورة جاهزة للإرسال",
                             modifier = Modifier.weight(1f),
-                            style    = MaterialTheme.typography.bodySmall,
-                            color    = MaterialTheme.colorScheme.onSecondaryContainer
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
+
                         IconButton(
-                            onClick  = onRemoveImage,
+                            onClick = onRemoveImage,
                             modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
-                                imageVector        = Icons.Filled.Close,
+                                imageVector = Icons.Filled.Close,
                                 contentDescription = "إزالة الصورة",
-                                modifier           = Modifier.size(18.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                 }
             }
 
-            // ------------------------------------------------
-            // الحقل الرئيسي
-            // ------------------------------------------------
-
             Row(
-                modifier          = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom
             ) {
 
                 Surface(
-                    modifier       = Modifier.weight(1f),
-                    shape          = RoundedCornerShape(26.dp),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(26.dp),
                     tonalElevation = 2.dp,
-                    color          = MaterialTheme.colorScheme.surfaceVariant
+                    color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Row(
-                        modifier          = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Bottom
                     ) {
 
-                        // ✅ زر الإرفاق مع القائمة المنسدلة
                         Box {
                             IconButton(
-                                onClick  = { showAttachMenu = true },
-                                enabled  = !isLoading
+                                onClick = {
+                                    showAttachMenu = true
+                                },
+                                enabled = !isLoading
                             ) {
                                 Icon(
-                                    imageVector        = Icons.Filled.AttachFile,
+                                    imageVector = Icons.Filled.AttachFile,
                                     contentDescription = "إرفاق"
                                 )
                             }
 
-                            // ✅ القائمة المنسدلة
                             DropdownMenu(
-                                expanded        = showAttachMenu,
-                                onDismissRequest = { showAttachMenu = false }
+                                expanded = showAttachMenu,
+                                onDismissRequest = {
+                                    showAttachMenu = false
+                                }
                             ) {
 
                                 DropdownMenuItem(
                                     text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             Icon(
-                                                imageVector        = Icons.Filled.Camera,
+                                                imageVector = Icons.Filled.Camera,
                                                 contentDescription = null,
-                                                modifier           = Modifier.size(20.dp)
+                                                modifier = Modifier.size(20.dp)
                                             )
+
                                             Spacer(Modifier.width(10.dp))
+
                                             Text("📷 التقاط صورة بالكاميرا")
                                         }
                                     },
@@ -485,13 +463,17 @@ private fun InputBar(
 
                                 DropdownMenuItem(
                                     text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             Icon(
-                                                imageVector        = Icons.Filled.Image,
+                                                imageVector = Icons.Filled.Image,
                                                 contentDescription = null,
-                                                modifier           = Modifier.size(20.dp)
+                                                modifier = Modifier.size(20.dp)
                                             )
+
                                             Spacer(Modifier.width(10.dp))
+
                                             Text("🖼️ اختيار صورة من المعرض")
                                         }
                                     },
@@ -503,13 +485,17 @@ private fun InputBar(
 
                                 DropdownMenuItem(
                                     text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             Icon(
-                                                imageVector        = Icons.Filled.Description,
+                                                imageVector = Icons.Filled.Description,
                                                 contentDescription = null,
-                                                modifier           = Modifier.size(20.dp)
+                                                modifier = Modifier.size(20.dp)
                                             )
+
                                             Spacer(Modifier.width(10.dp))
+
                                             Text("📄 اختيار ملف")
                                         }
                                     },
@@ -522,28 +508,24 @@ private fun InputBar(
                         }
 
                         OutlinedTextField(
-                            value         = inputText,
+                            value = inputText,
                             onValueChange = onTextChange,
-                            modifier      = Modifier.weight(1f),
-                            placeholder   = {
-                                Text(
-                                    text =
-                                        if (isImageMode) "صف الصورة..."
-                                        else "اكتب رسالة..."
-                                )
+                            modifier = Modifier.weight(1f),
+                            placeholder = {
+                                Text("اكتب رسالة...")
                             },
-                            enabled  = !isLoading,
+                            enabled = !isLoading,
                             maxLines = 5,
-                            shape    = RoundedCornerShape(26.dp),
-                            colors   = androidx.compose.material3
+                            shape = RoundedCornerShape(26.dp),
+                            colors = androidx.compose.material3
                                 .OutlinedTextFieldDefaults.colors(
                                     unfocusedContainerColor =
                                         androidx.compose.ui.graphics.Color.Transparent,
-                                    focusedContainerColor   =
+                                    focusedContainerColor =
                                         androidx.compose.ui.graphics.Color.Transparent,
-                                    unfocusedBorderColor    =
+                                    unfocusedBorderColor =
                                         androidx.compose.ui.graphics.Color.Transparent,
-                                    focusedBorderColor      =
+                                    focusedBorderColor =
                                         androidx.compose.ui.graphics.Color.Transparent
                                 )
                         )
@@ -557,9 +539,9 @@ private fun InputBar(
                     (inputText.isNotBlank() || hasSelectedImage)
 
                 FloatingActionButton(
-                    onClick        = onSend,
-                    modifier       = Modifier.size(50.dp),
-                    shape          = CircleShape,
+                    onClick = onSend,
+                    modifier = Modifier.size(50.dp),
+                    shape = CircleShape,
                     containerColor =
                         if (canSend)
                             MaterialTheme.colorScheme.primary
@@ -568,15 +550,15 @@ private fun InputBar(
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(
-                            modifier    = Modifier.size(21.dp),
+                            modifier = Modifier.size(21.dp),
                             strokeWidth = 2.dp,
-                            color       = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary
                         )
                     } else {
                         Icon(
-                            imageVector        = Icons.Filled.Send,
+                            imageVector = Icons.Filled.Send,
                             contentDescription = "إرسال",
-                            tint               =
+                            tint =
                                 if (canSend)
                                     MaterialTheme.colorScheme.onPrimary
                                 else
@@ -587,56 +569,54 @@ private fun InputBar(
             }
 
             Text(
-                text     =
-                    if (isImageMode)
-                        "يمكنك إرفاق صورة أو كتابة وصف"
-                    else if (hasSelectedImage)
+                text =
+                    if (hasSelectedImage)
                         "الصورة ستُرسل مع رسالتك للتحليل"
                     else
                         "اضغط مطولاً على الرسالة لنسخها",
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp),
-                style    = MaterialTheme.typography.labelSmall,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = 0.55f
+                )
             )
         }
     }
 }
 
-// ============================================================
-// فقاعة التفكير
-// ============================================================
-
 @Composable
 private fun ThinkingBubble() {
     Row(
-        modifier              = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start
     ) {
         Surface(
             shape = RoundedCornerShape(
-                topStart    = 6.dp,
-                topEnd      = 18.dp,
+                topStart = 6.dp,
+                topEnd = 18.dp,
                 bottomStart = 18.dp,
-                bottomEnd   = 18.dp
+                bottomEnd = 18.dp
             ),
             color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Row(
                 modifier = Modifier.padding(
                     horizontal = 16.dp,
-                    vertical   = 12.dp
+                    vertical = 12.dp
                 ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CircularProgressIndicator(
-                    modifier    = Modifier.size(16.dp),
+                    modifier = Modifier.size(16.dp),
                     strokeWidth = 2.dp
                 )
+
                 Spacer(Modifier.width(9.dp))
+
                 Text(
-                    text  = "جاري التفكير...",
+                    text = "جاري التفكير...",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -644,10 +624,6 @@ private fun ThinkingBubble() {
         }
     }
 }
-
-// ============================================================
-// فقاعة الرسالة
-// ============================================================
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -666,53 +642,62 @@ private fun MessageBubble(
     }
 
     Column(
-        modifier            = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalAlignment =
             if (isUser) Alignment.End
             else Alignment.Start
     ) {
         Surface(
             modifier = Modifier
-                .widthIn(max = if (isUser) 320.dp else 360.dp)
+                .widthIn(
+                    max = if (isUser) 320.dp else 360.dp
+                )
                 .combinedClickable(
-                    onClick     = {},
+                    onClick = {},
                     onLongClick = {
                         onCopy(message.content)
                         showCopied = true
                     }
                 ),
             shape = RoundedCornerShape(
-                topStart    = if (isUser) 18.dp else 6.dp,
-                topEnd      = if (isUser) 6.dp  else 18.dp,
+                topStart = if (isUser) 18.dp else 6.dp,
+                topEnd = if (isUser) 6.dp else 18.dp,
                 bottomStart = 18.dp,
-                bottomEnd   = 18.dp
+                bottomEnd = 18.dp
             ),
             color =
-                if (isUser) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surfaceVariant
+                if (isUser)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.surfaceVariant
         ) {
             Column(
                 modifier = Modifier.padding(
                     horizontal = 14.dp,
-                    vertical   = 11.dp
+                    vertical = 11.dp
                 )
             ) {
                 Text(
-                    text  = message.content,
+                    text = message.content,
                     style = MaterialTheme.typography.bodyLarge,
                     color =
-                        if (isUser) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                        if (isUser)
+                            MaterialTheme.colorScheme.onPrimary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 if (showCopied) {
                     Spacer(Modifier.size(5.dp))
+
                     Text(
-                        text  = "✓ تم النسخ",
+                        text = "✓ تم النسخ",
                         style = MaterialTheme.typography.labelSmall,
                         color =
                             if (isUser)
-                                MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                MaterialTheme.colorScheme.onPrimary.copy(
+                                    alpha = 0.7f
+                                )
                             else
                                 MaterialTheme.colorScheme.primary
                     )
@@ -721,10 +706,6 @@ private fun MessageBubble(
         }
     }
 }
-
-// ============================================================
-// رسالة الخطأ
-// ============================================================
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -736,31 +717,36 @@ private fun ErrorMessage(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .padding(
+                horizontal = 10.dp,
+                vertical = 4.dp
+            )
             .combinedClickable(
-                onClick     = {},
+                onClick = {},
                 onLongClick = onCopy
             ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
+            containerColor =
+                MaterialTheme.colorScheme.errorContainer
         ),
         shape = RoundedCornerShape(14.dp)
     ) {
         Row(
-            modifier          = Modifier.padding(10.dp),
+            modifier = Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text     = error,
+                text = error,
                 modifier = Modifier.weight(1f),
-                style    = MaterialTheme.typography.bodySmall,
-                color    = MaterialTheme.colorScheme.onErrorContainer
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
+
             IconButton(onClick = onDismiss) {
                 Icon(
-                    imageVector        = Icons.Filled.Close,
+                    imageVector = Icons.Filled.Close,
                     contentDescription = "إغلاق",
-                    tint               = MaterialTheme.colorScheme.onErrorContainer
+                    tint = MaterialTheme.colorScheme.onErrorContainer
                 )
             }
         }
