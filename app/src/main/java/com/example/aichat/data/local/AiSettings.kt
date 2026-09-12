@@ -200,6 +200,13 @@ var customModel: String
     set(value) = prefs.edit()
         .putString("custom_model", value.trim())
         .apply()
+        // Web
+
+var webPlatform: String
+    get() = prefs.getString("web_platform", "chatgpt") ?: "chatgpt"
+    set(value) = prefs.edit()
+        .putString("web_platform", value.trim())
+        .apply()
 
 // Helpers
 
