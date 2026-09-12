@@ -15,122 +15,71 @@ import com.example.aichat.data.local.AiSettings
 import com.example.aichat.ui.screens.ChatScreen
 import com.example.aichat.ui.screens.ConversationsScreen
 import com.example.aichat.ui.screens.SettingsScreen
+import com.example.aichat.ui.screens.WebScreen
 import com.example.aichat.ui.theme.AiChatTheme
 import com.example.aichat.ui.viewmodel.ChatViewModel
 
 class MainActivity : ComponentActivity() {
 
-    override fun onCreate(
-        savedInstanceState: Bundle?
-    ) {
+    override fun onCreate(savedInstanceState: Bundle?) {
 
         super.onCreate(savedInstanceState)
-
         enableEdgeToEdge()
 
         setContent {
 
             AiChatTheme {
 
-                Surface(
-                    modifier =
-                        Modifier.fillMaxSize()
-                ) {
+                Surface(modifier = Modifier.fillMaxSize()) {
 
-                    val navController =
-                        rememberNavController()
-
-                    val viewModel: ChatViewModel =
-                        viewModel()
-
-                    val settings =
-                        AiSettings(this)
+                    val navController = rememberNavController()
+                    val viewModel: ChatViewModel = viewModel()
+                    val settings = AiSettings(this)
 
                     NavHost(
-
-                        navController =
-                            navController,
-
-                        startDestination =
-                            "conversations"
-
+                        navController = navController,
+                        startDestination = "conversations"
                     ) {
 
-                        composable(
-                            "conversations"
-                        ) {
-
+                        composable("conversations") {
                             ConversationsScreen(
-
-                                viewModel =
-                                    viewModel,
-
-                                onOpenChat = {
-                                    conversationId ->
-
-                                    viewModel
-                                        .openConversation(
-                                            conversationId
-                                        )
-
-                                    navController.navigate(
-                                        "chat"
-                                    )
+                                viewModel = viewModel,
+                                onOpenChat = { conversationId ->
+                                    viewModel.openConversation(conversationId)
+                                    navController.navigate("chat")
                                 },
-
                                 onNewChat = {
-
-                                    viewModel
-                                        .newConversation()
-
-                                    navController.navigate(
-                                        "chat"
-                                    )
+                                    viewModel.newConversation()
+                                    navController.navigate("chat")
                                 },
-
                                 onSettings = {
-
-                                    navController.navigate(
-                                        "settings"
-                                    )
+                                    navController.navigate("settings")
+                                },
+                                onOpenWeb = {
+                                    navController.navigate("web")
                                 }
                             )
                         }
 
-                        composable(
-                            "chat"
-                        ) {
-
+                        composable("chat") {
                             ChatScreen(
-
-                                viewModel =
-                                    viewModel,
-
-                                settings =
-                                    settings,
-
-                                onBack = {
-
-                                    navController
-                                        .popBackStack()
-                                }
+                                viewModel = viewModel,
+                                settings = settings,
+                                onBack = { navController.popBackStack() }
                             )
                         }
 
-                        composable(
-                            "settings"
-                        ) {
-
+                        composable("settings") {
                             SettingsScreen(
+                                settings = settings,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
 
-                                settings =
-                                    settings,
-
-                                onBack = {
-
-                                    navController
-                                        .popBackStack()
-                                }
+                        composable("web") {
+                            WebScreen(
+                                platform = settings.webPlatform,
+                                onBack = { navController.popBackStack() }
                             )
                         }
                     }
