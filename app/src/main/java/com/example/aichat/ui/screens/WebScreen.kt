@@ -3,14 +3,15 @@ package com.example.aichat.ui.screens
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -27,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,6 +40,7 @@ fun WebScreen(
     val platformInfo = webPlatforms[platform] ?: webPlatforms["chatgpt"]!!
     var isLoading by remember { mutableStateOf(true) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var statusText by remember { mutableStateOf("جاري التحميل...") }
 
     Column(modifier = Modifier.fillMaxSize()) {
 
@@ -51,6 +52,12 @@ fun WebScreen(
                 }
             },
             actions = {
+                Text(
+                    text = statusText,
+                    modifier = Modifier,
+                    style = androidx.compose.material3.MaterialTheme
+                        .typography.bodySmall
+                )
                 IconButton(onClick = { webViewRef?.reload() }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
                 }
@@ -84,9 +91,23 @@ fun WebScreen(
                             displayZoomControls = false
                             loadWithOverviewMode = true
                             useWideViewPort = true
+                            mixedContentMode =
+                                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         }
 
                         cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onProgressChanged(
+                                view: WebView?,
+                                newProgress: Int
+                            ) {
+                                statusText = "$newProgress%"
+                                if (newProgress == 100) {
+                                    statusText = "✓"
+                                }
+                            }
+                        }
 
                         webViewClient = object : WebViewClient() {
 
@@ -96,6 +117,7 @@ fun WebScreen(
                                 favicon: Bitmap?
                             ) {
                                 isLoading = true
+                                statusText = "جاري..."
                             }
 
                             override fun onPageFinished(
@@ -103,7 +125,22 @@ fun WebScreen(
                                 url: String?
                             ) {
                                 isLoading = false
+                                statusText = "✓ ${url?.take(30)}"
                                 CookieManager.getInstance().flush()
+                            }
+
+                            override fun onReceivedError(
+                                view: WebView?,
+                                errorCode: Int,
+                                description: String?,
+                                failingUrl: String?
+                            ) {
+                                statusText = "خطأ $errorCode"
+                                Toast.makeText(
+                                    view?.context,
+                                    "خطأ $errorCode: $description",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
                         }
 
