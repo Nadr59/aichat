@@ -203,11 +203,7 @@ var customModel: String
         // Web
 
 var webPlatform: String
-    get() = prefs.getString("web_platform", "chatgpt") ?: "chatgpt"
-    set(value) = prefs.edit()
-        .putString("web_platform", value.trim())
-        .apply()
-
+    get() = prefs.getString("web_platform", "huggingchat") ?: "huggingchat"
 // Helpers
 
 fun getActiveKey(): String {
