@@ -1,12 +1,16 @@
 package com.example.aichat.ui.screens
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -21,7 +25,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,63 +57,69 @@ fun WebScreen(
             }
         )
 
-        if (isLoading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxSize().then(Modifier.fillMaxSize()))
-        }
+        Box(modifier = Modifier.fillMaxSize()) {
 
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { context ->
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
 
-                val cookieManager = CookieManager.getInstance()
-                cookieManager.setAcceptCookie(true)
-                cookieManager.setAcceptThirdPartyCookies(
-                    WebView(context), true
-                )
+                    val cookieManager = CookieManager.getInstance()
+                    cookieManager.setAcceptCookie(true)
 
-                WebView(context).apply {
+                    WebView(context).apply {
 
-                    webViewRef = this
+                        webViewRef = this
 
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        databaseEnabled = true
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                        userAgentString =
-                            "Mozilla/5.0 (Linux; Android 10; Redmi 8) " +
-                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                            "Chrome/124.0.0.0 Mobile Safari/537.36"
-                        setSupportZoom(true)
-                        builtInZoomControls = true
-                        displayZoomControls = false
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                    }
-
-                    webViewClient = object : WebViewClient() {
-
-                        override fun onPageStarted(
-                            view: WebView?,
-                            url: String?,
-                            favicon: android.graphics.Bitmap?
-                        ) {
-                            isLoading = true
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            databaseEnabled = true
+                            cacheMode = WebSettings.LOAD_DEFAULT
+                            userAgentString =
+                                "Mozilla/5.0 (Linux; Android 10; Redmi 8) " +
+                                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                                "Chrome/124.0.0.0 Mobile Safari/537.36"
+                            setSupportZoom(true)
+                            builtInZoomControls = true
+                            displayZoomControls = false
+                            loadWithOverviewMode = true
+                            useWideViewPort = true
                         }
 
-                        override fun onPageFinished(
-                            view: WebView?,
-                            url: String?
-                        ) {
-                            isLoading = false
-                            CookieManager.getInstance().flush()
-                        }
-                    }
+                        cookieManager.setAcceptThirdPartyCookies(this, true)
 
-                    loadUrl(platformInfo.url)
+                        webViewClient = object : WebViewClient() {
+
+                            override fun onPageStarted(
+                                view: WebView?,
+                                url: String?,
+                                favicon: Bitmap?
+                            ) {
+                                isLoading = true
+                            }
+
+                            override fun onPageFinished(
+                                view: WebView?,
+                                url: String?
+                            ) {
+                                isLoading = false
+                                CookieManager.getInstance().flush()
+                            }
+                        }
+
+                        loadUrl(platformInfo.url)
+                    }
                 }
+            )
+
+            if (isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                )
             }
-        )
+        }
     }
 }
 
