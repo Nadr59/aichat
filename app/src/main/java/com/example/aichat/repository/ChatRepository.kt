@@ -3,8 +3,12 @@ package com.example.aichat.repository
 import android.content.Context
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
+import com.example.aichat.data.model.ModelInfo
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -14,11 +18,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import com.example.aichat.data.model.ModelInfo
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 
 class ChatRepository(context: Context) {
 
@@ -30,25 +29,11 @@ class ChatRepository(context: Context) {
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    data class ImageResult(
-        val url: String? = null,
-        val base64: String? = null
-    )
-
-    // ============================================================
-    // عداد طلبات Custom
-    // ============================================================
-
     private val _customRequestCount = MutableStateFlow(0)
     val customRequestCount: StateFlow<Int> = _customRequestCount.asStateFlow()
 
-    // ============================================================
-    // حدود النماذج
-    // ============================================================
-
     private fun getMaxHistory(provider: String, model: String): Int = when {
         provider == "groq" -> 6
-        provider == "horde" -> 4
         provider == "mistral" -> 6
         provider == "openrouter" && model.contains(":free") -> 6
         else -> 10
@@ -56,15 +41,10 @@ class ChatRepository(context: Context) {
 
     private fun getMaxTokens(provider: String, model: String): Int = when {
         provider == "groq" -> 2048
-        provider == "horde" -> 512
         provider == "mistral" -> 2048
         provider == "openrouter" && model.contains(":free") -> 2048
         else -> 4096
     }
-
-    // ============================================================
-    // جلب النماذج ديناميكيًا
-    // ============================================================
 
     suspend fun getAvailableModels(
         provider: String,
@@ -73,34 +53,33 @@ class ChatRepository(context: Context) {
 
         when (provider.lowercase().trim()) {
             "gemini" -> getGeminiModels()
-            "openrouter" -> getOpenRouterModels(forImages)
+            "openrouter" -> getOpenRouterModels()
             "openai" -> getOpenAIModels()
             "mistral" -> getMistralModels()
             "groq" -> getGroqModels()
             "nvidia" -> getNvidiaModels()
-            "huggingface", "hugging face", "hf" -> getHuggingFaceModels()
-            "horde" -> getHordeModels(forImages)
+            "huggingface",
+            "hugging face",
+            "hf" -> getHuggingFaceModels()
 
-            // Ollama محلي ولا يحتاج جلب قائمة نماذج من الإنترنت
             "ollama" -> emptyList()
 
             else -> emptyList()
         }
     }
 
-    // ============================================================
-    // Gemini Models
-    // ============================================================
-
     private fun getGeminiModels(): List<ModelInfo> {
 
         val apiKey = settings.geminiKey.trim()
-        if (apiKey.isBlank()) throw IOException("Gemini: أدخل API Key أولاً")
+
+        if (apiKey.isBlank()) {
+            throw IOException("Gemini: أدخل API Key أولاً")
+        }
 
         val request = Request.Builder()
             .url(
                 "https://generativelanguage.googleapis.com/v1beta/models" +
-                        "?key=$apiKey&pageSize=100"
+                    "?key=$apiKey&pageSize=100"
             )
             .get()
             .build()
@@ -108,26 +87,40 @@ class ChatRepository(context: Context) {
         client.newCall(request).execute().use { response ->
 
             val body = response.body?.string().orEmpty()
+
             if (!response.isSuccessful) {
-                throw IOException("Gemini ${response.code}: ${body.take(300)}")
+                throw IOException(
+                    "Gemini ${response.code}: ${body.take(300)}"
+                )
             }
 
             val root = JSONObject(body)
-            val models = root.optJSONArray("models") ?: return emptyList()
+            val models = root.optJSONArray("models")
+                ?: return emptyList()
+
             val result = mutableListOf<ModelInfo>()
 
             for (i in 0 until models.length()) {
 
                 val obj = models.optJSONObject(i) ?: continue
-                val name = obj.optString("name").removePrefix("models/")
-                val displayName = obj.optString("displayName").ifBlank { name }
-                val methods = obj.optJSONArray("supportedGenerationMethods")
+                val name = obj.optString("name")
+                    .removePrefix("models/")
+
+                val displayName =
+                    obj.optString("displayName")
+                        .ifBlank { name }
+
+                val methods =
+                    obj.optJSONArray("supportedGenerationMethods")
 
                 var supportsGenerateContent = false
 
                 if (methods != null) {
                     for (j in 0 until methods.length()) {
-                        if (methods.optString(j).equals("generateContent", true)) {
+                        if (
+                            methods.optString(j)
+                                .equals("generateContent", true)
+                        ) {
                             supportsGenerateContent = true
                             break
                         }
@@ -142,17 +135,19 @@ class ChatRepository(context: Context) {
                     id = name,
                     name = displayName,
                     provider = "gemini",
-                    isFree = lower.contains("flash") || lower.contains("lite"),
+                    isFree =
+                        lower.contains("flash") ||
+                        lower.contains("lite"),
                     supportsVision =
                         lower.contains("flash") ||
                         lower.contains("pro") ||
                         lower.contains("image"),
-                    supportsImageGeneration = lower.contains("image"),
                     recommended =
                         lower.contains("3.8") ||
                         lower.contains("3.7") ||
                         lower.contains("3.6"),
-                    contextLength = obj.optLong("inputTokenLimit", 0L)
+                    contextLength =
+                        obj.optLong("inputTokenLimit", 0L)
                 )
             }
 
@@ -166,147 +161,168 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // OpenRouter Models
-    // ============================================================
+    private fun getOpenRouterModels(): List<ModelInfo> {
 
-    private fun getOpenRouterModels(forImages: Boolean): List<ModelInfo> {
-
-        val url = if (forImages) {
-            "https://openrouter.ai/api/v1/models?output_modalities=image"
-        } else {
-            "https://openrouter.ai/api/v1/models?output_modalities=text"
-        }
-
-        val requestBuilder = Request.Builder().url(url).get()
+        val requestBuilder = Request.Builder()
+            .url(
+                "https://openrouter.ai/api/v1/models?output_modalities=text"
+            )
+            .get()
 
         val apiKey = settings.openrouterKey.trim()
+
         if (apiKey.isNotBlank()) {
-            requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+            requestBuilder.addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
         }
 
-        client.newCall(requestBuilder.build()).execute().use { response ->
+        client.newCall(requestBuilder.build())
+            .execute()
+            .use { response ->
 
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IOException("OpenRouter ${response.code}: ${body.take(300)}")
+                val body = response.body?.string().orEmpty()
+
+                if (!response.isSuccessful) {
+                    throw IOException(
+                        "OpenRouter ${response.code}: ${body.take(300)}"
+                    )
+                }
+
+                val data =
+                    JSONObject(body).optJSONArray("data")
+                        ?: return emptyList()
+
+                val result = mutableListOf<ModelInfo>()
+
+                for (i in 0 until data.length()) {
+
+                    val obj = data.optJSONObject(i) ?: continue
+                    val id = obj.optString("id").trim()
+
+                    if (id.isBlank()) continue
+
+                    val name =
+                        obj.optString("name")
+                            .ifBlank { id }
+
+                    val architecture =
+                        obj.optJSONObject("architecture")
+
+                    val supportsVision =
+                        jsonArrayContains(
+                            architecture?.optJSONArray(
+                                "input_modalities"
+                            ),
+                            "image"
+                        )
+
+                    val pricing =
+                        obj.optJSONObject("pricing")
+
+                    val promptPrice =
+                        pricing?.optString("prompt", "1") ?: "1"
+
+                    val completionPrice =
+                        pricing?.optString("completion", "1") ?: "1"
+
+                    val requestPrice =
+                        pricing?.optString("request", "1") ?: "1"
+
+                    val isFree =
+                        isZeroPrice(promptPrice) &&
+                        isZeroPrice(completionPrice) &&
+                        isZeroPrice(requestPrice)
+
+                    val lower = "$id $name".lowercase()
+
+                    val recommended =
+                        lower.contains("gemini-3") ||
+                        lower.contains("gpt-5") ||
+                        lower.contains("claude") ||
+                        lower.contains("qwen3") ||
+                        lower.contains("nemotron") ||
+                        lower.contains("deepseek")
+
+                    result += ModelInfo(
+                        id = id,
+                        name = name,
+                        provider = "openrouter",
+                        isFree = isFree,
+                        supportsVision = supportsVision,
+                        recommended = recommended,
+                        contextLength =
+                            obj.optLong("context_length", 0L)
+                    )
+                }
+
+                return result
+                    .distinctBy { it.id }
+                    .sortedWith(
+                        compareByDescending<ModelInfo> { it.recommended }
+                            .thenByDescending { it.isFree }
+                            .thenBy { it.name }
+                    )
             }
-
-            val data = JSONObject(body).optJSONArray("data") ?: return emptyList()
-            val result = mutableListOf<ModelInfo>()
-
-            for (i in 0 until data.length()) {
-
-                val obj = data.optJSONObject(i) ?: continue
-                val id = obj.optString("id").trim()
-                if (id.isBlank()) continue
-
-                val name = obj.optString("name").ifBlank { id }
-                val architecture = obj.optJSONObject("architecture")
-
-                val inputModalities =
-                    architecture?.optJSONArray("input_modalities")
-
-                val outputModalities =
-                    architecture?.optJSONArray("output_modalities")
-
-                val supportsVision =
-                    jsonArrayContains(inputModalities, "image")
-
-                val supportsImageGeneration =
-                    jsonArrayContains(outputModalities, "image")
-
-                val pricing = obj.optJSONObject("pricing")
-
-                val promptPrice =
-                    pricing?.optString("prompt", "1") ?: "1"
-
-                val completionPrice =
-                    pricing?.optString("completion", "1") ?: "1"
-
-                val requestPrice =
-                    pricing?.optString("request", "1") ?: "1"
-
-                val imagePrice =
-                    pricing?.optString("image", "0") ?: "0"
-
-                val isFree =
-                    isZeroPrice(promptPrice) &&
-                    isZeroPrice(completionPrice) &&
-                    isZeroPrice(requestPrice) &&
-                    (!supportsImageGeneration || isZeroPrice(imagePrice))
-
-                val lower = "$id $name".lowercase()
-
-                val recommended =
-                    lower.contains("gemini-3") ||
-                    lower.contains("gpt-5") ||
-                    lower.contains("claude") ||
-                    lower.contains("qwen3") ||
-                    lower.contains("nemotron") ||
-                    lower.contains("deepseek")
-
-                result += ModelInfo(
-                    id = id,
-                    name = name,
-                    provider = "openrouter",
-                    isFree = isFree,
-                    supportsVision = supportsVision,
-                    supportsImageGeneration = supportsImageGeneration,
-                    recommended = recommended,
-                    contextLength = obj.optLong("context_length", 0L)
-                )
-            }
-
-            return result
-                .distinctBy { it.id }
-                .sortedWith(
-                    compareByDescending<ModelInfo> { it.recommended }
-                        .thenByDescending { it.isFree }
-                        .thenBy { it.name }
-                )
-        }
     }
-
-    // ============================================================
-    // Mistral Models
-    // ============================================================
 
     private fun getMistralModels(): List<ModelInfo> {
 
         val apiKey = settings.mistralKey.trim()
-        if (apiKey.isBlank()) throw IOException("Mistral: أدخل API Key أولاً")
+
+        if (apiKey.isBlank()) {
+            throw IOException("Mistral: أدخل API Key أولاً")
+        }
 
         val request = Request.Builder()
             .url("https://api.mistral.ai/v1/models")
             .get()
-            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
             .build()
 
         client.newCall(request).execute().use { response ->
 
             val body = response.body?.string().orEmpty()
+
             if (!response.isSuccessful) {
-                throw IOException("Mistral ${response.code}: ${body.take(300)}")
+                throw IOException(
+                    "Mistral ${response.code}: ${body.take(300)}"
+                )
             }
 
-            val data = JSONObject(body).optJSONArray("data") ?: return emptyList()
+            val data =
+                JSONObject(body).optJSONArray("data")
+                    ?: return emptyList()
+
             val result = mutableListOf<ModelInfo>()
 
             for (i in 0 until data.length()) {
 
                 val obj = data.optJSONObject(i) ?: continue
                 val id = obj.optString("id")
+
                 if (id.isBlank()) continue
 
-                val capabilities = obj.optJSONObject("capabilities")
+                val capabilities =
+                    obj.optJSONObject("capabilities")
+
                 val chat =
-                    capabilities?.optBoolean("completion_chat", false) ?: false
+                    capabilities?.optBoolean(
+                        "completion_chat",
+                        false
+                    ) ?: false
 
                 if (!chat) continue
 
                 val vision =
-                    capabilities?.optBoolean("vision", false) ?: false
+                    capabilities?.optBoolean(
+                        "vision",
+                        false
+                    ) ?: false
 
                 val lower = id.lowercase()
 
@@ -323,7 +339,10 @@ class ChatRepository(context: Context) {
                         lower.contains("small") ||
                         lower.contains("ministral"),
                     contextLength =
-                        obj.optLong("max_context_length", 0L)
+                        obj.optLong(
+                            "max_context_length",
+                            0L
+                        )
                 )
             }
 
@@ -337,22 +356,27 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // Hugging Face Models
-    // ============================================================
-
     private fun getHuggingFaceModels(): List<ModelInfo> {
 
         val apiKey = settings.huggingfaceKey.trim()
+
         if (apiKey.isBlank()) {
-            throw IOException("Hugging Face: أدخل API Token أولاً")
+            throw IOException(
+                "Hugging Face: أدخل API Token أولاً"
+            )
         }
 
         val request = Request.Builder()
             .url("https://router.huggingface.co/v1/models")
             .get()
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Accept", "application/json")
+            .addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
+            .addHeader(
+                "Accept",
+                "application/json"
+            )
             .build()
 
         client.newCall(request).execute().use { response ->
@@ -398,8 +422,11 @@ class ChatRepository(context: Context) {
 
             for (i in 0 until data.length()) {
 
-                val model = data.optJSONObject(i) ?: continue
-                val id = model.optString("id").trim()
+                val model =
+                    data.optJSONObject(i) ?: continue
+
+                val id =
+                    model.optString("id").trim()
 
                 if (id.isBlank()) continue
 
@@ -413,13 +440,9 @@ class ChatRepository(context: Context) {
 
                 val supportsVision =
                     jsonArrayContains(
-                        architecture?.optJSONArray("input_modalities"),
-                        "image"
-                    )
-
-                val supportsImageGeneration =
-                    jsonArrayContains(
-                        architecture?.optJSONArray("output_modalities"),
+                        architecture?.optJSONArray(
+                            "input_modalities"
+                        ),
                         "image"
                     )
 
@@ -441,7 +464,10 @@ class ChatRepository(context: Context) {
 
                         if (
                             provider.optString("status")
-                                .equals("live", ignoreCase = true)
+                                .equals(
+                                    "live",
+                                    ignoreCase = true
+                                )
                         ) {
 
                             hasLiveProvider = true
@@ -487,8 +513,6 @@ class ChatRepository(context: Context) {
                     provider = "huggingface",
                     isFree = isFree,
                     supportsVision = supportsVision,
-                    supportsImageGeneration =
-                        supportsImageGeneration,
                     recommended = recommended,
                     contextLength = contextLength
                 )
@@ -504,25 +528,27 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // NVIDIA Models
-    // ============================================================
-
-    private fun getNvidiaModels(
-        forImages: Boolean = false
-    ): List<ModelInfo> {
+    private fun getNvidiaModels(): List<ModelInfo> {
 
         val apiKey = settings.nvidiaKey.trim()
 
         if (apiKey.isBlank()) {
-            throw IOException("NVIDIA: أدخل API Key أولاً")
+            throw IOException(
+                "NVIDIA: أدخل API Key أولاً"
+            )
         }
 
         val request = Request.Builder()
             .url("https://integrate.api.nvidia.com/v1/models")
             .get()
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Accept", "application/json")
+            .addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
+            .addHeader(
+                "Accept",
+                "application/json"
+            )
             .build()
 
         client.newCall(request).execute().use { response ->
@@ -544,7 +570,9 @@ class ChatRepository(context: Context) {
             for (i in 0 until data.length()) {
 
                 val obj = data.optJSONObject(i) ?: continue
-                val id = obj.optString("id").trim()
+
+                val id =
+                    obj.optString("id").trim()
 
                 if (id.isBlank()) continue
 
@@ -563,7 +591,9 @@ class ChatRepository(context: Context) {
                     lower.contains("content-safety") ||
                     lower.contains("moderation") ||
                     lower.contains("pii")
-                ) continue
+                ) {
+                    continue
+                }
 
                 val supportsVision =
                     lower.contains("vision") ||
@@ -593,15 +623,12 @@ class ChatRepository(context: Context) {
                     lower.contains("mistral") ||
                     lower.contains("deepseek")
 
-                if (forImages && !supportsVision) continue
-
                 result += ModelInfo(
                     id = id,
                     name = name,
                     provider = "nvidia",
                     isFree = false,
                     supportsVision = supportsVision,
-                    supportsImageGeneration = false,
                     recommended = recommended,
                     contextLength =
                         obj.optLong(
@@ -628,22 +655,23 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // Groq Models
-    // ============================================================
-
     private fun getGroqModels(): List<ModelInfo> {
 
         val apiKey = settings.groqKey.trim()
 
         if (apiKey.isBlank()) {
-            throw IOException("Groq: أدخل API Key أولاً")
+            throw IOException(
+                "Groq: أدخل API Key أولاً"
+            )
         }
 
         val request = Request.Builder()
             .url("https://api.groq.com/openai/v1/models")
             .get()
-            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
             .build()
 
         client.newCall(request).execute().use { response ->
@@ -674,7 +702,9 @@ class ChatRepository(context: Context) {
                 if (
                     lower.contains("whisper") ||
                     lower.contains("guard")
-                ) continue
+                ) {
+                    continue
+                }
 
                 result += ModelInfo(
                     id = id,
@@ -706,89 +736,14 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // Horde Models
-    // ============================================================
-
-    private fun getHordeModels(
-        forImages: Boolean
-    ): List<ModelInfo> {
-
-        val request = Request.Builder()
-            .url("https://aihorde.net/api/v2/status/models")
-            .get()
-            .addHeader(
-                "Client-Agent",
-                "AiChat:1.0:anonymous"
-            )
-            .build()
-
-        client.newCall(request).execute().use { response ->
-
-            val body = response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-                throw IOException(
-                    "Horde ${response.code}: ${body.take(300)}"
-                )
-            }
-
-            val array = JSONArray(body)
-            val result = mutableListOf<ModelInfo>()
-
-            for (i in 0 until array.length()) {
-
-                val obj = array.optJSONObject(i) ?: continue
-                val name = obj.optString("name").trim()
-
-                if (name.isBlank()) continue
-
-                val lower = name.lowercase()
-
-                val imageModel =
-                    lower.contains("stable diffusion") ||
-                    lower.contains("sdxl") ||
-                    lower.contains("flux") ||
-                    lower.contains("dreamshaper") ||
-                    lower.contains("realistic")
-
-                if (forImages != imageModel) continue
-
-                result += ModelInfo(
-                    id = name,
-                    name = name,
-                    provider = "horde",
-                    isFree = true,
-                    supportsVision = false,
-                    supportsImageGeneration = imageModel,
-                    recommended =
-                        lower.contains("flux") ||
-                        lower.contains("sdxl") ||
-                        lower.contains("stable diffusion")
-                )
-            }
-
-            return result
-                .distinctBy { it.id }
-                .sortedWith(
-                    compareByDescending<ModelInfo> {
-                        it.recommended
-                    }
-                        .thenBy { it.name }
-                )
-        }
-    }
-
-    // ============================================================
-    // OpenAI Models
-    // ============================================================
-
     private fun getOpenAIModels(): List<ModelInfo> {
 
         val apiKey = settings.openaiKey.trim()
 
         if (apiKey.isBlank()) {
-            throw IOException("OpenAI: أدخل API Key أولاً")
+            throw IOException(
+                "OpenAI: أدخل API Key أولاً"
+            )
         }
 
         val request = Request.Builder()
@@ -857,10 +812,6 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // Helper Functions
-    // ============================================================
-
     private fun jsonArrayContains(
         array: JSONArray?,
         value: String
@@ -887,10 +838,6 @@ class ChatRepository(context: Context) {
             ?: false
     }
 
-    // ============================================================
-    // Hugging Face - Send Message
-    // ============================================================
-
     private fun sendHuggingFace(
         history: List<Message>,
         userMessage: String
@@ -902,7 +849,7 @@ class ChatRepository(context: Context) {
         if (apiKey.isBlank()) {
             throw IOException(
                 "Hugging Face: أدخل API Token\n" +
-                        "من: huggingface.co/settings/tokens"
+                    "من: huggingface.co/settings/tokens"
             )
         }
 
@@ -914,25 +861,31 @@ class ChatRepository(context: Context) {
 
         val messages = JSONArray()
 
-        messages.put(JSONObject().apply {
-            put("role", "system")
-            put(
-                "content",
-                "You are a helpful AI assistant."
-            )
-        })
+        messages.put(
+            JSONObject().apply {
+                put("role", "system")
+                put(
+                    "content",
+                    "You are a helpful AI assistant."
+                )
+            }
+        )
 
         history.takeLast(6).forEach { msg ->
-            messages.put(JSONObject().apply {
-                put("role", msg.role)
-                put("content", msg.content)
-            })
+            messages.put(
+                JSONObject().apply {
+                    put("role", msg.role)
+                    put("content", msg.content)
+                }
+            )
         }
 
-        messages.put(JSONObject().apply {
-            put("role", "user")
-            put("content", userMessage)
-        })
+        messages.put(
+            JSONObject().apply {
+                put("role", "user")
+                put("content", userMessage)
+            }
+        )
 
         val requestJson = JSONObject().apply {
             put("model", model)
@@ -969,7 +922,6 @@ class ChatRepository(context: Context) {
             if (!response.isSuccessful) {
 
                 val msg = runCatching {
-
                     val j = JSONObject(body)
 
                     j.optJSONObject("error")
@@ -987,15 +939,15 @@ class ChatRepository(context: Context) {
 
                         403 ->
                             "❌ HuggingFace: لا توجد صلاحية\n" +
-                                    "تأكد من قبول شروط النموذج على " +
-                                    "huggingface.co/$model"
+                                "تأكد من قبول شروط النموذج على " +
+                                "huggingface.co/$model"
 
                         404 ->
                             "❌ HuggingFace: النموذج غير موجود\n$model"
 
                         422 ->
                             "❌ HuggingFace: النموذج لا يدعم المحادثة\n" +
-                                    "جرب نموذجاً آخر"
+                                "جرب نموذجاً آخر"
 
                         429 ->
                             "⚠️ HuggingFace: تجاوزت الحد المجاني"
@@ -1024,10 +976,6 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // إرسال رسالة نصية
-    // ============================================================
-
     suspend fun sendMessage(
         history: List<Message>,
         userMessage: String,
@@ -1054,10 +1002,8 @@ class ChatRepository(context: Context) {
                     imageBase64 = imageBase64,
                     providerName = "OpenRouter",
                     extraHeaders = mapOf(
-                        "HTTP-Referer" to
-                                "https://github.com/",
-                        "X-Title" to
-                                "AiChat"
+                        "HTTP-Referer" to "https://github.com/",
+                        "X-Title" to "AiChat"
                     )
                 )
 
@@ -1110,16 +1056,6 @@ class ChatRepository(context: Context) {
                     providerName = "NVIDIA"
                 )
 
-            "horde" ->
-                sendHordeText(
-                    history,
-                    userMessage
-                )
-
-            // ====================================================
-            // Ollama - محلي على الهاتف عبر Termux
-            // ====================================================
-
             "ollama" ->
                 sendOllama(userMessage)
 
@@ -1141,7 +1077,6 @@ class ChatRepository(context: Context) {
                     userMessage = userMessage,
                     imageBase64 = imageBase64,
                     providerName = "Custom",
-                    // Custom يرسل الصورة دائماً إذا كانت موجودة
                     forceVision = true
                 )
             }
@@ -1152,10 +1087,6 @@ class ChatRepository(context: Context) {
                 )
         }
     }
-
-    // ============================================================
-    // Ollama - اتصال محلي نصي
-    // ============================================================
 
     private fun sendOllama(
         userMessage: String
@@ -1200,10 +1131,9 @@ class ChatRepository(context: Context) {
                 response.body?.string().orEmpty()
 
             if (!response.isSuccessful) {
-
                 throw IOException(
                     "Ollama ${response.code}: " +
-                            body.take(300)
+                        body.take(300)
                 )
             }
 
@@ -1218,7 +1148,7 @@ class ChatRepository(context: Context) {
                 }.getOrElse {
                     throw IOException(
                         "Ollama: استجابة غير صالحة\n" +
-                                body.take(300)
+                            body.take(300)
                     )
                 }
 
@@ -1229,40 +1159,6 @@ class ChatRepository(context: Context) {
             )
         }
     }
-
-    // ============================================================
-    // توليد الصور
-    // ============================================================
-
-    suspend fun generateImage(
-        prompt: String
-    ): ImageResult = withContext(Dispatchers.IO) {
-
-        when (settings.imageProvider.lowercase().trim()) {
-
-            "openai" ->
-                generateImageOpenAI(prompt)
-
-            "openrouter" ->
-                generateImageOpenRouter(prompt)
-
-            "horde" ->
-                generateImageHorde(prompt)
-
-            "custom" ->
-                generateImageCustom(prompt)
-
-            else ->
-                throw IOException(
-                    "مزود صور غير معروف: " +
-                            settings.imageProvider
-                )
-        }
-    }
-
-    // ============================================================
-    // Gemini - Send
-    // ============================================================
 
     private fun sendGemini(
         history: List<Message>,
@@ -1285,7 +1181,7 @@ class ChatRepository(context: Context) {
 
         val endpoint =
             "https://generativelanguage.googleapis.com/v1beta/models/" +
-                    "$model:generateContent?key=$apiKey"
+                "$model:generateContent?key=$apiKey"
 
         val contents = JSONArray()
 
@@ -1320,7 +1216,6 @@ class ChatRepository(context: Context) {
 
             newParts.put(
                 JSONObject().apply {
-
                     put(
                         "inline_data",
                         JSONObject().apply {
@@ -1351,59 +1246,43 @@ class ChatRepository(context: Context) {
             }
         )
 
-        val requestJson =
-            JSONObject().apply {
+        val requestJson = JSONObject().apply {
 
-                put(
-                    "contents",
-                    contents
-                )
+            put("contents", contents)
 
-                put(
-                    "generationConfig",
-                    JSONObject().apply {
+            put(
+                "generationConfig",
+                JSONObject().apply {
+                    put("temperature", 0.7)
+                    put("maxOutputTokens", 8192)
+                    put("topP", 0.95)
+                }
+            )
+
+            put(
+                "safetySettings",
+                JSONArray().apply {
+
+                    listOf(
+                        "HARM_CATEGORY_HARASSMENT",
+                        "HARM_CATEGORY_HATE_SPEECH",
+                        "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "HARM_CATEGORY_DANGEROUS_CONTENT"
+                    ).forEach { category ->
+
                         put(
-                            "temperature",
-                            0.7
-                        )
-                        put(
-                            "maxOutputTokens",
-                            8192
-                        )
-                        put(
-                            "topP",
-                            0.95
+                            JSONObject().apply {
+                                put("category", category)
+                                put(
+                                    "threshold",
+                                    "BLOCK_ONLY_HIGH"
+                                )
+                            }
                         )
                     }
-                )
-
-                put(
-                    "safetySettings",
-                    JSONArray().apply {
-
-                        listOf(
-                            "HARM_CATEGORY_HARASSMENT",
-                            "HARM_CATEGORY_HATE_SPEECH",
-                            "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                            "HARM_CATEGORY_DANGEROUS_CONTENT"
-                        ).forEach { category ->
-
-                            put(
-                                JSONObject().apply {
-                                    put(
-                                        "category",
-                                        category
-                                    )
-                                    put(
-                                        "threshold",
-                                        "BLOCK_ONLY_HIGH"
-                                    )
-                                }
-                            )
-                        }
-                    }
-                )
-            }
+                }
+            )
+        }
 
         val request = Request.Builder()
             .url(endpoint)
@@ -1507,10 +1386,6 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // Mistral - Send
-    // ============================================================
-
     private fun sendMistral(
         history: List<Message>,
         userMessage: String,
@@ -1558,7 +1433,7 @@ class ChatRepository(context: Context) {
 
         val isVision =
             model.contains("pixtral") ||
-                    model.contains("vision")
+                model.contains("vision")
 
         if (
             imageBase64 != null &&
@@ -1576,14 +1451,8 @@ class ChatRepository(context: Context) {
 
                             put(
                                 JSONObject().apply {
-                                    put(
-                                        "type",
-                                        "text"
-                                    )
-                                    put(
-                                        "text",
-                                        userMessage
-                                    )
+                                    put("type", "text")
+                                    put("text", userMessage)
                                 }
                             )
 
@@ -1616,22 +1485,17 @@ class ChatRepository(context: Context) {
             messages.put(
                 JSONObject().apply {
                     put("role", "user")
-                    put(
-                        "content",
-                        userMessage
-                    )
+                    put("content", userMessage)
                 }
             )
         }
 
-        val requestJson =
-            JSONObject().apply {
-
-                put("model", model)
-                put("messages", messages)
-                put("temperature", 0.7)
-                put("max_tokens", maxTokens)
-            }
+        val requestJson = JSONObject().apply {
+            put("model", model)
+            put("messages", messages)
+            put("temperature", 0.7)
+            put("max_tokens", maxTokens)
+        }
 
         val request = Request.Builder()
             .url(
@@ -1678,7 +1542,7 @@ class ChatRepository(context: Context) {
 
                         429 ->
                             "⚠️ Mistral: تجاوزت حد الطلبات\n" +
-                                    "النموذج: $model"
+                                "النموذج: $model"
 
                         401 ->
                             "❌ Mistral: المفتاح غير صحيح"
@@ -1707,10 +1571,6 @@ class ChatRepository(context: Context) {
             )
         }
     }
-
-    // ============================================================
-    // OpenAI Compatible - Send
-    // ============================================================
 
     private fun sendOpenAICompatible(
         baseUrl: String,
@@ -1783,10 +1643,10 @@ class ChatRepository(context: Context) {
 
         val hasImage =
             imageBase64 != null &&
-                    (
-                            forceVision ||
-                                    supportsVision(cleanModel)
-                            )
+                (
+                    forceVision ||
+                        supportsVision(cleanModel)
+                )
 
         if (hasImage) {
 
@@ -1845,25 +1705,17 @@ class ChatRepository(context: Context) {
             messages.put(
                 JSONObject().apply {
                     put("role", "user")
-                    put(
-                        "content",
-                        userMessage
-                    )
+                    put("content", userMessage)
                 }
             )
         }
 
-        val requestJson =
-            JSONObject().apply {
-
-                put("model", cleanModel)
-                put("messages", messages)
-                put("temperature", 0.7)
-                put(
-                    "max_tokens",
-                    maxTokens
-                )
-            }
+        val requestJson = JSONObject().apply {
+            put("model", cleanModel)
+            put("messages", messages)
+            put("temperature", 0.7)
+            put("max_tokens", maxTokens)
+        }
 
         val requestBuilder =
             Request.Builder()
@@ -1883,8 +1735,8 @@ class ChatRepository(context: Context) {
                     "application/json"
                 )
 
-        extraHeaders.forEach { (k, v) ->
-            requestBuilder.addHeader(k, v)
+        extraHeaders.forEach { (key, value) ->
+            requestBuilder.addHeader(key, value)
         }
 
         client.newCall(
@@ -1963,10 +1815,6 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // supportsVision
-    // ============================================================
-
     private fun supportsVision(
         model: String
     ): Boolean {
@@ -1999,816 +1847,6 @@ class ChatRepository(context: Context) {
             "yi-vl"
         ).any {
             m.contains(it)
-        }
-    }
-
-    // ============================================================
-    // AI Horde — النصوص
-    // ============================================================
-
-    private suspend fun sendHordeText(
-        history: List<Message>,
-        userMessage: String
-    ): String {
-
-        val apiKey =
-            settings.hordeKey.ifBlank {
-                "0000000000"
-            }
-
-        val model =
-            settings.hordeTextModel.trim()
-
-        val sb = StringBuilder()
-
-        sb.append(
-            "### System\n" +
-                    "You are a helpful AI assistant.\n\n"
-        )
-
-        history.takeLast(4).forEach { msg ->
-
-            when (msg.role) {
-
-                "user" ->
-                    sb.append(
-                        "### Human\n" +
-                                "${msg.content}\n\n"
-                    )
-
-                "assistant" ->
-                    sb.append(
-                        "### Assistant\n" +
-                                "${msg.content}\n\n"
-                    )
-            }
-        }
-
-        sb.append(
-            "### Human\n" +
-                    "$userMessage\n\n" +
-                    "### Assistant\n"
-        )
-
-        val requestJson =
-            JSONObject().apply {
-
-                put(
-                    "prompt",
-                    sb.toString()
-                )
-
-                put(
-                    "models",
-                    JSONArray().apply {
-                        put(model)
-                    }
-                )
-
-                put(
-                    "params",
-                    JSONObject().apply {
-                        put(
-                            "max_length",
-                            512
-                        )
-                        put(
-                            "max_context_length",
-                            2048
-                        )
-                        put(
-                            "temperature",
-                            0.7
-                        )
-                        put(
-                            "top_p",
-                            0.9
-                        )
-                        put(
-                            "rep_pen",
-                            1.1
-                        )
-                    }
-                )
-
-                put(
-                    "trusted_workers",
-                    false
-                )
-
-                put(
-                    "slow_workers",
-                    true
-                )
-            }
-
-        val request = Request.Builder()
-            .url(
-                "https://aihorde.net/api/v2/generate/text/async"
-            )
-            .post(
-                requestJson.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .addHeader(
-                "apikey",
-                apiKey
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .addHeader(
-                "Client-Agent",
-                "AiChat:1.0:anonymous"
-            )
-            .build()
-
-        val jobId =
-            client.newCall(request)
-                .execute()
-                .use { response ->
-
-                    val body =
-                        response.body?.string().orEmpty()
-
-                    if (!response.isSuccessful) {
-                        throw IOException(
-                            "Horde ${response.code}: $body"
-                        )
-                    }
-
-                    JSONObject(body)
-                        .optString("id", "")
-                        .takeIf {
-                            it.isNotBlank()
-                        }
-                        ?: throw IOException(
-                            "Horde: لم يُرجع job_id"
-                        )
-                }
-
-        return pollHordeText(
-            jobId,
-            apiKey
-        )
-    }
-
-    private suspend fun pollHordeText(
-        jobId: String,
-        apiKey: String
-    ): String {
-
-        repeat(60) {
-
-            delay(3000L)
-
-            val req = Request.Builder()
-                .url(
-                    "https://aihorde.net/api/v2/generate/text/status/$jobId"
-                )
-                .get()
-                .addHeader(
-                    "apikey",
-                    apiKey
-                )
-                .addHeader(
-                    "Client-Agent",
-                    "AiChat:1.0:anonymous"
-                )
-                .build()
-
-            val obj =
-                runCatching {
-
-                    client.newCall(req)
-                        .execute()
-                        .use { r ->
-                            JSONObject(
-                                r.body
-                                    ?.string()
-                                    .orEmpty()
-                            )
-                        }
-
-                }.getOrNull()
-                    ?: return@repeat
-
-            if (
-                obj.optBoolean(
-                    "faulted",
-                    false
-                )
-            ) {
-                throw IOException(
-                    "Horde: فشلت المهمة"
-                )
-            }
-
-            if (
-                obj.optBoolean(
-                    "done",
-                    false
-                )
-            ) {
-
-                val text =
-                    obj.optJSONArray(
-                        "generations"
-                    )
-                        ?.optJSONObject(0)
-                        ?.optString(
-                            "text",
-                            ""
-                        )
-                        ?.trim()
-
-                return text?.takeIf {
-                    it.isNotBlank()
-                } ?: throw IOException(
-                    "Horde: النتيجة فارغة"
-                )
-            }
-        }
-
-        throw IOException(
-            "Horde: انتهى الوقت بدون نتيجة"
-        )
-    }
-
-    // ============================================================
-    // AI Horde — الصور
-    // ============================================================
-
-    private suspend fun generateImageHorde(
-        prompt: String
-    ): ImageResult {
-
-        val apiKey =
-            settings.hordeKey.ifBlank {
-                "0000000000"
-            }
-
-        val model =
-            settings.hordeImageModel.trim()
-
-        val requestJson =
-            JSONObject().apply {
-
-                put("prompt", prompt)
-
-                put(
-                    "models",
-                    JSONArray().apply {
-                        put(model)
-                    }
-                )
-
-                put(
-                    "params",
-                    JSONObject().apply {
-                        put("width", 512)
-                        put("height", 512)
-                        put("steps", 20)
-                        put("cfg_scale", 7.5)
-                        put(
-                            "sampler_name",
-                            "k_euler_a"
-                        )
-                        put("n", 1)
-                        put("karras", true)
-                    }
-                )
-
-                put("r2", true)
-                put("shared", false)
-                put("trusted_workers", false)
-                put("slow_workers", true)
-            }
-
-        val request = Request.Builder()
-            .url(
-                "https://aihorde.net/api/v2/generate/async"
-            )
-            .post(
-                requestJson.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .addHeader(
-                "apikey",
-                apiKey
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .addHeader(
-                "Client-Agent",
-                "AiChat:1.0:anonymous"
-            )
-            .build()
-
-        val jobId =
-            client.newCall(request)
-                .execute()
-                .use { response ->
-
-                    val body =
-                        response.body?.string().orEmpty()
-
-                    if (!response.isSuccessful) {
-                        throw IOException(
-                            "Horde Image ${response.code}: $body"
-                        )
-                    }
-
-                    JSONObject(body)
-                        .optString("id", "")
-                        .takeIf {
-                            it.isNotBlank()
-                        }
-                        ?: throw IOException(
-                            "Horde: لم يُرجع job_id"
-                        )
-                }
-
-        return pollHordeImage(
-            jobId,
-            apiKey
-        )
-    }
-
-    private suspend fun pollHordeImage(
-        jobId: String,
-        apiKey: String
-    ): ImageResult {
-
-        repeat(120) {
-
-            delay(5000L)
-
-            val checkReq =
-                Request.Builder()
-                    .url(
-                        "https://aihorde.net/api/v2/generate/check/$jobId"
-                    )
-                    .get()
-                    .addHeader(
-                        "apikey",
-                        apiKey
-                    )
-                    .addHeader(
-                        "Client-Agent",
-                        "AiChat:1.0:anonymous"
-                    )
-                    .build()
-
-            val check =
-                runCatching {
-
-                    client.newCall(checkReq)
-                        .execute()
-                        .use { r ->
-                            JSONObject(
-                                r.body
-                                    ?.string()
-                                    .orEmpty()
-                            )
-                        }
-
-                }.getOrNull()
-                    ?: return@repeat
-
-            if (
-                check.optBoolean(
-                    "faulted",
-                    false
-                )
-            ) {
-                throw IOException(
-                    "Horde: فشل توليد الصورة"
-                )
-            }
-
-            if (
-                !check.optBoolean(
-                    "done",
-                    false
-                )
-            ) {
-                return@repeat
-            }
-
-            val statusReq =
-                Request.Builder()
-                    .url(
-                        "https://aihorde.net/api/v2/generate/status/$jobId"
-                    )
-                    .get()
-                    .addHeader(
-                        "apikey",
-                        apiKey
-                    )
-                    .addHeader(
-                        "Client-Agent",
-                        "AiChat:1.0:anonymous"
-                    )
-                    .build()
-
-            val status =
-                client.newCall(statusReq)
-                    .execute()
-                    .use { r ->
-
-                        val body =
-                            r.body
-                                ?.string()
-                                .orEmpty()
-
-                        if (!r.isSuccessful) {
-                            throw IOException(
-                                "Horde Status ${r.code}: $body"
-                            )
-                        }
-
-                        JSONObject(body)
-                    }
-
-            val img =
-                status.optJSONArray(
-                    "generations"
-                )
-                    ?.optJSONObject(0)
-                    ?.optString(
-                        "img",
-                        ""
-                    )
-                    ?: throw IOException(
-                        "Horde: لا توجد صورة"
-                    )
-
-            return when {
-
-                img.startsWith("http") ->
-                    ImageResult(url = img)
-
-                img.isNotBlank() ->
-                    ImageResult(base64 = img)
-
-                else ->
-                    throw IOException(
-                        "Horde: الصورة فارغة"
-                    )
-            }
-        }
-
-        throw IOException(
-            "Horde: انتهى الوقت بدون صورة"
-        )
-    }
-
-    // ============================================================
-    // توليد الصور — OpenAI
-    // ============================================================
-
-    private fun generateImageOpenAI(
-        prompt: String
-    ): ImageResult {
-
-        val apiKey = settings.openaiKey.trim()
-
-        val model =
-            settings.imageModel
-                .trim()
-                .ifBlank { "dall-e-3" }
-
-        if (apiKey.isBlank()) {
-            throw IOException(
-                "OpenAI: المفتاح فارغ"
-            )
-        }
-
-        val requestJson =
-            JSONObject().apply {
-
-                put("model", model)
-                put("prompt", prompt)
-                put("n", 1)
-
-                put(
-                    "size",
-                    if (model == "dall-e-3") {
-                        "1024x1024"
-                    } else {
-                        "512x512"
-                    }
-                )
-
-                put(
-                    "response_format",
-                    "url"
-                )
-
-                if (model == "dall-e-3") {
-                    put(
-                        "quality",
-                        "standard"
-                    )
-                }
-            }
-
-        val request = Request.Builder()
-            .url(
-                "https://api.openai.com/v1/images/generations"
-            )
-            .post(
-                requestJson.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .build()
-
-        client.newCall(request).execute().use { response ->
-
-            val body =
-                response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-
-                val msg = runCatching {
-
-                    JSONObject(body)
-                        .optJSONObject("error")
-                        ?.optString("message")
-                        ?: body
-
-                }.getOrDefault(body)
-
-                throw IOException(
-                    "OpenAI Image ${response.code}: $msg"
-                )
-            }
-
-            val url =
-                JSONObject(body)
-                    .optJSONArray("data")
-                    ?.optJSONObject(0)
-                    ?.optString("url", "")
-                    ?.takeIf {
-                        it.isNotBlank()
-                    }
-                    ?: throw IOException(
-                        "OpenAI: لم يُرجع رابط الصورة"
-                    )
-
-            return ImageResult(url = url)
-        }
-    }
-
-    // ============================================================
-    // توليد الصور — OpenRouter
-    // ============================================================
-
-    private fun generateImageOpenRouter(
-        prompt: String
-    ): ImageResult {
-
-        val apiKey =
-            settings.openrouterKey.trim()
-
-        val model =
-            settings.imageModel
-                .trim()
-                .ifBlank {
-                    "black-forest-labs/flux-schnell:free"
-                }
-
-        if (apiKey.isBlank()) {
-            throw IOException(
-                "OpenRouter: المفتاح فارغ"
-            )
-        }
-
-        val requestJson =
-            JSONObject().apply {
-                put("model", model)
-                put("prompt", prompt)
-                put("n", 1)
-            }
-
-        val request = Request.Builder()
-            .url(
-                "https://openrouter.ai/api/v1/images/generations"
-            )
-            .post(
-                requestJson.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .addHeader(
-                "HTTP-Referer",
-                "https://github.com/"
-            )
-            .addHeader(
-                "X-Title",
-                "AiChat"
-            )
-            .build()
-
-        client.newCall(request).execute().use { response ->
-
-            val body =
-                response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-
-                val msg = runCatching {
-
-                    val j = JSONObject(body)
-
-                    j.optJSONObject("error")
-                        ?.optString("message")
-                        ?: j.optString(
-                            "message",
-                            body
-                        )
-
-                }.getOrDefault(body)
-
-                throw IOException(
-                    "OpenRouter Image ${response.code}: $msg"
-                )
-            }
-
-            val root = JSONObject(body)
-
-            root.optJSONArray("data")
-                ?.optJSONObject(0)
-                ?.let { d ->
-
-                    d.optString(
-                        "url",
-                        ""
-                    )
-                        .takeIf {
-                            it.isNotBlank()
-                        }
-                        ?.let {
-                            return ImageResult(
-                                url = it
-                            )
-                        }
-
-                    d.optString(
-                        "b64_json",
-                        ""
-                    )
-                        .takeIf {
-                            it.isNotBlank()
-                        }
-                        ?.let {
-                            return ImageResult(
-                                base64 = it
-                            )
-                        }
-                }
-
-            throw IOException(
-                "OpenRouter: لم يُرجع صورة\n" +
-                        body.take(200)
-            )
-        }
-    }
-
-    // ============================================================
-    // توليد الصور — Custom
-    // ============================================================
-
-    private fun generateImageCustom(
-        prompt: String
-    ): ImageResult {
-
-        val url =
-            settings.customImageUrl.trim()
-
-        val apiKey =
-            settings.customImageKey.trim()
-
-        val model =
-            settings.imageModel.trim()
-
-        if (url.isBlank()) {
-            throw IOException(
-                "Custom Image: الرابط فارغ"
-            )
-        }
-
-        val requestJson =
-            JSONObject().apply {
-
-                put("prompt", prompt)
-
-                if (model.isNotBlank()) {
-                    put("model", model)
-                }
-
-                put("n", 1)
-            }
-
-        val requestBuilder =
-            Request.Builder()
-                .url(url)
-                .post(
-                    requestJson.toString()
-                        .toRequestBody(
-                            "application/json".toMediaType()
-                        )
-                )
-                .addHeader(
-                    "Content-Type",
-                    "application/json"
-                )
-
-        if (apiKey.isNotBlank()) {
-            requestBuilder.addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
-        }
-
-        client.newCall(
-            requestBuilder.build()
-        ).execute().use { response ->
-
-            val body =
-                response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-                throw IOException(
-                    "Custom Image ${response.code}: " +
-                            body.take(300)
-                )
-            }
-
-            val root = JSONObject(body)
-
-            root.optJSONArray("data")
-                ?.optJSONObject(0)
-                ?.let { d ->
-
-                    d.optString(
-                        "url",
-                        ""
-                    )
-                        .takeIf {
-                            it.isNotBlank()
-                        }
-                        ?.let {
-                            return ImageResult(
-                                url = it
-                            )
-                        }
-
-                    d.optString(
-                        "b64_json",
-                        ""
-                    )
-                        .takeIf {
-                            it.isNotBlank()
-                        }
-                        ?.let {
-                            return ImageResult(
-                                base64 = it
-                            )
-                        }
-                }
-
-            throw IOException(
-                "Custom Image: لم يُرجع صورة\n" +
-                        body.take(200)
-            )
         }
     }
 }
