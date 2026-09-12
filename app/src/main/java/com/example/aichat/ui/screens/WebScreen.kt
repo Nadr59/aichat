@@ -83,9 +83,9 @@ fun WebScreen(
                             databaseEnabled = true
                             cacheMode = WebSettings.LOAD_DEFAULT
                             userAgentString =
-                                "Mozilla/5.0 (Linux; Android 10; Redmi 8) " +
-                                "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                                "Chrome/124.0.0.0 Mobile Safari/537.36"
+                            "Mozilla/5.0 (Linux; Android 10; Redmi 8 Build/QKQ1.191014.001) " +
+                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                            "Chrome/124.0.6367.82 Mobile Safari/537.36"
                             setSupportZoom(true)
                             builtInZoomControls = true
                             displayZoomControls = false
@@ -93,6 +93,14 @@ fun WebScreen(
                             useWideViewPort = true
                             mixedContentMode =
                                 WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                        }
+                        
+                // إخفاء WebView عن Bot detection
+                   if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                      setRendererPriorityPolicy(
+                       WebView.RENDERER_PRIORITY_IMPORTANT,
+                         true
+                          )
                         }
 
                         cookieManager.setAcceptThirdPartyCookies(this, true)
