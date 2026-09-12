@@ -7,11 +7,11 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -23,11 +23,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,8 +41,8 @@ fun WebScreen(
 ) {
     val platformInfo = webPlatforms[platform] ?: webPlatforms["chatgpt"]!!
     var isLoading by remember { mutableStateOf(true) }
+    var progress by remember { mutableIntStateOf(0) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var statusText by remember { mutableStateOf("جاري التحميل...") }
 
     Column(modifier = Modifier.fillMaxSize()) {
 
@@ -52,12 +54,6 @@ fun WebScreen(
                 }
             },
             actions = {
-                Text(
-                    text = statusText,
-                    modifier = Modifier,
-                    style = androidx.compose.material3.MaterialTheme
-                        .typography.bodySmall
-                )
                 IconButton(onClick = { webViewRef?.reload() }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
                 }
@@ -75,32 +71,24 @@ fun WebScreen(
 
                     WebView(context).apply {
 
-                        webViewRef = this
-
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
                             cacheMode = WebSettings.LOAD_DEFAULT
                             userAgentString =
-                            "Mozilla/5.0 (Linux; Android 10; Redmi 8 Build/QKQ1.191014.001) " +
-                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                            "Chrome/124.0.6367.82 Mobile Safari/537.36"
+                                "Mozilla/5.0 (Linux; Android 10; Redmi 8 Build/QKQ1.191014.001) " +
+                                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                                "Chrome/124.0.6367.82 Mobile Safari/537.36"
                             setSupportZoom(true)
                             builtInZoomControls = true
                             displayZoomControls = false
                             loadWithOverviewMode = true
                             useWideViewPort = true
-                            mixedContentMode =
-                                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        }
-                        
-                // إخفاء WebView عن Bot detection
-                   if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                      setRendererPriorityPolicy(
-                       WebView.RENDERER_PRIORITY_IMPORTANT,
-                         true
-                          )
+                            defaultTextEncodingName = "UTF-8"
+                            loadsImagesAutomatically = true
+                            javaScriptCanOpenWindowsAutomatically = true
+                            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         }
 
                         cookieManager.setAcceptThirdPartyCookies(this, true)
@@ -110,10 +98,8 @@ fun WebScreen(
                                 view: WebView?,
                                 newProgress: Int
                             ) {
-                                statusText = "$newProgress%"
-                                if (newProgress == 100) {
-                                    statusText = "✓"
-                                }
+                                progress = newProgress
+                                isLoading = newProgress < 100
                             }
                         }
 
@@ -125,7 +111,6 @@ fun WebScreen(
                                 favicon: Bitmap?
                             ) {
                                 isLoading = true
-                                statusText = "جاري..."
                             }
 
                             override fun onPageFinished(
@@ -133,34 +118,25 @@ fun WebScreen(
                                 url: String?
                             ) {
                                 isLoading = false
-                                statusText = "✓ ${url?.take(30)}"
                                 CookieManager.getInstance().flush()
                             }
-
-                            override fun onReceivedError(
-                                view: WebView?,
-                                errorCode: Int,
-                                description: String?,
-                                failingUrl: String?
-                            ) {
-                                statusText = "خطأ $errorCode"
-                                Toast.makeText(
-                                    view?.context,
-                                    "خطأ $errorCode: $description",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
                         }
-
-                        loadUrl(platformInfo.url)
+                    }
+                },
+                update = { view ->
+                    webViewRef = view
+                    if (view.url == null) {
+                        view.loadUrl(platformInfo.url)
                     }
                 }
             )
 
             if (isLoading) {
                 LinearProgressIndicator(
+                    progress = { progress / 100f },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(3.dp)
                         .align(Alignment.TopCenter)
                 )
             }
