@@ -71,6 +71,11 @@ fun WebScreen(
 
                     WebView(context).apply {
 
+                        setLayerType(
+                            android.view.View.LAYER_TYPE_HARDWARE,
+                            null
+                        )
+
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -88,7 +93,11 @@ fun WebScreen(
                             defaultTextEncodingName = "UTF-8"
                             loadsImagesAutomatically = true
                             javaScriptCanOpenWindowsAutomatically = true
-                            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                            mixedContentMode =
+                                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                            @Suppress("DEPRECATION")
+                            setRenderPriority(WebSettings.RenderPriority.HIGH)
+                            mediaPlaybackRequiresUserGesture = false
                         }
 
                         cookieManager.setAcceptThirdPartyCookies(this, true)
@@ -154,13 +163,13 @@ val webPlatforms = mapOf(
         title = "HuggingChat 🤗",
         url = "https://huggingface.co/chat"
     ),
+    "venice" to WebPlatformInfo(
+        title = "Venice AI",
+        url = "https://venice.ai/chat"
+    ),
     "you" to WebPlatformInfo(
         title = "You.com",
         url = "https://you.com"
-    ),
-    "poe" to WebPlatformInfo(
-        title = "Poe",
-        url = "https://poe.com"
     ),
     "gemini_web" to WebPlatformInfo(
         title = "Gemini Web",
