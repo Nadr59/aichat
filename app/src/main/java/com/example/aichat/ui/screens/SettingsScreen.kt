@@ -172,10 +172,9 @@ LaunchedEffect(provider, refreshTrigger) {
 
     try {
         models = catalog.getModels(
-            provider = provider,
-            apiKey = keyToUse,
-            forImages = false
-        )
+    provider = provider,
+    apiKey = keyToUse
+)
     } catch (e: Exception) {
         modelsError = e.message ?: "تعذر تحميل النماذج"
     } finally {
