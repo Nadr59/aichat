@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -53,7 +54,8 @@ fun ConversationsScreen(
     viewModel: ChatViewModel,
     onOpenChat: (Long) -> Unit,
     onNewChat: () -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    onOpenWeb: () -> Unit
 ) {
     val conversations by viewModel.conversations.collectAsState()
     var conversationToDelete by remember { mutableStateOf<Conversation?>(null) }
@@ -62,12 +64,15 @@ fun ConversationsScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "المحادثات",
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("المحادثات", fontWeight = FontWeight.Bold)
                 },
                 actions = {
+                    IconButton(onClick = onOpenWeb) {
+                        Icon(
+                            Icons.Filled.Language,
+                            contentDescription = "فتح منصة ويب"
+                        )
+                    }
                     IconButton(onClick = onSettings) {
                         Icon(
                             Icons.Filled.Settings,
@@ -82,17 +87,13 @@ fun ConversationsScreen(
                 onClick = onNewChat,
                 shape = RoundedCornerShape(16.dp)
             ) {
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = "محادثة جديدة"
-                )
+                Icon(Icons.Filled.Add, contentDescription = "محادثة جديدة")
             }
         }
     ) { padding ->
 
         if (conversations.isEmpty()) {
 
-            // شاشة فارغة
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -106,8 +107,7 @@ fun ConversationsScreen(
                     Icon(
                         Icons.Filled.Chat,
                         contentDescription = null,
-                        modifier = Modifier
-                            .padding(8.dp),
+                        modifier = Modifier.padding(8.dp),
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                     )
                     Text(
@@ -136,13 +136,12 @@ fun ConversationsScreen(
 
                 items(
                     items = conversations,
-                    key   = { it.id }
+                    key = { it.id }
                 ) { conversation ->
-
                     ConversationCard(
                         conversation = conversation,
-                        onClick      = { onOpenChat(conversation.id) },
-                        onDelete     = { conversationToDelete = conversation }
+                        onClick = { onOpenChat(conversation.id) },
+                        onDelete = { conversationToDelete = conversation }
                     )
                 }
 
@@ -151,29 +150,23 @@ fun ConversationsScreen(
         }
     }
 
-    // حوار تأكيد الحذف
     conversationToDelete?.let { conversation ->
         AlertDialog(
             onDismissRequest = { conversationToDelete = null },
-            title   = { Text("حذف المحادثة") },
-            text    = { Text("هل تريد حذف \"${conversation.title}\"؟") },
-            confirmButton   = {
+            title = { Text("حذف المحادثة") },
+            text = { Text("هل تريد حذف \"${conversation.title}\"؟") },
+            confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.deleteConversation(conversation)
                         conversationToDelete = null
                     }
                 ) {
-                    Text(
-                        "حذف",
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    Text("حذف", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = { conversationToDelete = null }
-                ) {
+                TextButton(onClick = { conversationToDelete = null }) {
                     Text("إلغاء")
                 }
             }
@@ -192,10 +185,10 @@ private fun ConversationCard(
     }
 
     Card(
-        onClick  = onClick,
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(12.dp),
-        colors   = CardDefaults.cardColors(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         )
     ) {
@@ -203,20 +196,20 @@ private fun ConversationCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalAlignment     = Alignment.CenterVertically,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text     = conversation.title,
-                    style    = MaterialTheme.typography.titleSmall,
+                    text = conversation.title,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text  = dateFormat.format(Date(conversation.updatedAt)),
+                    text = dateFormat.format(Date(conversation.updatedAt)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                 )
