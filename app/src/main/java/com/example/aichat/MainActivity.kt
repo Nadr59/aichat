@@ -18,6 +18,7 @@ import com.example.aichat.ui.screens.SettingsScreen
 import com.example.aichat.ui.screens.WebScreen
 import com.example.aichat.ui.theme.AiChatTheme
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import com.example.aichat.ui.screens.GeckoTestScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -77,10 +78,9 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable("web") {
-                            WebScreen(
-                                platform = settings.webPlatform,
-                                onBack = { navController.popBackStack() }
-                            )
+    GeckoTestScreen(
+        onBack = { navController.popBackStack() }
+    )
                         }
                     }
                 }
