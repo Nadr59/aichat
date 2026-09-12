@@ -194,11 +194,10 @@ class AiSettings(context: Context) {
     // Web
 
     var webPlatform: String
-        get() = prefs.getString("web_platform", "huggingchat") ?: "huggingchat"
-        set(value) = prefs.edit()
-            .putString("web_platform", value.trim())
-            .apply()
-
+    get() = prefs.getString("web_platform", "venice") ?: "venice"
+    set(value) = prefs.edit()
+        .putString("web_platform", value.trim())
+        .apply()
     // Helpers
 
     fun getActiveKey(): String {
