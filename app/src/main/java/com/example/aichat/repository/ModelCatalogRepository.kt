@@ -20,26 +20,17 @@ class ModelCatalogRepository(
         .readTimeout(45, TimeUnit.SECONDS)
         .build()
 
-    // ============================================================
-    // المدخل الرئيسي
-    // ============================================================
-
     suspend fun getModels(
         provider: String,
-        apiKey: String,
-        forImages: Boolean = false
+        apiKey: String
     ): List<ModelInfo> = withContext(Dispatchers.IO) {
 
         when (provider.lowercase().trim()) {
-
             "gemini" ->
                 getGeminiModels(apiKey)
 
             "openrouter" ->
-                getOpenRouterModels(
-                    apiKey,
-                    forImages
-                )
+                getOpenRouterModels(apiKey)
 
             "openai" ->
                 getOpenAIModels(apiKey)
@@ -50,41 +41,25 @@ class ModelCatalogRepository(
             "groq" ->
                 getGroqModels(apiKey)
 
-            // ====================================================
-            // Hugging Face
-            // ====================================================
-
             "huggingface",
             "hugging face",
             "hf" ->
-                getHuggingFaceModels(
-                    apiKey,
-                    forImages
-                )
+                getHuggingFaceModels(apiKey)
 
             "nvidia" ->
                 getNvidiaModels()
-
-            "horde" ->
-                getHordeModels(forImages)
 
             else ->
                 emptyList()
         }
     }
 
-    // ============================================================
-    // Gemini
-    // ============================================================
-
     private fun getGeminiModels(
         apiKey: String
     ): List<ModelInfo> {
 
         if (apiKey.isBlank()) {
-            throw IOException(
-                "Gemini: أدخل API Key أولاً"
-            )
+            throw IOException("Gemini: أدخل API Key أولاً")
         }
 
         val request = Request.Builder()
@@ -99,8 +74,7 @@ class ModelCatalogRepository(
             .execute()
             .use { response ->
 
-                val body =
-                    response.body?.string().orEmpty()
+                val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
                     throw IOException(
@@ -109,155 +83,73 @@ class ModelCatalogRepository(
                 }
 
                 val models =
-                    JSONObject(body)
-                        .optJSONArray("models")
+                    JSONObject(body).optJSONArray("models")
                         ?: return emptyList()
 
-                val result =
-                    mutableListOf<ModelInfo>()
+                val result = mutableListOf<ModelInfo>()
 
                 for (i in 0 until models.length()) {
 
-                    val obj =
-                        models.optJSONObject(i)
-                            ?: continue
+                    val obj = models.optJSONObject(i)
+                        ?: continue
 
-                    val id =
-                        obj.optString("name")
-                            .removePrefix("models/")
+                    val id = obj.optString("name")
+                        .removePrefix("models/")
 
                     val displayName =
                         obj.optString("displayName")
                             .ifBlank { id }
 
                     val methods =
-                        obj.optJSONArray(
-                            "supportedGenerationMethods"
-                        )
+                        obj.optJSONArray("supportedGenerationMethods")
 
                     val supportsChat =
-                        (0 until (methods?.length() ?: 0))
-                            .any {
-                                methods
-                                    ?.optString(it)
-                                    .equals(
-                                        "generateContent",
-                                        true
-                                    )
-                            }
+                        (0 until (methods?.length() ?: 0)).any {
+                            methods?.optString(it)
+                                .equals("generateContent", true)
+                        }
 
                     if (!supportsChat) {
                         continue
                     }
 
-                    val lower =
-                        id.lowercase()
+                    val lower = id.lowercase()
 
                     result += ModelInfo(
                         id = id,
                         name = displayName,
                         provider = "gemini",
-
                         isFree =
                             lower.contains("flash") ||
-                            lower.contains("lite"),
-
+                                lower.contains("lite"),
                         supportsVision =
                             !lower.contains("audio"),
-
-                        supportsImageGeneration =
-                            lower.contains("image"),
-
                         recommended =
                             lower.contains("2.5") ||
-                            lower.contains("3."),
-
+                                lower.contains("3."),
                         contextLength =
-                            obj.optLong(
-                                "inputTokenLimit",
-                                0L
-                            )
+                            obj.optLong("inputTokenLimit", 0L)
                     )
                 }
 
                 return result
                     .distinctBy { it.id }
                     .sortedWith(
-                        compareByDescending<ModelInfo> {
-                            it.recommended
-                        }
-                            .thenByDescending {
-                                it.isFree
-                            }
-                            .thenBy {
-                                it.name
-                            }
+                        compareByDescending<ModelInfo> { it.recommended }
+                            .thenByDescending { it.isFree }
+                            .thenBy { it.name }
                     )
             }
     }
 
-    // ============================================================
-    // Hugging Face
-    // ============================================================
-
-    /*
-     * مهم:
-     *
-     * لا نستخدم هنا:
-     *
-     *     pipeline_tag=text-generation
-     *
-     * لأن هذا قد يعيد نماذج نصية لا تعمل مع
-     * Chat Completions.
-     *
-     * في وضع المحادثة نستخدم endpoint الرسمي:
-     *
-     *     GET https://router.huggingface.co/v1/models
-     *
-     * وهو يعرض نماذج Chat Completion التي يوفرها
-     * Hugging Face Inference Providers.
-     *
-     * أما توليد الصور فيبقى عبر Hub API
-     * باستخدام pipeline_tag=text-to-image.
-     */
-
     private fun getHuggingFaceModels(
-        apiKey: String,
-        forImages: Boolean
-    ): List<ModelInfo> {
-
-        return if (forImages) {
-
-            getHuggingFaceImageModels(
-                apiKey
-            )
-
-        } else {
-
-            getHuggingFaceChatModels(
-                apiKey
-            )
-        }
-    }
-
-    // ============================================================
-    // Hugging Face Chat Models
-    // ============================================================
-
-    private fun getHuggingFaceChatModels(
         apiKey: String
     ): List<ModelInfo> {
 
-        val requestBuilder =
-            Request.Builder()
-                .url(
-                    "https://router.huggingface.co/v1/models"
-                )
-                .get()
-                .addHeader(
-                    "User-Agent",
-                    "AiChat/1.0 Android"
-                )
+        val requestBuilder = Request.Builder()
+            .url("https://router.huggingface.co/v1/models")
+            .get()
+            .addHeader("User-Agent", "AiChat/1.0 Android")
 
         if (apiKey.isNotBlank()) {
             requestBuilder.addHeader(
@@ -266,58 +158,40 @@ class ModelCatalogRepository(
             )
         }
 
-        client.newCall(
-            requestBuilder.build()
-        )
+        client.newCall(requestBuilder.build())
             .execute()
             .use { response ->
 
-                val body =
-                    response.body?.string().orEmpty()
+                val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
                     throw IOException(
-                        "Hugging Face ${response.code}: " +
-                            body.take(500)
+                        "Hugging Face ${response.code}: ${body.take(500)}"
                     )
                 }
 
                 val data =
-                    JSONObject(body)
-                        .optJSONArray("data")
+                    JSONObject(body).optJSONArray("data")
                         ?: return emptyList()
 
-                val result =
-                    mutableListOf<ModelInfo>()
+                val result = mutableListOf<ModelInfo>()
 
                 for (i in 0 until data.length()) {
 
-                    val obj =
-                        data.optJSONObject(i)
-                            ?: continue
+                    val obj = data.optJSONObject(i)
+                        ?: continue
 
-                    val id =
-                        obj.optString("id")
-                            .trim()
+                    val id = obj.optString("id").trim()
 
                     if (id.isBlank()) {
                         continue
                     }
 
                     val architecture =
-                        obj.optJSONObject(
-                            "architecture"
-                        )
+                        obj.optJSONObject("architecture")
 
                     val inputModalities =
-                        architecture?.optJSONArray(
-                            "input_modalities"
-                        )
-
-                    val outputModalities =
-                        architecture?.optJSONArray(
-                            "output_modalities"
-                        )
+                        architecture?.optJSONArray("input_modalities")
 
                     val supportsVision =
                         jsonArrayContains(
@@ -325,51 +199,26 @@ class ModelCatalogRepository(
                             "image"
                         )
 
-                    /*
-                     * في endpoint /v1/models الخاص بـ Hugging Face
-                     * يمكن أن تظهر image ضمن output_modalities
-                     * لبعض نماذج المحادثة.
-                     *
-                     * لا نعتبر ذلك Text-to-Image تلقائيًا.
-                     * هذا الحقل هنا فقط للمحافظة على معلومات
-                     * النموذج إن كانت موجودة.
-                     */
-                    val supportsImageGeneration =
-                        jsonArrayContains(
-                            outputModalities,
-                            "image"
-                        )
-
                     val contextLength =
-                        obj.optLong(
-                            "context_length",
-                            0L
-                        )
+                        obj.optLong("context_length", 0L)
 
                     val providers =
-                        obj.optJSONArray(
-                            "providers"
-                        )
+                        obj.optJSONArray("providers")
 
                     var isFree = false
                     var hasLiveProvider = false
-                    var bestContextLength =
-                        contextLength
+                    var bestContextLength = contextLength
 
                     if (providers != null) {
 
-                        for (
-                            j in 0 until providers.length()
-                        ) {
+                        for (j in 0 until providers.length()) {
 
                             val provider =
                                 providers.optJSONObject(j)
                                     ?: continue
 
                             val status =
-                                provider.optString(
-                                    "status"
-                                )
+                                provider.optString("status")
                                     .trim()
                                     .lowercase()
 
@@ -405,12 +254,6 @@ class ModelCatalogRepository(
                         }
                     }
 
-                    /*
-                     * نتأكد أن النموذج لديه مزود صالح.
-                     *
-                     * في حال لم ترجع HF معلومات providers
-                     * لبعض النماذج، لا نحذف النموذج.
-                     */
                     if (
                         providers != null &&
                         providers.length() > 0 &&
@@ -419,330 +262,44 @@ class ModelCatalogRepository(
                         continue
                     }
 
-                    val lower =
-                        id.lowercase()
+                    val lower = id.lowercase()
 
                     val recommended =
                         lower.contains("qwen") ||
-                        lower.contains("deepseek") ||
-                        lower.contains("llama") ||
-                        lower.contains("gemma") ||
-                        lower.contains("mistral") ||
-                        lower.contains("phi") ||
-                        lower.contains("kimi") ||
-                        lower.contains("glm") ||
-                        lower.contains("nemotron") ||
-                        lower.contains("minimax") ||
-                        lower.contains("gpt-oss") ||
-                        lower.contains("command") ||
-                        lower.contains("granite")
+                            lower.contains("deepseek") ||
+                            lower.contains("llama") ||
+                            lower.contains("gemma") ||
+                            lower.contains("mistral") ||
+                            lower.contains("phi") ||
+                            lower.contains("kimi") ||
+                            lower.contains("glm") ||
+                            lower.contains("nemotron") ||
+                            lower.contains("minimax") ||
+                            lower.contains("gpt-oss") ||
+                            lower.contains("command") ||
+                            lower.contains("granite")
 
                     result += ModelInfo(
                         id = id,
-
-                        name =
-                            createHuggingFaceDisplayName(
-                                id
-                            ),
-
+                        name = createHuggingFaceDisplayName(id),
                         provider = "huggingface",
-
                         isFree = isFree,
-
-                        supportsVision =
-                            supportsVision,
-
-                        supportsImageGeneration =
-                            supportsImageGeneration,
-
-                        recommended =
-                            recommended,
-
-                        contextLength =
-                            bestContextLength
+                        supportsVision = supportsVision,
+                        recommended = recommended,
+                        contextLength = bestContextLength
                     )
                 }
 
                 return result
                     .distinctBy { it.id }
                     .sortedWith(
-                        compareByDescending<ModelInfo> {
-                            it.recommended
-                        }
-                            .thenByDescending {
-                                it.isFree
-                            }
-                            .thenByDescending {
-                                it.supportsVision
-                            }
-                            .thenBy {
-                                it.name
-                            }
+                        compareByDescending<ModelInfo> { it.recommended }
+                            .thenByDescending { it.isFree }
+                            .thenByDescending { it.supportsVision }
+                            .thenBy { it.name }
                     )
             }
     }
-
-    // ============================================================
-    // Hugging Face Image Models
-    // ============================================================
-
-    private fun getHuggingFaceImageModels(
-        apiKey: String
-    ): List<ModelInfo> {
-
-        val result =
-            mutableListOf<HuggingFaceModel>()
-
-        val imageUrl =
-            "https://huggingface.co/api/models" +
-                "?inference_provider=all" +
-                "&pipeline_tag=text-to-image" +
-                "&sort=downloads" +
-                "&direction=-1" +
-                "&limit=200"
-
-        fetchHuggingFaceModels(
-            url = imageUrl,
-            apiKey = apiKey,
-            target = result
-        )
-
-        return result
-            .distinctBy { it.id }
-            .map { model ->
-
-                val lower =
-                    (
-                        "${model.id} " +
-                            "${model.pipelineTag} " +
-                            model.tags.joinToString(" ")
-                        ).lowercase()
-
-                val recommended =
-                    lower.contains("flux") ||
-                    lower.contains("stable-diffusion") ||
-                    lower.contains("sdxl") ||
-                    lower.contains("sd3") ||
-                    lower.contains("ideogram") ||
-                    lower.contains("qwen") ||
-                    lower.contains("wan") ||
-                    lower.contains("hunyuan")
-
-                ModelInfo(
-                    id = model.id,
-
-                    name =
-                        createHuggingFaceDisplayName(
-                            model.id
-                        ),
-
-                    provider = "huggingface",
-
-                    isFree = false,
-
-                    supportsVision = false,
-
-                    supportsImageGeneration = true,
-
-                    recommended = recommended,
-
-                    contextLength =
-                        model.contextLength
-                )
-            }
-            .sortedWith(
-                compareByDescending<ModelInfo> {
-                    it.recommended
-                }
-                    .thenBy {
-                        it.name
-                    }
-            )
-    }
-
-    // ============================================================
-    // Fetch Hugging Face Hub Models
-    // ============================================================
-
-    private fun fetchHuggingFaceModels(
-        url: String,
-        apiKey: String,
-        target: MutableList<HuggingFaceModel>
-    ) {
-
-        val requestBuilder =
-            Request.Builder()
-                .url(url)
-                .get()
-                .addHeader(
-                    "User-Agent",
-                    "AiChat/1.0 Android"
-                )
-
-        if (apiKey.isNotBlank()) {
-            requestBuilder.addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
-        }
-
-        client.newCall(
-            requestBuilder.build()
-        )
-            .execute()
-            .use { response ->
-
-                val body =
-                    response.body?.string().orEmpty()
-
-                if (!response.isSuccessful) {
-                    throw IOException(
-                        "Hugging Face ${response.code}: " +
-                            body.take(500)
-                    )
-                }
-
-                val array =
-                    try {
-                        JSONArray(body)
-                    } catch (e: Exception) {
-                        throw IOException(
-                            "Hugging Face: استجابة غير صالحة"
-                        )
-                    }
-
-                for (i in 0 until array.length()) {
-
-                    val obj =
-                        array.optJSONObject(i)
-                            ?: continue
-
-                    val id =
-                        obj.optString("id")
-                            .trim()
-
-                    if (id.isBlank()) {
-                        continue
-                    }
-
-                    if (
-                        obj.optBoolean(
-                            "disabled",
-                            false
-                        )
-                    ) {
-                        continue
-                    }
-
-                    val pipelineTag =
-                        obj.optString(
-                            "pipeline_tag"
-                        )
-                            .trim()
-
-                    val downloads =
-                        obj.optLong(
-                            "downloads",
-                            0L
-                        )
-
-                    val likes =
-                        obj.optLong(
-                            "likes",
-                            0L
-                        )
-
-                    val tags =
-                        mutableListOf<String>()
-
-                    val tagsArray =
-                        obj.optJSONArray("tags")
-
-                    if (tagsArray != null) {
-
-                        for (
-                            j in 0 until tagsArray.length()
-                        ) {
-
-                            val tag =
-                                tagsArray
-                                    .optString(j)
-                                    .trim()
-
-                            if (tag.isNotBlank()) {
-                                tags += tag
-                            }
-                        }
-                    }
-
-                    val contextLength =
-                        extractContextLength(
-                            obj
-                        )
-
-                    target += HuggingFaceModel(
-                        id = id,
-
-                        pipelineTag =
-                            pipelineTag,
-
-                        downloads =
-                            downloads,
-
-                        likes =
-                            likes,
-
-                        tags =
-                            tags,
-
-                        contextLength =
-                            contextLength
-                    )
-                }
-            }
-    }
-
-    // ============================================================
-    // Hugging Face Context
-    // ============================================================
-
-    private fun extractContextLength(
-        obj: JSONObject
-    ): Long {
-
-        val config =
-            obj.optJSONObject("config")
-                ?: return 0L
-
-        val possibleKeys =
-            listOf(
-                "max_position_embeddings",
-                "max_sequence_length",
-                "max_seq_len",
-                "seq_length",
-                "model_max_length",
-                "max_context_length"
-            )
-
-        for (key in possibleKeys) {
-
-            val value =
-                config.optLong(
-                    key,
-                    0L
-                )
-
-            if (value > 0L) {
-                return value
-            }
-        }
-
-        return 0L
-    }
-
-    // ============================================================
-    // Hugging Face Display Name
-    // ============================================================
 
     private fun createHuggingFaceDisplayName(
         modelId: String
@@ -752,8 +309,7 @@ class ModelCatalogRepository(
             return modelId
         }
 
-        val parts =
-            modelId.split("/")
+        val parts = modelId.split("/")
 
         return if (parts.size >= 2) {
             parts.last()
@@ -762,35 +318,15 @@ class ModelCatalogRepository(
         }
     }
 
-    private data class HuggingFaceModel(
-        val id: String,
-        val pipelineTag: String,
-        val downloads: Long,
-        val likes: Long,
-        val tags: List<String>,
-        val contextLength: Long
-    )
-
-    // ============================================================
-    // OpenRouter
-    // ============================================================
-
     private fun getOpenRouterModels(
-        apiKey: String,
-        forImages: Boolean
+        apiKey: String
     ): List<ModelInfo> {
 
-        val url =
-            if (forImages) {
-                "https://openrouter.ai/api/v1/models?output_modalities=image"
-            } else {
+        val requestBuilder = Request.Builder()
+            .url(
                 "https://openrouter.ai/api/v1/models?output_modalities=text"
-            }
-
-        val requestBuilder =
-            Request.Builder()
-                .url(url)
-                .get()
+            )
+            .get()
 
         if (apiKey.isNotBlank()) {
             requestBuilder.addHeader(
@@ -799,39 +335,30 @@ class ModelCatalogRepository(
             )
         }
 
-        client.newCall(
-            requestBuilder.build()
-        )
+        client.newCall(requestBuilder.build())
             .execute()
             .use { response ->
 
-                val body =
-                    response.body?.string().orEmpty()
+                val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
                     throw IOException(
-                        "OpenRouter ${response.code}: " +
-                            body.take(200)
+                        "OpenRouter ${response.code}: ${body.take(200)}"
                     )
                 }
 
                 val data =
-                    JSONObject(body)
-                        .optJSONArray("data")
+                    JSONObject(body).optJSONArray("data")
                         ?: return emptyList()
 
-                val result =
-                    mutableListOf<ModelInfo>()
+                val result = mutableListOf<ModelInfo>()
 
                 for (i in 0 until data.length()) {
 
-                    val obj =
-                        data.optJSONObject(i)
-                            ?: continue
+                    val obj = data.optJSONObject(i)
+                        ?: continue
 
-                    val id =
-                        obj.optString("id")
-                            .trim()
+                    val id = obj.optString("id").trim()
 
                     if (id.isBlank()) {
                         continue
@@ -842,29 +369,16 @@ class ModelCatalogRepository(
                             .ifBlank { id }
 
                     val architecture =
-                        obj.optJSONObject(
-                            "architecture"
-                        )
+                        obj.optJSONObject("architecture")
 
                     val inputMod =
                         architecture?.optJSONArray(
                             "input_modalities"
                         )
 
-                    val outputMod =
-                        architecture?.optJSONArray(
-                            "output_modalities"
-                        )
-
                     val supportsVision =
                         jsonArrayContains(
                             inputMod,
-                            "image"
-                        )
-
-                    val supportsImageGen =
-                        jsonArrayContains(
-                            outputMod,
                             "image"
                         )
 
@@ -889,42 +403,29 @@ class ModelCatalogRepository(
                             "0"
                         ) ?: "0"
 
-                    val imagePrice =
-                        pricing?.optString(
-                            "image",
-                            "0"
-                        ) ?: "0"
-
                     val isFree =
                         isZeroPrice(promptPrice) &&
-                        isZeroPrice(completionPrice) &&
-                        isZeroPrice(requestPrice) &&
-                        (
-                            !supportsImageGen ||
-                                isZeroPrice(imagePrice)
-                            )
+                            isZeroPrice(completionPrice) &&
+                            isZeroPrice(requestPrice)
 
                     val lower =
                         "$id $name".lowercase()
 
                     val recommended =
                         lower.contains("gemini-2.5") ||
-                        lower.contains("claude-3.5") ||
-                        lower.contains("claude-opus") ||
-                        lower.contains("gpt-4o") ||
-                        lower.contains("qwen3") ||
-                        lower.contains("nemotron") ||
-                        lower.contains("deepseek-r1")
+                            lower.contains("claude-3.5") ||
+                            lower.contains("claude-opus") ||
+                            lower.contains("gpt-4o") ||
+                            lower.contains("qwen3") ||
+                            lower.contains("nemotron") ||
+                            lower.contains("deepseek-r1")
 
                     result += ModelInfo(
                         id = id,
                         name = name,
                         provider = "openrouter",
                         isFree = isFree,
-                        supportsVision =
-                            supportsVision,
-                        supportsImageGeneration =
-                            supportsImageGen,
+                        supportsVision = supportsVision,
                         recommended = recommended,
                         contextLength =
                             obj.optLong(
@@ -937,88 +438,66 @@ class ModelCatalogRepository(
                 return result
                     .distinctBy { it.id }
                     .sortedWith(
-                        compareByDescending<ModelInfo> {
-                            it.recommended
-                        }
-                            .thenByDescending {
-                                it.isFree
-                            }
-                            .thenBy {
-                                it.name
-                            }
+                        compareByDescending<ModelInfo> { it.recommended }
+                            .thenByDescending { it.isFree }
+                            .thenBy { it.name }
                     )
             }
     }
-
-    // ============================================================
-    // OpenAI
-    // ============================================================
 
     private fun getOpenAIModels(
         apiKey: String
     ): List<ModelInfo> {
 
         if (apiKey.isBlank()) {
-            throw IOException(
-                "OpenAI: أدخل API Key أولاً"
-            )
+            throw IOException("OpenAI: أدخل API Key أولاً")
         }
 
-        val request =
-            Request.Builder()
-                .url(
-                    "https://api.openai.com/v1/models"
-                )
-                .get()
-                .addHeader(
-                    "Authorization",
-                    "Bearer $apiKey"
-                )
-                .build()
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/models")
+            .get()
+            .addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
+            .build()
 
         client.newCall(request)
             .execute()
             .use { response ->
 
-                val body =
-                    response.body?.string().orEmpty()
+                val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
                     throw IOException(
-                        "OpenAI ${response.code}: " +
-                            body.take(200)
+                        "OpenAI ${response.code}: ${body.take(200)}"
                     )
                 }
 
                 val data =
-                    JSONObject(body)
-                        .optJSONArray("data")
+                    JSONObject(body).optJSONArray("data")
                         ?: return emptyList()
 
-                val result =
-                    mutableListOf<ModelInfo>()
+                val result = mutableListOf<ModelInfo>()
 
                 for (i in 0 until data.length()) {
 
-                    val obj =
-                        data.optJSONObject(i)
-                            ?: continue
+                    val obj = data.optJSONObject(i)
+                        ?: continue
 
-                    val id =
-                        obj.optString("id")
+                    val id = obj.optString("id")
 
                     if (id.isBlank()) {
                         continue
                     }
 
-                    val lower =
-                        id.lowercase()
+                    val lower = id.lowercase()
 
                     val isChat =
                         lower.startsWith("gpt-") ||
-                        lower.startsWith("o1") ||
-                        lower.startsWith("o3") ||
-                        lower.startsWith("o4")
+                            lower.startsWith("o1") ||
+                            lower.startsWith("o3") ||
+                            lower.startsWith("o4")
 
                     if (!isChat) {
                         continue
@@ -1029,97 +508,74 @@ class ModelCatalogRepository(
                         name = id,
                         provider = "openai",
                         isFree = false,
-
                         supportsVision =
                             lower.contains("gpt-4o") ||
-                            lower.contains("gpt-4.1") ||
-                            lower.contains("gpt-5"),
-
+                                lower.contains("gpt-4.1") ||
+                                lower.contains("gpt-5"),
                         recommended =
                             lower.contains("gpt-4o") ||
-                            lower.contains("gpt-4.1") ||
-                            lower.contains("gpt-5")
+                                lower.contains("gpt-4.1") ||
+                                lower.contains("gpt-5")
                     )
                 }
 
                 return result
                     .distinctBy { it.id }
                     .sortedWith(
-                        compareByDescending<ModelInfo> {
-                            it.recommended
-                        }
-                            .thenBy {
-                                it.name
-                            }
+                        compareByDescending<ModelInfo> { it.recommended }
+                            .thenBy { it.name }
                     )
             }
     }
-
-    // ============================================================
-    // Mistral
-    // ============================================================
 
     private fun getMistralModels(
         apiKey: String
     ): List<ModelInfo> {
 
         if (apiKey.isBlank()) {
-            throw IOException(
-                "Mistral: أدخل API Key أولاً"
-            )
+            throw IOException("Mistral: أدخل API Key أولاً")
         }
 
-        val request =
-            Request.Builder()
-                .url(
-                    "https://api.mistral.ai/v1/models"
-                )
-                .get()
-                .addHeader(
-                    "Authorization",
-                    "Bearer $apiKey"
-                )
-                .build()
+        val request = Request.Builder()
+            .url("https://api.mistral.ai/v1/models")
+            .get()
+            .addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
+            .build()
 
         client.newCall(request)
             .execute()
             .use { response ->
 
-                val body =
-                    response.body?.string().orEmpty()
+                val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
                     throw IOException(
-                        "Mistral ${response.code}: " +
-                            body.take(200)
+                        "Mistral ${response.code}: ${body.take(200)}"
                     )
                 }
 
                 val data =
-                    JSONObject(body)
-                        .optJSONArray("data")
+                    JSONObject(body).optJSONArray("data")
                         ?: return emptyList()
 
-                val result =
-                    mutableListOf<ModelInfo>()
+                val result = mutableListOf<ModelInfo>()
 
                 for (i in 0 until data.length()) {
 
-                    val obj =
-                        data.optJSONObject(i)
-                            ?: continue
+                    val obj = data.optJSONObject(i)
+                        ?: continue
 
-                    val id =
-                        obj.optString("id")
+                    val id = obj.optString("id")
 
                     if (id.isBlank()) {
                         continue
                     }
 
                     val capabilities =
-                        obj.optJSONObject(
-                            "capabilities"
-                        )
+                        obj.optJSONObject("capabilities")
 
                     val isChat =
                         capabilities?.optBoolean(
@@ -1137,26 +593,20 @@ class ModelCatalogRepository(
                             false
                         ) ?: false
 
-                    val lower =
-                        id.lowercase()
+                    val lower = id.lowercase()
 
                     result += ModelInfo(
                         id = id,
                         name = id,
                         provider = "mistral",
-
                         isFree =
                             lower.contains("ministral") ||
-                            lower.contains("small"),
-
-                        supportsVision =
-                            vision,
-
+                                lower.contains("small"),
+                        supportsVision = vision,
                         recommended =
                             lower.contains("large") ||
-                            lower.contains("medium") ||
-                            lower.contains("pixtral"),
-
+                                lower.contains("medium") ||
+                                lower.contains("pixtral"),
                         contextLength =
                             obj.optLong(
                                 "max_context_length",
@@ -1168,82 +618,60 @@ class ModelCatalogRepository(
                 return result
                     .distinctBy { it.id }
                     .sortedWith(
-                        compareByDescending<ModelInfo> {
-                            it.recommended
-                        }
-                            .thenByDescending {
-                                it.isFree
-                            }
-                            .thenBy {
-                                it.name
-                            }
+                        compareByDescending<ModelInfo> { it.recommended }
+                            .thenByDescending { it.isFree }
+                            .thenBy { it.name }
                     )
             }
     }
-
-    // ============================================================
-    // Groq
-    // ============================================================
 
     private fun getGroqModels(
         apiKey: String
     ): List<ModelInfo> {
 
         if (apiKey.isBlank()) {
-            throw IOException(
-                "Groq: أدخل API Key أولاً"
-            )
+            throw IOException("Groq: أدخل API Key أولاً")
         }
 
-        val request =
-            Request.Builder()
-                .url(
-                    "https://api.groq.com/openai/v1/models"
-                )
-                .get()
-                .addHeader(
-                    "Authorization",
-                    "Bearer $apiKey"
-                )
-                .build()
+        val request = Request.Builder()
+            .url("https://api.groq.com/openai/v1/models")
+            .get()
+            .addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
+            .build()
 
         client.newCall(request)
             .execute()
             .use { response ->
 
-                val body =
-                    response.body?.string().orEmpty()
+                val body = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
                     throw IOException(
-                        "Groq ${response.code}: " +
-                            body.take(200)
+                        "Groq ${response.code}: ${body.take(200)}"
                     )
                 }
 
                 val data =
-                    JSONObject(body)
-                        .optJSONArray("data")
+                    JSONObject(body).optJSONArray("data")
                         ?: return emptyList()
 
-                val result =
-                    mutableListOf<ModelInfo>()
+                val result = mutableListOf<ModelInfo>()
 
                 for (i in 0 until data.length()) {
 
-                    val obj =
-                        data.optJSONObject(i)
-                            ?: continue
+                    val obj = data.optJSONObject(i)
+                        ?: continue
 
-                    val id =
-                        obj.optString("id")
+                    val id = obj.optString("id")
 
                     if (id.isBlank()) {
                         continue
                     }
 
-                    val lower =
-                        id.lowercase()
+                    val lower = id.lowercase()
 
                     if (
                         lower.contains("whisper") ||
@@ -1258,16 +686,13 @@ class ModelCatalogRepository(
                         name = id,
                         provider = "groq",
                         isFree = true,
-
                         supportsVision =
                             lower.contains("vision") ||
-                            lower.contains("scout") ||
-                            lower.contains("maverick"),
-
+                                lower.contains("scout") ||
+                                lower.contains("maverick"),
                         recommended =
                             lower.contains("llama-4") ||
-                            lower.contains("deepseek"),
-
+                                lower.contains("deepseek"),
                         contextLength =
                             obj.optLong(
                                 "context_window",
@@ -1279,133 +704,11 @@ class ModelCatalogRepository(
                 return result
                     .distinctBy { it.id }
                     .sortedWith(
-                        compareByDescending<ModelInfo> {
-                            it.recommended
-                        }
-                            .thenBy {
-                                it.name
-                            }
+                        compareByDescending<ModelInfo> { it.recommended }
+                            .thenBy { it.name }
                     )
             }
     }
-
-    // ============================================================
-    // AI Horde
-    // ============================================================
-
-    private fun getHordeModels(
-        forImages: Boolean
-    ): List<ModelInfo> {
-
-        val request =
-            Request.Builder()
-                .url(
-                    "https://aihorde.net/api/v2/status/models"
-                )
-                .get()
-                .addHeader(
-                    "Client-Agent",
-                    "AiChat:1.0:anonymous"
-                )
-                .build()
-
-        client.newCall(request)
-            .execute()
-            .use { response ->
-
-                val body =
-                    response.body?.string().orEmpty()
-
-                if (!response.isSuccessful) {
-                    throw IOException(
-                        "Horde ${response.code}: " +
-                            body.take(200)
-                    )
-                }
-
-                val array =
-                    JSONArray(body)
-
-                val result =
-                    mutableListOf<ModelInfo>()
-
-                for (i in 0 until array.length()) {
-
-                    val obj =
-                        array.optJSONObject(i)
-                            ?: continue
-
-                    val name =
-                        obj.optString("name")
-                            .trim()
-
-                    if (name.isBlank()) {
-                        continue
-                    }
-
-                    val lower =
-                        name.lowercase()
-
-                    val isImage =
-                        lower.contains(
-                            "stable diffusion"
-                        ) ||
-                        lower.contains("sdxl") ||
-                        lower.contains("flux") ||
-                        lower.contains("dreamshaper") ||
-                        lower.contains("realistic") ||
-                        lower.contains("deliberate")
-
-                    if (forImages != isImage) {
-                        continue
-                    }
-
-                    result += ModelInfo(
-                        id = name,
-                        name = name,
-                        provider = "horde",
-                        isFree = true,
-                        supportsVision = false,
-                        supportsImageGeneration =
-                            isImage,
-
-                        recommended =
-                            lower.contains("flux") ||
-                            lower.contains("sdxl") ||
-                            lower.contains("mistral") ||
-                            lower.contains("llama-3")
-                    )
-                }
-
-                return result
-                    .distinctBy { it.id }
-                    .sortedWith(
-                        compareByDescending<ModelInfo> {
-                            it.recommended
-                        }
-                            .thenBy {
-                                it.name
-                            }
-                    )
-            }
-    }
-
-    // ============================================================
-    // NVIDIA NIM
-    // ============================================================
-
-    /*
-     * NVIDIA لا نستخدم معه /v1/models هنا.
-     *
-     * واجهة NVIDIA NIM الحالية تستخدم:
-     *
-     * POST https://integrate.api.nvidia.com/v1/chat/completions
-     *
-     * لذلك نحافظ على قائمة النماذج داخل التطبيق.
-     *
-     * هذه النماذج هي نماذج LLM / Multimodal مناسبة
-     * للاستخدام مع واجهة chat completions.
-     */
 
     private fun getNvidiaModels(): List<ModelInfo> {
 
@@ -1415,9 +718,7 @@ class ModelCatalogRepository(
                 id = "qwen/qwen3.5-122b-a10b",
                 name = "Qwen 3.5 122B",
                 provider = "nvidia",
-                isFree = false,
                 supportsVision = true,
-                supportsImageGeneration = false,
                 recommended = true,
                 contextLength = 131072L
             ),
@@ -1426,9 +727,7 @@ class ModelCatalogRepository(
                 id = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
                 name = "Nemotron 3 Nano Omni 30B",
                 provider = "nvidia",
-                isFree = false,
                 supportsVision = true,
-                supportsImageGeneration = false,
                 recommended = true,
                 contextLength = 131072L
             ),
@@ -1437,9 +736,7 @@ class ModelCatalogRepository(
                 id = "nvidia/nemotron-nano-12b-v2-vl",
                 name = "Nemotron Nano 12B V2 VL",
                 provider = "nvidia",
-                isFree = false,
                 supportsVision = true,
-                supportsImageGeneration = false,
                 recommended = true,
                 contextLength = 32768L
             ),
@@ -1448,9 +745,7 @@ class ModelCatalogRepository(
                 id = "google/gemma-4-31b-it",
                 name = "Gemma 4 31B IT",
                 provider = "nvidia",
-                isFree = false,
                 supportsVision = true,
-                supportsImageGeneration = false,
                 recommended = true,
                 contextLength = 131072L
             ),
@@ -1459,9 +754,7 @@ class ModelCatalogRepository(
                 id = "google/gemma-3-27b-it",
                 name = "Gemma 3 27B IT",
                 provider = "nvidia",
-                isFree = false,
                 supportsVision = true,
-                supportsImageGeneration = false,
                 recommended = true,
                 contextLength = 131072L
             ),
@@ -1470,9 +763,7 @@ class ModelCatalogRepository(
                 id = "microsoft/phi-4-multimodal-instruct",
                 name = "Phi 4 Multimodal",
                 provider = "nvidia",
-                isFree = false,
                 supportsVision = true,
-                supportsImageGeneration = false,
                 recommended = true,
                 contextLength = 16384L
             ),
@@ -1481,9 +772,6 @@ class ModelCatalogRepository(
                 id = "mistralai/mistral-large-3-675b-instruct-2512",
                 name = "Mistral Large 3 675B",
                 provider = "nvidia",
-                isFree = false,
-                supportsVision = false,
-                supportsImageGeneration = false,
                 recommended = true,
                 contextLength = 131072L
             ),
@@ -1492,9 +780,6 @@ class ModelCatalogRepository(
                 id = "mistralai/ministral-14b-instruct-2512",
                 name = "Ministral 14B",
                 provider = "nvidia",
-                isFree = false,
-                supportsVision = false,
-                supportsImageGeneration = false,
                 recommended = false,
                 contextLength = 131072L
             ),
@@ -1503,29 +788,16 @@ class ModelCatalogRepository(
                 id = "moonshotai/kimi-k2.6",
                 name = "Kimi K2.6",
                 provider = "nvidia",
-                isFree = false,
                 supportsVision = true,
-                supportsImageGeneration = false,
                 recommended = true,
                 contextLength = 131072L
             )
+        ).sortedWith(
+            compareByDescending<ModelInfo> { it.recommended }
+                .thenByDescending { it.supportsVision }
+                .thenBy { it.name }
         )
-            .sortedWith(
-                compareByDescending<ModelInfo> {
-                    it.recommended
-                }
-                    .thenByDescending {
-                        it.supportsVision
-                    }
-                    .thenBy {
-                        it.name
-                    }
-            )
     }
-
-    // ============================================================
-    // Helpers
-    // ============================================================
 
     private fun jsonArrayContains(
         array: JSONArray?,
@@ -1537,13 +809,9 @@ class ModelCatalogRepository(
         }
 
         for (i in 0 until array.length()) {
-
             if (
                 array.optString(i)
-                    .equals(
-                        value,
-                        ignoreCase = true
-                    )
+                    .equals(value, ignoreCase = true)
             ) {
                 return true
             }
@@ -1557,8 +825,6 @@ class ModelCatalogRepository(
     ): Boolean =
         value.trim()
             .toDoubleOrNull()
-            ?.let {
-                it == 0.0
-            }
+            ?.let { it == 0.0 }
             ?: false
 }
