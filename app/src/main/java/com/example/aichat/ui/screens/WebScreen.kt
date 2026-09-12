@@ -39,7 +39,7 @@ fun WebScreen(
     platform: String,
     onBack: () -> Unit
 ) {
-    val platformInfo = webPlatforms[platform] ?: webPlatforms["chatgpt"]!!
+    val platformInfo = webPlatforms[platform] ?: webPlatforms["huggingchat"]!!
     var isLoading by remember { mutableStateOf(true) }
     var progress by remember { mutableIntStateOf(0) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -150,25 +150,24 @@ data class WebPlatformInfo(
 )
 
 val webPlatforms = mapOf(
-    "chatgpt" to WebPlatformInfo(
-    title = "Perplexity",
-    url = "https://www.perplexity.ai"
-),
-    
+    "huggingchat" to WebPlatformInfo(
+        title = "HuggingChat 🤗",
+        url = "https://huggingface.co/chat"
+    ),
+    "you" to WebPlatformInfo(
+        title = "You.com",
+        url = "https://you.com"
+    ),
+    "poe" to WebPlatformInfo(
+        title = "Poe",
+        url = "https://poe.com"
+    ),
     "gemini_web" to WebPlatformInfo(
         title = "Gemini Web",
         url = "https://gemini.google.com"
     ),
-    "claude" to WebPlatformInfo(
-        title = "Claude",
-        url = "https://claude.ai"
-    ),
     "copilot" to WebPlatformInfo(
         title = "Copilot",
         url = "https://copilot.microsoft.com"
-    ),
-    "perplexity" to WebPlatformInfo(
-        title = "Perplexity",
-        url = "https://www.perplexity.ai"
     )
 )
