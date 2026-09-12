@@ -67,7 +67,6 @@ dependencies {
     // JSON
     implementation("com.google.code.gson:gson:2.10.1")
 // GeckoView
-implementation("org.mozilla.geckoview:geckoview:155.0.20260903215306")
-
+implementation("org.mozilla.geckoview:geckoview:130.0.20240913135723")
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.8")
 }
