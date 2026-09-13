@@ -91,10 +91,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addMemory(
-        content: String,
-        category: String = "OTHER",
-        isShared: Boolean = true
-    ) {
+    content: String,
+    category: String = "OTHER",
+    isShared: Boolean = true,
+    sourceMessageId: Long? = null
+) {
+
+    val cleanContent = content.trim()
+
+    if (cleanContent.isBlank()) {
+        return
+    }
+
+    viewModelScope.launch {
+
+        memoryRepository.addMemory(
+            content = cleanContent,
+            sourceConversationId = _currentConversationId.value,
+            sourceMessageId = sourceMessageId,
+            category = category,
+            isShared = isShared
+        )
+    }
+    } 
 
         val cleanContent = content.trim()
 
