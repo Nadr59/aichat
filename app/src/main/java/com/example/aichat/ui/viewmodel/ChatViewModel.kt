@@ -12,6 +12,7 @@ import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
 import com.example.aichat.repository.ChatRepository
+import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -33,6 +34,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val memoryRepository =
         MemoryRepository(memoryDao)
+
+    private val memoryContextBuilder =
+        MemoryContextBuilder()
 
     val customRequestCount: StateFlow<Int> =
         repository.customRequestCount
@@ -79,6 +83,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     val selectedImageBase64: StateFlow<String?> =
         _selectedImageBase64.asStateFlow()
+
+    // ============================================================
+    // سياق الذاكرة
+    // ============================================================
+
+    private val _memoryContext =
+        MutableStateFlow("")
+
+    val memoryContext: StateFlow<String> =
+        _memoryContext.asStateFlow()
 
     // ============================================================
     // الذاكرة
@@ -171,6 +185,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * يبحث عن الذكريات المرتبطة بالسؤال الحالي
+     * ثم يحولها إلى سياق نصي.
+     *
+     * في هذه المرحلة يتم تجهيز السياق فقط.
+     * لا يتم تمريره إلى ChatRepository بعد.
+     */
+    private suspend fun prepareMemoryContext(
+        userText: String
+    ) {
+
+        if (userText.isBlank()) {
+            _memoryContext.value = ""
+            return
+        }
+
+        val memories =
+            memoryRepository.searchSharedMemories(
+                userText
+            )
+
+        _memoryContext.value =
+            memoryContextBuilder.build(
+                memories
+            )
+    }
+
     // ============================================================
     // المحادثات
     // ============================================================
@@ -179,6 +220,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         conversationId: Long
     ) {
         _currentConversationId.value = conversationId
+        _memoryContext.value = ""
         startCollecting(conversationId)
     }
 
@@ -190,6 +232,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _currentConversationId.value = null
         _messages.value = emptyList()
         _selectedImageBase64.value = null
+        _memoryContext.value = ""
         _error.value = null
     }
 
@@ -299,6 +342,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 _selectedImageBase64.value = null
+
+                // تجهيز سياق الذاكرة فقط.
+                // لن يتم تمريره إلى ChatRepository في هذه المرحلة.
+                prepareMemoryContext(
+                    userText
+                )
 
                 val response =
                     repository.sendMessage(
