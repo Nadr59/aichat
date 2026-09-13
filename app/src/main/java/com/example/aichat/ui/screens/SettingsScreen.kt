@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
@@ -65,39 +66,92 @@ ExperimentalLayoutApi::class
 @Composable
 fun SettingsScreen(
 settings: AiSettings,
-onBack: () -> Unit
+onBack: () -> Unit,
+onOpenMemory: () -> Unit
 ) {
-var provider by remember { mutableStateOf(settings.provider) }
+var provider by remember {
+mutableStateOf(settings.provider)
+}
 
-var geminiKey by remember { mutableStateOf(settings.geminiKey) }
-var geminiModel by remember { mutableStateOf(settings.geminiModel) }
+var geminiKey by remember {
+    mutableStateOf(settings.geminiKey)
+}
 
-var openrouterKey by remember { mutableStateOf(settings.openrouterKey) }
-var openrouterModel by remember { mutableStateOf(settings.openrouterModel) }
+var geminiModel by remember {
+    mutableStateOf(settings.geminiModel)
+}
 
-var openaiKey by remember { mutableStateOf(settings.openaiKey) }
-var openaiModel by remember { mutableStateOf(settings.openaiModel) }
+var openrouterKey by remember {
+    mutableStateOf(settings.openrouterKey)
+}
 
-var mistralKey by remember { mutableStateOf(settings.mistralKey) }
-var mistralModel by remember { mutableStateOf(settings.mistralModel) }
+var openrouterModel by remember {
+    mutableStateOf(settings.openrouterModel)
+}
 
-var groqKey by remember { mutableStateOf(settings.groqKey) }
-var groqModel by remember { mutableStateOf(settings.groqModel) }
+var openaiKey by remember {
+    mutableStateOf(settings.openaiKey)
+}
 
-var nvidiaKey by remember { mutableStateOf(settings.nvidiaKey) }
-var nvidiaModel by remember { mutableStateOf(settings.nvidiaModel) }
+var openaiModel by remember {
+    mutableStateOf(settings.openaiModel)
+}
 
-var huggingfaceKey by remember { mutableStateOf(settings.huggingfaceKey) }
-var huggingfaceModel by remember { mutableStateOf(settings.huggingfaceModel) }
+var mistralKey by remember {
+    mutableStateOf(settings.mistralKey)
+}
 
-var ollamaModel by remember { mutableStateOf(settings.ollamaModel) }
+var mistralModel by remember {
+    mutableStateOf(settings.mistralModel)
+}
 
-var customUrl by remember { mutableStateOf(settings.customUrl) }
-var customKey by remember { mutableStateOf(settings.customKey) }
-var customModel by remember { mutableStateOf(settings.customModel) }
+var groqKey by remember {
+    mutableStateOf(settings.groqKey)
+}
 
-var showKeys by remember { mutableStateOf(false) }
-var saved by remember { mutableStateOf(false) }
+var groqModel by remember {
+    mutableStateOf(settings.groqModel)
+}
+
+var nvidiaKey by remember {
+    mutableStateOf(settings.nvidiaKey)
+}
+
+var nvidiaModel by remember {
+    mutableStateOf(settings.nvidiaModel)
+}
+
+var huggingfaceKey by remember {
+    mutableStateOf(settings.huggingfaceKey)
+}
+
+var huggingfaceModel by remember {
+    mutableStateOf(settings.huggingfaceModel)
+}
+
+var ollamaModel by remember {
+    mutableStateOf(settings.ollamaModel)
+}
+
+var customUrl by remember {
+    mutableStateOf(settings.customUrl)
+}
+
+var customKey by remember {
+    mutableStateOf(settings.customKey)
+}
+
+var customModel by remember {
+    mutableStateOf(settings.customModel)
+}
+
+var showKeys by remember {
+    mutableStateOf(false)
+}
+
+var saved by remember {
+    mutableStateOf(false)
+}
 
 val catalog = remember {
     ModelCatalogRepository(settings)
@@ -119,9 +173,17 @@ var refreshTrigger by remember {
     mutableIntStateOf(0)
 }
 
-var onlyFree by remember { mutableStateOf(false) }
-var onlyRecommended by remember { mutableStateOf(false) }
-var onlyVision by remember { mutableStateOf(false) }
+var onlyFree by remember {
+    mutableStateOf(false)
+}
+
+var onlyRecommended by remember {
+    mutableStateOf(false)
+}
+
+var onlyVision by remember {
+    mutableStateOf(false)
+}
 
 val currentModel = when (provider) {
     "gemini" -> geminiModel
@@ -136,7 +198,10 @@ val currentModel = when (provider) {
     else -> ""
 }
 
-LaunchedEffect(provider, refreshTrigger) {
+LaunchedEffect(
+    provider,
+    refreshTrigger
+) {
     if (
         provider == "custom" ||
         provider == "ollama"
@@ -162,52 +227,72 @@ LaunchedEffect(provider, refreshTrigger) {
         else -> ""
     }
 
-    val needsKey = provider != "huggingface"
+    val needsKey =
+        provider != "huggingface"
 
-    if (needsKey && keyToUse.isBlank()) {
-        modelsError = "أدخل API Key أولاً ثم اضغط تحديث 🔄"
+    if (
+        needsKey &&
+        keyToUse.isBlank()
+    ) {
+        modelsError =
+            "أدخل API Key أولاً ثم اضغط تحديث 🔄"
+
         loadingModels = false
+
         return@LaunchedEffect
     }
 
     try {
         models = catalog.getModels(
-    provider = provider,
-    apiKey = keyToUse
-)
+            provider = provider,
+            apiKey = keyToUse
+        )
     } catch (e: Exception) {
-        modelsError = e.message ?: "تعذر تحميل النماذج"
+        modelsError =
+            e.message
+                ?: "تعذر تحميل النماذج"
     } finally {
         loadingModels = false
     }
 }
 
-val modelsWithSaved = remember(
-    models,
-    currentModel
-) {
-    if (
-        currentModel.isBlank() ||
-        models.any { it.id == currentModel }
+val modelsWithSaved =
+    remember(
+        models,
+        currentModel
     ) {
-        models
-    } else {
-        listOf(
-            ModelInfo(
-                id = currentModel,
-                name = "$currentModel 💾",
-                provider = provider,
-                isFree = currentModel.contains(":free"),
-                recommended = false
-            )
-        ) + models
+        if (
+            currentModel.isBlank() ||
+            models.any {
+                it.id == currentModel
+            }
+        ) {
+            models
+        } else {
+            listOf(
+                ModelInfo(
+                    id = currentModel,
+                    name = "$currentModel 💾",
+                    provider = provider,
+                    isFree =
+                        currentModel.contains(":free"),
+                    recommended = false
+                )
+            ) + models
+        }
     }
-}
 
-val filteredModels = modelsWithSaved
-    .filter { !onlyFree || it.isFree }
-    .filter { !onlyRecommended || it.recommended }
-    .filter { !onlyVision || it.supportsVision }
+val filteredModels =
+    modelsWithSaved
+        .filter {
+            !onlyFree || it.isFree
+        }
+        .filter {
+            !onlyRecommended || it.recommended
+        }
+        .filter {
+            !onlyVision || it.supportsVision
+        }
 
 val providers = listOf(
     "gemini" to "Google Gemini ⭐",
@@ -228,7 +313,9 @@ Scaffold(
                 Text("الإعدادات")
             },
             navigationIcon = {
-                IconButton(onClick = onBack) {
+                IconButton(
+                    onClick = onBack
+                ) {
                     Icon(
                         Icons.Filled.ArrowBack,
                         contentDescription = "رجوع"
@@ -238,20 +325,75 @@ Scaffold(
         )
     }
 ) { padding ->
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(
+                rememberScrollState()
+            )
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement =
+            Arrangement.spacedBy(12.dp)
     ) {
+
+        // ====================================================
+        // الذاكرة
+        // ====================================================
+
+        Card(
+            onClick = onOpenMemory,
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor =
+                    MaterialTheme.colorScheme.primaryContainer
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment =
+                    Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector =
+                        Icons.Filled.Memory,
+                    contentDescription = null
+                )
+
+                Spacer(
+                    Modifier.width(10.dp)
+                )
+
+                Column {
+                    Text(
+                        text = "الذكريات",
+                        fontWeight =
+                            FontWeight.Bold
+                    )
+
+                    Text(
+                        text =
+                            "عرض وتعديل وحذف الذكريات المحفوظة",
+                        style =
+                            MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
+        // ====================================================
+        // مزود المحادثة
+        // ====================================================
+
         Text(
             "مزود المحادثة:",
             fontWeight = FontWeight.Bold
         )
 
         providers.forEach { (key, name) ->
+
             Card(
                 onClick = {
                     if (provider != key) {
@@ -268,24 +410,34 @@ Scaffold(
                 colors = CardDefaults.cardColors(
                     containerColor =
                         if (provider == key) {
-                            MaterialTheme.colorScheme.primaryContainer
+                            MaterialTheme
+                                .colorScheme
+                                .primaryContainer
                         } else {
-                            MaterialTheme.colorScheme.surfaceVariant
+                            MaterialTheme
+                                .colorScheme
+                                .surfaceVariant
                                 .copy(alpha = 0.5f)
                         }
                 ),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier =
+                        Modifier.padding(12.dp),
+                    verticalAlignment =
+                        Alignment.CenterVertically
                 ) {
+
                     RadioButton(
-                        selected = provider == key,
+                        selected =
+                            provider == key,
                         onClick = null
                     )
 
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(
+                        Modifier.width(8.dp)
+                    )
 
                     Text(
                         text = name,
@@ -301,18 +453,28 @@ Scaffold(
         }
 
         HorizontalDivider(
-            modifier = Modifier.padding(vertical = 4.dp)
+            modifier =
+                Modifier.padding(
+                    vertical = 4.dp
+                )
         )
 
+        // ====================================================
+        // مفاتيح API
+        // ====================================================
+
         Row(
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment =
+                Alignment.CenterVertically
         ) {
             Text(
                 "مفاتيح API:",
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(Modifier.weight(1f))
+            Spacer(
+                Modifier.weight(1f)
+            )
 
             TextButton(
                 onClick = {
@@ -328,16 +490,28 @@ Scaffold(
                     contentDescription = null
                 )
 
-                Spacer(Modifier.width(4.dp))
+                Spacer(
+                    Modifier.width(4.dp)
+                )
 
                 Text(
-                    if (showKeys) "إخفاء" else "إظهار"
+                    if (showKeys) {
+                        "إخفاء"
+                    } else {
+                        "إظهار"
+                    }
                 )
             }
         }
 
+        // ====================================================
+        // إعدادات المزود
+        // ====================================================
+
         when (provider) {
+
             "gemini" -> {
+
                 InfoCard(
                     "احصل على مفتاح مجاني من:\n" +
                         "aistudio.google.com/apikey"
@@ -360,11 +534,18 @@ Scaffold(
                     loading = loadingModels,
                     error = modelsError,
                     onlyFree = onlyFree,
-                    onlyRecommended = onlyRecommended,
+                    onlyRecommended =
+                        onlyRecommended,
                     onlyVision = onlyVision,
-                    onFreeChange = { onlyFree = it },
-                    onRecommendedChange = { onlyRecommended = it },
-                    onVisionChange = { onlyVision = it },
+                    onFreeChange = {
+                        onlyFree = it
+                    },
+                    onRecommendedChange = {
+                        onlyRecommended = it
+                    },
+                    onVisionChange = {
+                        onlyVision = it
+                    },
                     onSelect = {
                         geminiModel = it
                         saved = false
@@ -376,6 +557,7 @@ Scaffold(
             }
 
             "openrouter" -> {
+
                 InfoCard(
                     "احصل على مفتاح من:\n" +
                         "openrouter.ai/keys\n" +
@@ -395,15 +577,23 @@ Scaffold(
 
                 DynamicModelSelector(
                     models = filteredModels,
-                    selected = openrouterModel,
+                    selected =
+                        openrouterModel,
                     loading = loadingModels,
                     error = modelsError,
                     onlyFree = onlyFree,
-                    onlyRecommended = onlyRecommended,
+                    onlyRecommended =
+                        onlyRecommended,
                     onlyVision = onlyVision,
-                    onFreeChange = { onlyFree = it },
-                    onRecommendedChange = { onlyRecommended = it },
-                    onVisionChange = { onlyVision = it },
+                    onFreeChange = {
+                        onlyFree = it
+                    },
+                    onRecommendedChange = {
+                        onlyRecommended = it
+                    },
+                    onVisionChange = {
+                        onlyVision = it
+                    },
                     onSelect = {
                         openrouterModel = it
                         saved = false
@@ -419,16 +609,21 @@ Scaffold(
                         openrouterModel = it
                         saved = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.fillMaxWidth(),
                     label = {
-                        Text("أو اكتب اسم النموذج يدوياً")
+                        Text(
+                            "أو اكتب اسم النموذج يدوياً"
+                        )
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape =
+                        RoundedCornerShape(12.dp)
                 )
             }
 
             "openai" -> {
+
                 InfoCard(
                     "احصل على مفتاح من:\n" +
                         "platform.openai.com"
@@ -451,11 +646,18 @@ Scaffold(
                     loading = loadingModels,
                     error = modelsError,
                     onlyFree = onlyFree,
-                    onlyRecommended = onlyRecommended,
+                    onlyRecommended =
+                        onlyRecommended,
                     onlyVision = onlyVision,
-                    onFreeChange = { onlyFree = it },
-                    onRecommendedChange = { onlyRecommended = it },
-                    onVisionChange = { onlyVision = it },
+                    onFreeChange = {
+                        onlyFree = it
+                    },
+                    onRecommendedChange = {
+                        onlyRecommended = it
+                    },
+                    onVisionChange = {
+                        onlyVision = it
+                    },
                     onSelect = {
                         openaiModel = it
                         saved = false
@@ -467,6 +669,7 @@ Scaffold(
             }
 
             "mistral" -> {
+
                 InfoCard(
                     "احصل على مفتاح من:\n" +
                         "console.mistral.ai\n" +
@@ -490,11 +693,18 @@ Scaffold(
                     loading = loadingModels,
                     error = modelsError,
                     onlyFree = onlyFree,
-                    onlyRecommended = onlyRecommended,
+                    onlyRecommended =
+                        onlyRecommended,
                     onlyVision = onlyVision,
-                    onFreeChange = { onlyFree = it },
-                    onRecommendedChange = { onlyRecommended = it },
-                    onVisionChange = { onlyVision = it },
+                    onFreeChange = {
+                        onlyFree = it
+                    },
+                    onRecommendedChange = {
+                        onlyRecommended = it
+                    },
+                    onVisionChange = {
+                        onlyVision = it
+                    },
                     onSelect = {
                         mistralModel = it
                         saved = false
@@ -506,6 +716,7 @@ Scaffold(
             }
 
             "groq" -> {
+
                 InfoCard(
                     "احصل على مفتاح من:\n" +
                         "console.groq.com"
@@ -528,11 +739,18 @@ Scaffold(
                     loading = loadingModels,
                     error = modelsError,
                     onlyFree = onlyFree,
-                    onlyRecommended = onlyRecommended,
+                    onlyRecommended =
+                        onlyRecommended,
                     onlyVision = onlyVision,
-                    onFreeChange = { onlyFree = it },
-                    onRecommendedChange = { onlyRecommended = it },
-                    onVisionChange = { onlyVision = it },
+                    onFreeChange = {
+                        onlyFree = it
+                    },
+                    onRecommendedChange = {
+                        onlyRecommended = it
+                    },
+                    onVisionChange = {
+                        onlyVision = it
+                    },
                     onSelect = {
                         groqModel = it
                         saved = false
@@ -548,16 +766,21 @@ Scaffold(
                         groqModel = it
                         saved = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.fillMaxWidth(),
                     label = {
-                        Text("أو اكتب اسم النموذج يدوياً")
+                        Text(
+                            "أو اكتب اسم النموذج يدوياً"
+                        )
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape =
+                        RoundedCornerShape(12.dp)
                 )
             }
 
             "nvidia" -> {
+
                 InfoCard(
                     "NVIDIA NIM\n" +
                         "احصل على API Key من NVIDIA Developer.\n" +
@@ -581,11 +804,18 @@ Scaffold(
                     loading = loadingModels,
                     error = modelsError,
                     onlyFree = onlyFree,
-                    onlyRecommended = onlyRecommended,
+                    onlyRecommended =
+                        onlyRecommended,
                     onlyVision = onlyVision,
-                    onFreeChange = { onlyFree = it },
-                    onRecommendedChange = { onlyRecommended = it },
-                    onVisionChange = { onlyVision = it },
+                    onFreeChange = {
+                        onlyFree = it
+                    },
+                    onRecommendedChange = {
+                        onlyRecommended = it
+                    },
+                    onVisionChange = {
+                        onlyVision = it
+                    },
                     onSelect = {
                         nvidiaModel = it
                         saved = false
@@ -601,19 +831,26 @@ Scaffold(
                         nvidiaModel = it
                         saved = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.fillMaxWidth(),
                     label = {
-                        Text("أو اكتب اسم نموذج NVIDIA يدوياً")
+                        Text(
+                            "أو اكتب اسم نموذج NVIDIA يدوياً"
+                        )
                     },
                     placeholder = {
-                        Text("nvidia/nemotron-...")
+                        Text(
+                            "nvidia/nemotron-..."
+                        )
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape =
+                        RoundedCornerShape(12.dp)
                 )
             }
 
             "huggingface" -> {
+
                 InfoCard(
                     "🤗 Hugging Face Inference API\n" +
                         "يمكن تحميل قائمة النماذج بدون Token، " +
@@ -638,11 +875,18 @@ Scaffold(
                     loading = loadingModels,
                     error = modelsError,
                     onlyFree = onlyFree,
-                    onlyRecommended = onlyRecommended,
+                    onlyRecommended =
+                        onlyRecommended,
                     onlyVision = onlyVision,
-                    onFreeChange = { onlyFree = it },
-                    onRecommendedChange = { onlyRecommended = it },
-                    onVisionChange = { onlyVision = it },
+                    onFreeChange = {
+                        onlyFree = it
+                    },
+                    onRecommendedChange = {
+                        onlyRecommended = it
+                    },
+                    onVisionChange = {
+                        onlyVision = it
+                    },
                     onSelect = {
                         huggingfaceModel = it
                         saved = false
@@ -658,19 +902,26 @@ Scaffold(
                         huggingfaceModel = it
                         saved = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.fillMaxWidth(),
                     label = {
-                        Text("أو اكتب اسم النموذج يدوياً")
+                        Text(
+                            "أو اكتب اسم النموذج يدوياً"
+                        )
                     },
                     placeholder = {
-                        Text("username/model-name")
+                        Text(
+                            "username/model-name"
+                        )
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape =
+                        RoundedCornerShape(12.dp)
                 )
             }
 
             "ollama" -> {
+
                 InfoCard(
                     "🦙 Ollama يعمل محلياً على الهاتف عبر Termux.\n" +
                         "لا يحتاج API Key ولا اتصالاً بالإنترنت أثناء التشغيل.\n" +
@@ -683,7 +934,8 @@ Scaffold(
                         ollamaModel = it
                         saved = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.fillMaxWidth(),
                     label = {
                         Text("اسم نموذج Ollama")
                     },
@@ -691,11 +943,13 @@ Scaffold(
                         Text("qwen2.5:1.5b")
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape =
+                        RoundedCornerShape(12.dp)
                 )
             }
 
             "custom" -> {
+
                 InfoCard(
                     "API متوافق مع OpenAI.\n" +
                         "يمكن استخدام NVIDIA أو أي خادم متوافق."
@@ -707,7 +961,8 @@ Scaffold(
                         customUrl = it
                         saved = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.fillMaxWidth(),
                     label = {
                         Text("Server URL")
                     },
@@ -717,7 +972,8 @@ Scaffold(
                         )
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape =
+                        RoundedCornerShape(12.dp)
                 )
 
                 KeyField(
@@ -728,7 +984,8 @@ Scaffold(
                         saved = false
                     },
                     showKey = showKeys,
-                    placeholder = "key... (اختياري)"
+                    placeholder =
+                        "key... (اختياري)"
                 )
 
                 OutlinedTextField(
@@ -737,65 +994,98 @@ Scaffold(
                         customModel = it
                         saved = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.fillMaxWidth(),
                     label = {
                         Text("اسم النموذج")
                     },
                     placeholder = {
-                        Text("nvidia/nemotron-...")
+                        Text(
+                            "nvidia/nemotron-..."
+                        )
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape =
+                        RoundedCornerShape(12.dp)
                 )
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(
+            Modifier.height(8.dp)
+        )
+
+        // ====================================================
+        // حفظ الإعدادات
+        // ====================================================
 
         Button(
             onClick = {
-                settings.provider = provider
 
-                settings.geminiKey = geminiKey
-                settings.geminiModel = geminiModel
+                settings.provider =
+                    provider
 
-                settings.openrouterKey = openrouterKey
-                settings.openrouterModel = openrouterModel
+                settings.geminiKey =
+                    geminiKey
+                settings.geminiModel =
+                    geminiModel
 
-                settings.openaiKey = openaiKey
-                settings.openaiModel = openaiModel
+                settings.openrouterKey =
+                    openrouterKey
+                settings.openrouterModel =
+                    openrouterModel
 
-                settings.mistralKey = mistralKey
-                settings.mistralModel = mistralModel
+                settings.openaiKey =
+                    openaiKey
+                settings.openaiModel =
+                    openaiModel
 
-                settings.groqKey = groqKey
-                settings.groqModel = groqModel
+                settings.mistralKey =
+                    mistralKey
+                settings.mistralModel =
+                    mistralModel
 
-                settings.nvidiaKey = nvidiaKey
-                settings.nvidiaModel = nvidiaModel
+                settings.groqKey =
+                    groqKey
+                settings.groqModel =
+                    groqModel
 
-                settings.huggingfaceKey = huggingfaceKey
-                settings.huggingfaceModel = huggingfaceModel
+                settings.nvidiaKey =
+                    nvidiaKey
+                settings.nvidiaModel =
+                    nvidiaModel
 
-                settings.ollamaModel = ollamaModel
+                settings.huggingfaceKey =
+                    huggingfaceKey
+                settings.huggingfaceModel =
+                    huggingfaceModel
 
-                settings.customUrl = customUrl
-                settings.customKey = customKey
-                settings.customModel = customModel
+                settings.ollamaModel =
+                    ollamaModel
+
+                settings.customUrl =
+                    customUrl
+                settings.customKey =
+                    customKey
+                settings.customModel =
+                    customModel
 
                 saved = true
             },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            shape = RoundedCornerShape(12.dp)
+            shape =
+                RoundedCornerShape(12.dp)
         ) {
             Icon(
                 Icons.Filled.Save,
                 contentDescription = null
             )
 
-            Spacer(Modifier.width(8.dp))
+            Spacer(
+                Modifier.width(8.dp)
+            )
 
             Text(
                 "حفظ الإعدادات",
@@ -803,40 +1093,67 @@ Scaffold(
             )
         }
 
+        // ====================================================
+        // رسالة الحفظ
+        // ====================================================
+
         if (saved) {
+
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor =
-                        MaterialTheme.colorScheme.primaryContainer
-                ),
-                shape = RoundedCornerShape(12.dp)
+                colors =
+                    CardDefaults.cardColors(
+                        containerColor =
+                            MaterialTheme
+                                .colorScheme
+                                .primaryContainer
+                    ),
+                shape =
+                    RoundedCornerShape(12.dp)
             ) {
+
                 Row(
                     Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment =
+                        Alignment.CenterVertically
                 ) {
+
                     Icon(
                         Icons.Filled.CheckCircle,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint =
+                            MaterialTheme
+                                .colorScheme
+                                .primary
                     )
 
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(
+                        Modifier.width(8.dp)
+                    )
 
                     Text(
                         "تم الحفظ بنجاح!",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .primary,
+                        fontWeight =
+                            FontWeight.Bold
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(
+            Modifier.height(32.dp)
+        )
     }
 }
 
 }
+
+// ================================================================
+// اختيار النموذج
+// ================================================================
 
 @OptIn(
 ExperimentalMaterial3Api::class,
@@ -861,17 +1178,22 @@ var expanded by remember {
 mutableStateOf(false)
 }
 
-val selectedInfo = models.firstOrNull {
-    it.id == selected
-}
+val selectedInfo =
+    models.firstOrNull {
+        it.id == selected
+    }
 
 Column(
-    verticalArrangement = Arrangement.spacedBy(8.dp)
+    verticalArrangement =
+        Arrangement.spacedBy(8.dp)
 ) {
+
     Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment =
+            Alignment.CenterVertically
     ) {
+
         Text(
             "النموذج",
             fontWeight = FontWeight.Bold,
@@ -879,41 +1201,66 @@ Column(
         )
 
         if (loading) {
+
             CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
+                modifier =
+                    Modifier.size(20.dp),
                 strokeWidth = 2.dp
             )
 
-            Spacer(Modifier.width(8.dp))
+            Spacer(
+                Modifier.width(8.dp)
+            )
 
             Text(
                 "جاري التحميل...",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall,
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onSurfaceVariant
             )
+
         } else {
-            IconButton(onClick = onRefresh) {
+
+            IconButton(
+                onClick = onRefresh
+            ) {
                 Icon(
                     Icons.Filled.Refresh,
-                    contentDescription = "تحديث النماذج"
+                    contentDescription =
+                        "تحديث النماذج"
                 )
             }
 
             Text(
                 "${models.size} نموذج",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall,
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onSurfaceVariant
             )
         }
     }
 
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement =
+            Arrangement.spacedBy(6.dp)
     ) {
+
         FilterChip(
             selected = onlyFree,
             onClick = {
-                onFreeChange(!onlyFree)
+                onFreeChange(
+                    !onlyFree
+                )
             },
             label = {
                 Text("🟢 مجاني")
@@ -923,7 +1270,9 @@ Column(
         FilterChip(
             selected = onlyRecommended,
             onClick = {
-                onRecommendedChange(!onlyRecommended)
+                onRecommendedChange(
+                    !onlyRecommended
+                )
             },
             label = {
                 Text("⭐ موصى به")
@@ -933,7 +1282,9 @@ Column(
         FilterChip(
             selected = onlyVision,
             onClick = {
-                onVisionChange(!onlyVision)
+                onVisionChange(
+                    !onlyVision
+                )
             },
             label = {
                 Text("🖼️ يدعم الصور")
@@ -942,18 +1293,34 @@ Column(
     }
 
     if (!error.isNullOrBlank()) {
+
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer
-            ),
-            shape = RoundedCornerShape(8.dp)
+            modifier =
+                Modifier.fillMaxWidth(),
+            colors =
+                CardDefaults.cardColors(
+                    containerColor =
+                        MaterialTheme
+                            .colorScheme
+                            .errorContainer
+                ),
+            shape =
+                RoundedCornerShape(8.dp)
         ) {
+
             Text(
-                text = "⚠️ $error\nسيتم الاحتفاظ بالنموذج المحفوظ.",
-                modifier = Modifier.padding(12.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer
+                text =
+                    "⚠️ $error\nسيتم الاحتفاظ بالنموذج المحفوظ.",
+                modifier =
+                    Modifier.padding(12.dp),
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall,
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onErrorContainer
             )
         }
     }
@@ -964,21 +1331,29 @@ Column(
             expanded = !expanded
         }
     ) {
+
         OutlinedTextField(
-            value = selectedInfo
-                ?.let { modelLabel(it) }
-                ?: selected.ifBlank { "اختر نموذجاً" },
+            value =
+                selectedInfo
+                    ?.let {
+                        modelLabel(it)
+                    }
+                    ?: selected.ifBlank {
+                        "اختر نموذجاً"
+                    },
             onValueChange = {},
             readOnly = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor(),
             trailingIcon = {
-                ExposedDropdownMenuDefaults.TrailingIcon(
-                    expanded = expanded
-                )
+                ExposedDropdownMenuDefaults
+                    .TrailingIcon(
+                        expanded = expanded
+                    )
             },
-            shape = RoundedCornerShape(12.dp),
+            shape =
+                RoundedCornerShape(12.dp),
             label = {
                 Text("النموذج المختار")
             }
@@ -990,7 +1365,9 @@ Column(
                 expanded = false
             }
         ) {
+
             if (models.isEmpty()) {
+
                 DropdownMenuItem(
                     text = {
                         Text(
@@ -1005,26 +1382,39 @@ Column(
                         expanded = false
                     }
                 )
+
             } else {
+
                 models.forEach { model ->
+
                     DropdownMenuItem(
                         text = {
+
                             Column {
+
                                 Text(
-                                    text = modelLabel(model),
+                                    text =
+                                        modelLabel(
+                                            model
+                                        ),
                                     fontWeight =
-                                        if (model.recommended) {
+                                        if (
+                                            model.recommended
+                                        ) {
                                             FontWeight.Bold
                                         } else {
                                             FontWeight.Normal
                                         }
                                 )
 
-                                if (model.contextLength > 0) {
+                                if (
+                                    model.contextLength > 0
+                                ) {
                                     Text(
-                                        text = formatContextLength(
-                                            model.contextLength
-                                        ),
+                                        text =
+                                            formatContextLength(
+                                                model.contextLength
+                                            ),
                                         style =
                                             MaterialTheme
                                                 .typography
@@ -1038,7 +1428,9 @@ Column(
                             }
                         },
                         onClick = {
-                            onSelect(model.id)
+                            onSelect(
+                                model.id
+                            )
                             expanded = false
                         }
                     )
@@ -1050,12 +1442,17 @@ Column(
 
 }
 
+// ================================================================
+// اسم النموذج
+// ================================================================
+
 private fun modelLabel(
 model: ModelInfo
 ): String = buildString {
+
 if (model.name.contains("💾")) {
-append(model.name)
-return@buildString
+    append(model.name)
+    return@buildString
 }
 
 if (model.isFree) {
@@ -1074,12 +1471,18 @@ if (model.supportsVision) {
 
 }
 
+// ================================================================
+// طول السياق
+// ================================================================
+
 private fun formatContextLength(
 contextLength: Long
 ): String {
+
 return when {
-contextLength >= 1_000_000 ->
-"${contextLength / 1_000_000}M context"
+
+    contextLength >= 1_000_000 ->
+        "${contextLength / 1_000_000}M context"
 
     contextLength >= 1_000 ->
         "${contextLength / 1_000}K context"
@@ -1090,26 +1493,47 @@ contextLength >= 1_000_000 ->
 
 }
 
+// ================================================================
+// بطاقة المعلومات
+// ================================================================
+
 @Composable
 private fun InfoCard(
 text: String
 ) {
 Card(
-colors = CardDefaults.cardColors(
+colors =
+CardDefaults.cardColors(
 containerColor =
-MaterialTheme.colorScheme.secondaryContainer
+MaterialTheme
+.colorScheme
+.secondaryContainer
 .copy(alpha = 0.5f)
 ),
-shape = RoundedCornerShape(12.dp)
+shape =
+RoundedCornerShape(12.dp)
 ) {
-Text(
-text = text,
-modifier = Modifier.padding(12.dp),
-style = MaterialTheme.typography.bodySmall,
-color = MaterialTheme.colorScheme.onSecondaryContainer
-)
+
+    Text(
+        text = text,
+        modifier =
+            Modifier.padding(12.dp),
+        style =
+            MaterialTheme
+                .typography
+                .bodySmall,
+        color =
+            MaterialTheme
+                .colorScheme
+                .onSecondaryContainer
+    )
 }
+
 }
+
+// ================================================================
+// حقل API Key
+// ================================================================
 
 @Composable
 private fun KeyField(
@@ -1122,7 +1546,8 @@ placeholder: String
 OutlinedTextField(
 value = value,
 onValueChange = onValueChange,
-modifier = Modifier.fillMaxWidth(),
+modifier =
+Modifier.fillMaxWidth(),
 label = {
 Text(label)
 },
@@ -1136,6 +1561,7 @@ VisualTransformation.None
 } else {
 PasswordVisualTransformation()
 },
-shape = RoundedCornerShape(12.dp)
+shape =
+RoundedCornerShape(12.dp)
 )
 }
