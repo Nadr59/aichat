@@ -14,77 +14,155 @@ import androidx.navigation.compose.rememberNavController
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.ui.screens.ChatScreen
 import com.example.aichat.ui.screens.ConversationsScreen
+import com.example.aichat.ui.screens.GeckoTestScreen
+import com.example.aichat.ui.screens.MemoryScreen
 import com.example.aichat.ui.screens.SettingsScreen
-import com.example.aichat.ui.screens.WebScreen
 import com.example.aichat.ui.theme.AiChatTheme
 import com.example.aichat.ui.viewmodel.ChatViewModel
-import com.example.aichat.ui.screens.GeckoTestScreen
 
 class MainActivity : ComponentActivity() {
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+override fun onCreate(
+    savedInstanceState: Bundle?
+) {
+    super.onCreate(savedInstanceState)
 
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+    enableEdgeToEdge()
 
-        setContent {
+    setContent {
 
-            AiChatTheme {
+        AiChatTheme {
 
-                Surface(modifier = Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier.fillMaxSize()
+            ) {
 
-                    val navController = rememberNavController()
-                    val viewModel: ChatViewModel = viewModel()
-                    val settings = AiSettings(this)
+                val navController =
+                    rememberNavController()
 
-                    NavHost(
-                        navController = navController,
-                        startDestination = "conversations"
-                    ) {
+                val viewModel: ChatViewModel =
+                    viewModel()
 
-                        composable("conversations") {
-                            ConversationsScreen(
-                                viewModel = viewModel,
-                                onOpenChat = { conversationId ->
-                                    viewModel.openConversation(conversationId)
-                                    navController.navigate("chat")
-                                },
-                                onNewChat = {
-                                    viewModel.newConversation()
-                                    navController.navigate("chat")
-                                },
-                                onSettings = {
-                                    navController.navigate("settings")
-                                },
-                                onOpenWeb = {
-                                    navController.navigate("web")
-                                }
-                            )
-                        }
+                val settings =
+                    AiSettings(this)
 
-                        composable("chat") {
-                            ChatScreen(
-                                viewModel = viewModel,
-                                settings = settings,
-                                onBack = { navController.popBackStack() }
-                            )
-                        }
+                NavHost(
+                    navController = navController,
+                    startDestination = "conversations"
+                ) {
 
-                        composable("settings") {
-                            SettingsScreen(
-                                settings = settings,
-                                onBack = { navController.popBackStack() }
-                            )
-                        }
+                    // ====================================================
+                    // المحادثات
+                    // ====================================================
 
-                        composable("web") {
-    GeckoTestScreen(
-        onBack = { navController.popBackStack() }
-    )
-                        }
+                    composable("conversations") {
+
+                        ConversationsScreen(
+                            viewModel = viewModel,
+
+                            onOpenChat = { conversationId ->
+
+                                viewModel.openConversation(
+                                    conversationId
+                                )
+
+                                navController.navigate(
+                                    "chat"
+                                )
+                            },
+
+                            onNewChat = {
+
+                                viewModel.newConversation()
+
+                                navController.navigate(
+                                    "chat"
+                                )
+                            },
+
+                            onSettings = {
+
+                                navController.navigate(
+                                    "settings"
+                                )
+                            },
+
+                            onOpenWeb = {
+
+                                navController.navigate(
+                                    "web"
+                                )
+                            }
+                        )
+                    }
+
+                    // ====================================================
+                    // المحادثة
+                    // ====================================================
+
+                    composable("chat") {
+
+                        ChatScreen(
+                            viewModel = viewModel,
+                            settings = settings,
+                            onBack = {
+                                navController.popBackStack()
+                            }
+                        )
+                    }
+
+                    // ====================================================
+                    // الإعدادات
+                    // ====================================================
+
+                    composable("settings") {
+
+                        SettingsScreen(
+                            settings = settings,
+
+                            onBack = {
+                                navController.popBackStack()
+                            },
+
+                            onOpenMemory = {
+                                navController.navigate(
+                                    "memory"
+                                )
+                            }
+                        )
+                    }
+
+                    // ====================================================
+                    // الذاكرة المشتركة
+                    // ====================================================
+
+                    composable("memory") {
+
+                        MemoryScreen(
+                            viewModel = viewModel,
+
+                            onBack = {
+                                navController.popBackStack()
+                            }
+                        )
+                    }
+
+                    // ====================================================
+                    // الويب / GeckoView
+                    // ====================================================
+
+                    composable("web") {
+
+                        GeckoTestScreen(
+                            onBack = {
+                                navController.popBackStack()
+                            }
+                        )
                     }
                 }
             }
         }
     }
+}
+
 }
