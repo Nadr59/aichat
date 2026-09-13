@@ -75,6 +75,7 @@ import com.example.aichat.data.model.Message
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import java.io.File
+import androidx.compose.foundation.clickable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -560,12 +561,9 @@ private fun MemoryCategoryOption(
 
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = {}
-            )
-            .padding(vertical = 2.dp),
+    .fillMaxWidth()
+    .clickable(onClick = onClick)
+    .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
 
