@@ -9,9 +9,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.data.model.Conversation
+import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
 import com.example.aichat.repository.ChatRepository
+import com.example.aichat.repository.MemoryRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,8 +27,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = ChatDatabase.getInstance(application)
     private val dao = db.chatDao()
+    private val memoryDao = db.memoryDao()
 
     val repository = ChatRepository(application)
+
+    private val memoryRepository =
+        MemoryRepository(memoryDao)
 
     val customRequestCount: StateFlow<Int> =
         repository.customRequestCount
@@ -62,6 +69,92 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedImageBase64 = MutableStateFlow<String?>(null)
     val selectedImageBase64: StateFlow<String?> =
         _selectedImageBase64.asStateFlow()
+
+    // ============================================================
+    // الذاكرة
+    // ============================================================
+
+    val sharedMemories: StateFlow<List<MemoryItem>> =
+        memoryRepository.getSharedMemories()
+            .stateIn(
+                viewModelScope,
+                SharingStarted.Lazily,
+                emptyList()
+            )
+
+    fun getConversationMemories(
+        conversationId: Long
+    ): Flow<List<MemoryItem>> {
+        return memoryRepository.getConversationMemories(
+            conversationId
+        )
+    }
+
+    fun addMemory(
+        content: String,
+        category: String = "OTHER",
+        isShared: Boolean = true
+    ) {
+
+        val cleanContent = content.trim()
+
+        if (cleanContent.isBlank()) {
+            return
+        }
+
+        viewModelScope.launch {
+
+            memoryRepository.addMemory(
+                content = cleanContent,
+                sourceConversationId = _currentConversationId.value,
+                sourceMessageId = null,
+                category = category,
+                isShared = isShared
+            )
+        }
+    }
+
+    fun updateMemory(memory: MemoryItem) {
+
+        viewModelScope.launch {
+
+            memoryRepository.updateMemory(memory)
+        }
+    }
+
+    fun deleteMemory(memory: MemoryItem) {
+
+        viewModelScope.launch {
+
+            memoryRepository.deleteMemory(memory)
+        }
+    }
+
+    suspend fun searchSharedMemories(
+        query: String
+    ): List<MemoryItem> {
+
+        return memoryRepository.searchSharedMemories(query)
+    }
+
+    suspend fun getMemoryById(
+        memoryId: Long
+    ): MemoryItem? {
+
+        return memoryRepository.getMemoryById(memoryId)
+    }
+
+    fun deleteConversationMemories(
+        conversationId: Long
+    ) {
+
+        viewModelScope.launch {
+
+            memoryRepository.deleteConversationMemories(
+                conversationId
+            )
+        }
+    }
 
     // ============================================================
     // المحادثات
