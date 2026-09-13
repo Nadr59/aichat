@@ -23,6 +23,12 @@ abstract class ChatDatabase : RoomDatabase() {
 
     abstract fun chatDao(): ChatDao
 
+    // ============================================================
+    // Memory
+    // ============================================================
+
+    abstract fun memoryDao(): MemoryDao
+
     companion object {
 
         @Volatile
