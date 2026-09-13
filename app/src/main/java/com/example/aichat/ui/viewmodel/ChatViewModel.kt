@@ -50,23 +50,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             emptyList()
         )
 
-    private val _currentConversationId = MutableStateFlow<Long?>(null)
+    private val _currentConversationId =
+        MutableStateFlow<Long?>(null)
+
     val currentConversationId: StateFlow<Long?> =
         _currentConversationId.asStateFlow()
 
-    private val _messages = MutableStateFlow<List<Message>>(emptyList())
+    private val _messages =
+        MutableStateFlow<List<Message>>(emptyList())
+
     val messages: StateFlow<List<Message>> =
         _messages.asStateFlow()
 
-    private val _isLoading = MutableStateFlow(false)
+    private val _isLoading =
+        MutableStateFlow(false)
+
     val isLoading: StateFlow<Boolean> =
         _isLoading.asStateFlow()
 
-    private val _error = MutableStateFlow<String?>(null)
+    private val _error =
+        MutableStateFlow<String?>(null)
+
     val error: StateFlow<String?> =
         _error.asStateFlow()
 
-    private val _selectedImageBase64 = MutableStateFlow<String?>(null)
+    private val _selectedImageBase64 =
+        MutableStateFlow<String?>(null)
+
     val selectedImageBase64: StateFlow<String?> =
         _selectedImageBase64.asStateFlow()
 
@@ -91,30 +101,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addMemory(
-    content: String,
-    category: String = "OTHER",
-    isShared: Boolean = true,
-    sourceMessageId: Long? = null
-) {
-
-    val cleanContent = content.trim()
-
-    if (cleanContent.isBlank()) {
-        return
-    }
-
-    viewModelScope.launch {
-
-        memoryRepository.addMemory(
-            content = cleanContent,
-            sourceConversationId = _currentConversationId.value,
-            sourceMessageId = sourceMessageId,
-            category = category,
-            isShared = isShared
-        )
-    }
-    } 
-
+        content: String,
+        category: String = "OTHER",
+        isShared: Boolean = true,
+        sourceMessageId: Long? = null
+    ) {
         val cleanContent = content.trim()
 
         if (cleanContent.isBlank()) {
@@ -125,8 +116,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             memoryRepository.addMemory(
                 content = cleanContent,
-                sourceConversationId = _currentConversationId.value,
-                sourceMessageId = null,
+                sourceConversationId =
+                    _currentConversationId.value,
+                sourceMessageId = sourceMessageId,
                 category = category,
                 isShared = isShared
             )
@@ -153,14 +145,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         query: String
     ): List<MemoryItem> {
 
-        return memoryRepository.searchSharedMemories(query)
+        return memoryRepository.searchSharedMemories(
+            query
+        )
     }
 
     suspend fun getMemoryById(
         memoryId: Long
     ): MemoryItem? {
 
-        return memoryRepository.getMemoryById(memoryId)
+        return memoryRepository.getMemoryById(
+            memoryId
+        )
     }
 
     fun deleteConversationMemories(
@@ -179,12 +175,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // المحادثات
     // ============================================================
 
-    fun openConversation(conversationId: Long) {
+    fun openConversation(
+        conversationId: Long
+    ) {
         _currentConversationId.value = conversationId
         startCollecting(conversationId)
     }
 
     fun newConversation() {
+
         messagesCollectJob?.cancel()
         messagesCollectJob = null
 
@@ -198,26 +197,43 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // مراقبة رسائل Room
     // ============================================================
 
-    private fun startCollecting(conversationId: Long) {
+    private fun startCollecting(
+        conversationId: Long
+    ) {
         messagesCollectJob?.cancel()
 
-        messagesCollectJob = viewModelScope.launch {
-            dao.getMessages(conversationId).collect { msgs ->
-                _messages.value = msgs
+        messagesCollectJob =
+            viewModelScope.launch {
+
+                dao.getMessages(
+                    conversationId
+                ).collect { msgs ->
+
+                    _messages.value = msgs
+                }
             }
-        }
     }
 
     // ============================================================
     // إرسال
     // ============================================================
 
-    fun sendMessage(userText: String) {
-        if (_isLoading.value) return
+    fun sendMessage(
+        userText: String
+    ) {
+        if (_isLoading.value) {
+            return
+        }
 
-        val image = _selectedImageBase64.value
+        val image =
+            _selectedImageBase64.value
 
-        if (userText.isBlank() && image == null) return
+        if (
+            userText.isBlank() &&
+            image == null
+        ) {
+            return
+        }
 
         sendChatMessage(userText)
     }
@@ -226,9 +242,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // المحادثة النصية وتحليل الصور
     // ============================================================
 
-    private fun sendChatMessage(userText: String) {
+    private fun sendChatMessage(
+        userText: String
+    ) {
 
-        if (_isLoading.value) return
+        if (_isLoading.value) {
+            return
+        }
 
         _isLoading.value = true
 
@@ -238,28 +258,35 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
 
-                val imageBase64 = _selectedImageBase64.value
+                val imageBase64 =
+                    _selectedImageBase64.value
 
                 val convId =
-                    _currentConversationId.value ?: run {
+                    _currentConversationId.value
+                        ?: run {
 
-                        val id = dao.insertConversation(
-                            Conversation(
-                                title = userText
-                                    .take(50)
-                                    .ifBlank { "محادثة جديدة" }
-                            )
-                        )
+                            val id =
+                                dao.insertConversation(
+                                    Conversation(
+                                        title = userText
+                                            .take(50)
+                                            .ifBlank {
+                                                "محادثة جديدة"
+                                            }
+                                    )
+                                )
 
-                        _currentConversationId.value = id
+                            _currentConversationId.value = id
 
-                        startCollecting(id)
+                            startCollecting(id)
 
-                        id
-                    }
+                            id
+                        }
 
                 val historySnapshot =
-                    dao.getMessagesOnce(convId)
+                    dao.getMessagesOnce(
+                        convId
+                    )
 
                 dao.insertMessage(
                     Message(
@@ -291,7 +318,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 val title =
                     historySnapshot
-                        .firstOrNull { it.role == "user" }
+                        .firstOrNull {
+                            it.role == "user"
+                        }
                         ?.content
                         ?: userText
 
@@ -299,14 +328,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     Conversation(
                         id = convId,
                         title = title.take(50),
-                        updatedAt = System.currentTimeMillis()
+                        updatedAt =
+                            System.currentTimeMillis()
                     )
                 )
 
             } catch (e: Exception) {
 
                 _error.value =
-                    e.message ?: "حدث خطأ غير معروف"
+                    e.message
+                        ?: "حدث خطأ غير معروف"
 
             } finally {
 
@@ -319,7 +350,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // الصور
     // ============================================================
 
-    fun selectImage(uri: Uri) {
+    fun selectImage(
+        uri: Uri
+    ) {
 
         viewModelScope.launch {
 
@@ -334,12 +367,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         ?: return@launch
 
                 val bitmap =
-                    BitmapFactory.decodeStream(stream)
+                    BitmapFactory.decodeStream(
+                        stream
+                    )
 
                 stream.close()
 
                 if (bitmap == null) {
-                    _error.value = "تعذر قراءة الصورة"
+
+                    _error.value =
+                        "تعذر قراءة الصورة"
+
                     return@launch
                 }
 
@@ -366,7 +404,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun selectBitmap(bitmap: Bitmap) {
+    fun selectBitmap(
+        bitmap: Bitmap
+    ) {
 
         viewModelScope.launch {
 
@@ -395,7 +435,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun selectFile(uri: Uri) {
+    fun selectFile(
+        uri: Uri
+    ) {
 
         viewModelScope.launch {
 
@@ -448,14 +490,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // حذف المحادثة
     // ============================================================
 
-    fun deleteConversation(conversation: Conversation) {
+    fun deleteConversation(
+        conversation: Conversation
+    ) {
 
         viewModelScope.launch {
 
-            dao.deleteMessages(conversation.id)
-            dao.deleteConversation(conversation)
+            dao.deleteMessages(
+                conversation.id
+            )
 
-            if (_currentConversationId.value == conversation.id) {
+            dao.deleteConversation(
+                conversation
+            )
+
+            if (
+                _currentConversationId.value ==
+                conversation.id
+            ) {
                 newConversation()
             }
         }
