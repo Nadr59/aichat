@@ -60,15 +60,13 @@ class MemoryRepository(
         return memoryDao.getSharedMemories()
     }
 
-    
-
 // ============================================================
 // البحث في الذكريات المشتركة
 // ============================================================
 
 suspend fun searchSharedMemories(
     query: String,
-    useSemanticAnalysis: Boolean = true, // يمكن تعطيله إذا لزم
+    useSemanticAnalysis: Boolean = true,
     ollamaUrl: String = "http://127.0.0.1:11434"
 ): List<MemoryItem> {
 
@@ -80,6 +78,7 @@ suspend fun searchSharedMemories(
 
     // المرحلة 1: البحث المحلي السريع
     val allMemories = memoryDao.getAllSharedMemories()
+    
     val localResult = MemorySearchEngine.search(
         query = cleanQuery,
         memories = allMemories,
@@ -87,13 +86,18 @@ suspend fun searchSharedMemories(
         minScore = 0.1
     )
 
+    // إذا لم نجد أي ذكريات
+    if (localResult.memories.isEmpty()) {
+        return emptyList()
+    }
+
     // إذا وجدنا تطابق قوي، نرجع مباشرة
     if (localResult.hasStrongMatch || localResult.averageScore >= 0.4) {
         return localResult.memories
     }
 
     // المرحلة 2: إذا التطابق ضعيف ونريد التحليل الدلالي
-    if (useSemanticAnalysis && localResult.memories.isNotEmpty()) {
+    if (useSemanticAnalysis) {
         return try {
             SemanticMemoryAnalyzer.analyzeMemories(
                 query = cleanQuery,
@@ -106,7 +110,7 @@ suspend fun searchSharedMemories(
         }
     }
 
-    // إذا لم نجد شيء أو عطّلنا التحليل الدلالي
+    // إذا عطّلنا التحليل الدلالي
     return localResult.memories
 }
 
