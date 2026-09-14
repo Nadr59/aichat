@@ -3,12 +3,12 @@ package com.example.aichat.repository
 import android.content.Context
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -27,21 +27,25 @@ class ChatRepository(context: Context) {
         .readTimeout(180, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
-        private val geminiProvider =
-    GeminiProvider(
-        settings = settings,
-        client = client
-    )
+
+    private val geminiProvider =
+        GeminiProvider(
+            settings = settings,
+            client = client
+        )
+
     private val mistralProvider =
-    MistralProvider(
-        settings = settings,
-        client = client
-    )
+        MistralProvider(
+            settings = settings,
+            client = client
+        )
+
     private val openAICompatibleProvider =
-    OpenAICompatibleProvider(client)
+        OpenAICompatibleProvider(client)
 
     private val _customRequestCount = MutableStateFlow(0)
-    val customRequestCount: StateFlow<Int> = _customRequestCount.asStateFlow()
+    val customRequestCount: StateFlow<Int> =
+        _customRequestCount.asStateFlow()
 
     /**
      * Repository المسؤول عن جلب قوائم النماذج.
@@ -217,7 +221,8 @@ class ChatRepository(context: Context) {
 
         client.newCall(request).execute().use { response ->
 
-            val body = response.body?.string().orEmpty()
+            val body =
+                response.body?.string().orEmpty()
 
             if (!response.isSuccessful) {
 
@@ -226,8 +231,16 @@ class ChatRepository(context: Context) {
 
                     j.optJSONObject("error")
                         ?.optString("message")
-                        ?: j.optString("error", body)
-                        ?: j.optString("message", body)
+                        ?: j.optString(
+                            "error",
+                            body
+                        )
+                        .ifBlank {
+                            j.optString(
+                                "message",
+                                body
+                            )
+                        }
 
                 }.getOrDefault(body)
 
@@ -290,62 +303,62 @@ class ChatRepository(context: Context) {
         when (settings.provider.lowercase().trim()) {
 
             "gemini" ->
-              geminiProvider.send(
-                history,
-                userMessage,
-               imageBase64
-    )
+                geminiProvider.send(
+                    history,
+                    userMessage,
+                    imageBase64
+                )
 
             "openrouter" ->
-    openAICompatibleProvider.send(
-        baseUrl =
-            "https://openrouter.ai/api/v1/chat/completions",
-        apiKey = settings.openrouterKey,
-        model = settings.openrouterModel,
-        history = history,
-        userMessage = userMessage,
-        imageBase64 = imageBase64,
-        providerName = "OpenRouter",
-        maxHistory = getMaxHistory(
-            "openrouter",
-            settings.openrouterModel
-        ),
-        maxTokens = getMaxTokens(
-            "openrouter",
-            settings.openrouterModel
-        ),
-        extraHeaders = mapOf(
-            "HTTP-Referer" to "https://github.com/",
-            "X-Title" to "AiChat"
-        )
-    )
+                openAICompatibleProvider.send(
+                    baseUrl =
+                        "https://openrouter.ai/api/v1/chat/completions",
+                    apiKey = settings.openrouterKey,
+                    model = settings.openrouterModel,
+                    history = history,
+                    userMessage = userMessage,
+                    imageBase64 = imageBase64,
+                    providerName = "OpenRouter",
+                    maxHistory = getMaxHistory(
+                        "openrouter",
+                        settings.openrouterModel
+                    ),
+                    maxTokens = getMaxTokens(
+                        "openrouter",
+                        settings.openrouterModel
+                    ),
+                    extraHeaders = mapOf(
+                        "HTTP-Referer" to "https://github.com/",
+                        "X-Title" to "AiChat"
+                    )
+                )
 
             "openai" ->
-    openAICompatibleProvider.send(
-        baseUrl =
-            "https://api.openai.com/v1/chat/completions",
-        apiKey = settings.openaiKey,
-        model = settings.openaiModel,
-        history = history,
-        userMessage = userMessage,
-        imageBase64 = imageBase64,
-        providerName = "OpenAI",
-        maxHistory = getMaxHistory(
-            "openai",
-            settings.openaiModel
-        ),
-        maxTokens = getMaxTokens(
-            "openai",
-            settings.openaiModel
-        )
-    )
+                openAICompatibleProvider.send(
+                    baseUrl =
+                        "https://api.openai.com/v1/chat/completions",
+                    apiKey = settings.openaiKey,
+                    model = settings.openaiModel,
+                    history = history,
+                    userMessage = userMessage,
+                    imageBase64 = imageBase64,
+                    providerName = "OpenAI",
+                    maxHistory = getMaxHistory(
+                        "openai",
+                        settings.openaiModel
+                    ),
+                    maxTokens = getMaxTokens(
+                        "openai",
+                        settings.openaiModel
+                    )
+                )
 
             "mistral" ->
-    mistralProvider.send(
-        history,
-        userMessage,
-        imageBase64
-    )
+                mistralProvider.send(
+                    history,
+                    userMessage,
+                    imageBase64
+                )
 
             "huggingface" ->
                 sendHuggingFace(
@@ -354,83 +367,90 @@ class ChatRepository(context: Context) {
                 )
 
             "groq" ->
-    openAICompatibleProvider.send(
-        baseUrl =
-            "https://api.groq.com/openai/v1/chat/completions",
-        apiKey = settings.groqKey,
-        model = settings.groqModel,
-        history = history,
-        userMessage = userMessage,
-        imageBase64 = imageBase64,
-        providerName = "Groq",
-        maxHistory = getMaxHistory(
-            "groq",
-            settings.groqModel
-        ),
-        maxTokens = getMaxTokens(
-            "groq",
-            settings.groqModel
-        )
-    )
+                openAICompatibleProvider.send(
+                    baseUrl =
+                        "https://api.groq.com/openai/v1/chat/completions",
+                    apiKey = settings.groqKey,
+                    model = settings.groqModel,
+                    history = history,
+                    userMessage = userMessage,
+                    imageBase64 = imageBase64,
+                    providerName = "Groq",
+                    maxHistory = getMaxHistory(
+                        "groq",
+                        settings.groqModel
+                    ),
+                    maxTokens = getMaxTokens(
+                        "groq",
+                        settings.groqModel
+                    )
+                )
 
             "nvidia" ->
-    openAICompatibleProvider.send(
-        baseUrl =
-            "https://integrate.api.nvidia.com/v1/chat/completions",
-        apiKey = settings.nvidiaKey,
-        model = settings.nvidiaModel,
-        history = history,
-        userMessage = userMessage,
-        imageBase64 = imageBase64,
-        providerName = "NVIDIA",
-        maxHistory = getMaxHistory(
-            "nvidia",
-            settings.nvidiaModel
-        ),
-        maxTokens = getMaxTokens(
-            "nvidia",
-            settings.nvidiaModel
-        )
-    )
+                openAICompatibleProvider.send(
+                    baseUrl =
+                        "https://integrate.api.nvidia.com/v1/chat/completions",
+                    apiKey = settings.nvidiaKey,
+                    model = settings.nvidiaModel,
+                    history = history,
+                    userMessage = userMessage,
+                    imageBase64 = imageBase64,
+                    providerName = "NVIDIA",
+                    maxHistory = getMaxHistory(
+                        "nvidia",
+                        settings.nvidiaModel
+                    ),
+                    maxTokens = getMaxTokens(
+                        "nvidia",
+                        settings.nvidiaModel
+                    )
+                )
 
             "ollama" ->
                 sendOllama(userMessage)
 
             "custom" -> {
 
-    val url = settings.customUrl.trim()
+                val url =
+                    settings.customUrl.trim()
 
-    if (url.isBlank()) {
-        throw IOException(
-            "Custom: رابط الخادم فارغ"
-        )
-    }
+                if (url.isBlank()) {
+                    throw IOException(
+                        "Custom: رابط الخادم فارغ"
+                    )
+                }
 
-    openAICompatibleProvider.send(
-        baseUrl = url,
-        apiKey = settings.customKey,
-        model = settings.customModel,
-        history = history,
-        userMessage = userMessage,
-        imageBase64 = imageBase64,
-        providerName = "Custom",
-        maxHistory = getMaxHistory(
-            "custom",
-            settings.customModel
-        ),
-        maxTokens = getMaxTokens(
-            "custom",
-            settings.customModel
-        ),
-        forceVision = true,
-        onCustomRequest = {
-            _customRequestCount.update {
-                it + 1
+                openAICompatibleProvider.send(
+                    baseUrl = url,
+                    apiKey = settings.customKey,
+                    model = settings.customModel,
+                    history = history,
+                    userMessage = userMessage,
+                    imageBase64 = imageBase64,
+                    providerName = "Custom",
+                    maxHistory = getMaxHistory(
+                        "custom",
+                        settings.customModel
+                    ),
+                    maxTokens = getMaxTokens(
+                        "custom",
+                        settings.customModel
+                    ),
+                    forceVision = true,
+                    onCustomRequest = {
+                        _customRequestCount.update {
+                            it + 1
+                        }
+                    }
+                )
             }
+
+            else ->
+                throw IOException(
+                    "مزود غير معروف: ${settings.provider}"
+                )
         }
-    )
-            }
-    
+    }
 
     // ============================================================
     // Ollama
@@ -443,7 +463,9 @@ class ChatRepository(context: Context) {
         val model =
             settings.ollamaModel
                 .trim()
-                .ifBlank { "qwen2.5:1.5b" }
+                .ifBlank {
+                    "qwen2.5:1.5b"
+                }
 
         if (userMessage.isBlank()) {
             throw IOException(
@@ -507,9 +529,4 @@ class ChatRepository(context: Context) {
             )
         }
     }
-
-    
-    
-    
-    
 }
