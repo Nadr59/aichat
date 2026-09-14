@@ -2,9 +2,6 @@ package com.example.aichat.repository
 
 import com.example.aichat.data.model.MemoryItem
 
-/**
- * محرك بحث محلي ذكي للذاكرة المشتركة
- */
 object MemorySearchEngine {
 
     private val ARABIC_STOP_WORDS = setOf(
@@ -12,7 +9,8 @@ object MemorySearchEngine {
         "التي", "الذي", "ما", "لا", "نعم", "هل", "كيف", "لماذا",
         "أين", "متى", "ماذا", "أي", "كل", "بعض", "هذا", "هذه",
         "ذلك", "تلك", "مع", "أو", "لكن", "لأن", "حتى", "إذا",
-        "عند", "بعد", "قبل", "فوق", "تحت", "بين", "خلال", "ضد"
+        "عند", "بعد", "قبل", "فوق", "تحت", "بين", "خلال", "ضد",
+        "كان", "يكون", "تكون"
     )
 
     private val ENGLISH_STOP_WORDS = setOf(
@@ -28,7 +26,7 @@ object MemorySearchEngine {
         return text
             .replace(Regex("[\u064B-\u0652\u0670]"), "")
             .replace(Regex("[أإآ]"), "ا")
-            .replace("ة", "ه")
+            .replace(Regex("[ةه]"), "ه") // ← توحيد ة و ه
             .replace("ى", "ي")
             .lowercase()
             .replace(Regex("[^a-z0-9\u0600-\u06FF\\s]"), " ")
@@ -58,16 +56,23 @@ object MemorySearchEngine {
 
         val commonKeywords = queryKeywords.intersect(memoryKeywords)
         
+        // إذا لا توجد كلمات مشتركة
+        if (commonKeywords.isEmpty()) return 0.0
+        
         val queryMatchRatio = commonKeywords.size.toDouble() / queryKeywords.size
         val memoryMatchRatio = commonKeywords.size.toDouble() / memoryKeywords.size
 
-        val technicalBonus = commonKeywords.count { it.length >= 5 } * 0.1
+        // بونص للكلمات الطويلة (مصطلحات تقنية)
+        val technicalBonus = commonKeywords.count { it.length >= 5 } * 0.15
 
+        // بونص إذا كانت الفئة مذكورة
         val categoryBonus = if (queryKeywords.any { 
-            it == memory.category.lowercase() 
-        }) 0.15 else 0.0
+            it == normalizeText(memory.category)
+        }) 0.2 else 0.0
 
-        val baseScore = (queryMatchRatio * 0.6) + (memoryMatchRatio * 0.4)
+        // الدرجة الأساسية - وزن أكبر لتطابق السؤال
+        val baseScore = (queryMatchRatio * 0.7) + (memoryMatchRatio * 0.3)
+        
         val totalScore = baseScore + technicalBonus + categoryBonus
 
         return when {
@@ -81,7 +86,7 @@ object MemorySearchEngine {
         query: String,
         memories: List<MemoryItem>,
         limit: Int = 8,
-        minScore: Double = 0.1
+        minScore: Double = 0.05
     ): MemorySearchResult {
         
         if (query.isBlank() || memories.isEmpty()) {
@@ -123,7 +128,7 @@ object MemorySearchEngine {
             0.0
         }
 
-        val strongMatch = sorted.any { it.score >= 0.4 }
+        val strongMatch = sorted.any { it.score >= 0.3 }
         val scoresMap = sorted.associate { it.memory.id to it.score }
 
         return MemorySearchResult(
