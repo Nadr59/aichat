@@ -96,9 +96,10 @@ result.scores.forEach { (id, score) ->
     Log.d("MemorySearch", "Memory $id: score=$score")
 }
 
-
-
     return result.memories
+    
+}
+
 
     // ============================================================
     // ذكريات محادثة محددة
