@@ -18,7 +18,8 @@ class MistralProvider(
     fun send(
         history: List<Message>,
         userMessage: String,
-        imageBase64: String?
+        imageBase64: String?,
+        memoryContext: String = ""
     ): String {
 
         val apiKey = settings.mistralKey.trim()
@@ -39,7 +40,24 @@ class MistralProvider(
         val messages = JSONArray()
 
         val maxHistory = 6
-val maxTokens = 2048
+        val maxTokens = 2048
+
+        if (memoryContext.isNotBlank()) {
+
+            messages.put(
+                JSONObject().apply {
+                    put(
+                        "role",
+                        "system"
+                    )
+                    put(
+                        "content",
+                        memoryContext
+                    )
+                }
+            )
+        }
+
         history.takeLast(maxHistory).forEach { msg ->
 
             messages.put(
