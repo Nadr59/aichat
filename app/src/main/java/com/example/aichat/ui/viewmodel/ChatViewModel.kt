@@ -205,32 +205,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * - تحليل دلالي بـ Qwen إذا كان التطابق ضعيفاً
      */
     private suspend fun prepareMemoryContext(
-        userText: String
-    ) {
-
-        if (userText.isBlank()) {
-            _memoryContext.value = ""
-            return
-        }
-
-        try {
-            val memories =
-                memoryRepository.searchSharedMemories(
-                    query = userText,
-                    useSemanticAnalysis = true,
-                    ollamaUrl = "http://127.0.0.1:11434"
-                )
-
-            _memoryContext.value =
-                memoryContextBuilder.build(
-                    memories
-                )
-
-        } catch (e: Exception) {
-            // في حالة فشل البحث، نستمر بدون ذاكرة
-            _memoryContext.value = ""
-        }
+    userText: String
+) {
+    if (userText.isBlank()) {
+        _memoryContext.value = ""
+        return
     }
+
+    try {
+        val memories =
+            memoryRepository.searchSharedMemories(
+                query = userText,
+                useSemanticAnalysis = false,  // ✅ معطّل
+                ollamaUrl = "http://127.0.0.1:11434"
+            )
+
+        _memoryContext.value =
+            memoryContextBuilder.build(
+                memories
+            )
+
+    } catch (e: Exception) {
+        _memoryContext.value = ""
+    }
+    }
+    
 
     // ============================================================
     // المحادثات
