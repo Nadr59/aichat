@@ -17,7 +17,8 @@ class HuggingFaceProvider(
 
     fun send(
         history: List<Message>,
-        userMessage: String
+        userMessage: String,
+        memoryContext: String = ""
     ): String {
 
         val apiKey =
@@ -41,6 +42,19 @@ class HuggingFaceProvider(
 
         val messages = JSONArray()
 
+        val systemContent =
+            buildString {
+
+                append(
+                    "You are a helpful AI assistant."
+                )
+
+                if (memoryContext.isNotBlank()) {
+                    append("\n\n")
+                    append(memoryContext)
+                }
+            }
+
         messages.put(
             JSONObject().apply {
                 put(
@@ -49,7 +63,7 @@ class HuggingFaceProvider(
                 )
                 put(
                     "content",
-                    "You are a helpful AI assistant."
+                    systemContent
                 )
             }
         )
