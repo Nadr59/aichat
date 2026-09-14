@@ -62,12 +62,14 @@ class MemoryRepository(
 
     
 
-    // ============================================================
+// ============================================================
 // البحث في الذكريات المشتركة
 // ============================================================
 
 suspend fun searchSharedMemories(
-    query: String
+    query: String,
+    useSemanticAnalysis: Boolean = true, // يمكن تعطيله إذا لزم
+    ollamaUrl: String = "http://127.0.0.1:11434"
 ): List<MemoryItem> {
 
     val cleanQuery = query.trim()
@@ -76,28 +78,36 @@ suspend fun searchSharedMemories(
         return emptyList()
     }
 
-    // جلب جميع الذكريات المشتركة
+    // المرحلة 1: البحث المحلي السريع
     val allMemories = memoryDao.getAllSharedMemories()
-
-    // استخدام محرك البحث الذكي
-    val result = MemorySearchEngine.search(
+    val localResult = MemorySearchEngine.search(
         query = cleanQuery,
         memories = allMemories,
         limit = 8,
         minScore = 0.1
     )
-    
-// أضف هذا السطر للتحليل:
-Log.d("MemorySearch", "Query: $cleanQuery")
-Log.d("MemorySearch", "Average Score: ${result.averageScore}")
-Log.d("MemorySearch", "Has Strong Match: ${result.hasStrongMatch}")
-Log.d("MemorySearch", "Found: ${result.memories.size} memories")
-result.scores.forEach { (id, score) ->
-    Log.d("MemorySearch", "Memory $id: score=$score")
-}
 
-    return result.memories
-    
+    // إذا وجدنا تطابق قوي، نرجع مباشرة
+    if (localResult.hasStrongMatch || localResult.averageScore >= 0.4) {
+        return localResult.memories
+    }
+
+    // المرحلة 2: إذا التطابق ضعيف ونريد التحليل الدلالي
+    if (useSemanticAnalysis && localResult.memories.isNotEmpty()) {
+        return try {
+            SemanticMemoryAnalyzer.analyzeMemories(
+                query = cleanQuery,
+                candidates = localResult.memories,
+                ollamaUrl = ollamaUrl
+            )
+        } catch (e: Exception) {
+            // في حالة فشل Qwen، نرجع نتيجة البحث المحلي
+            localResult.memories
+        }
+    }
+
+    // إذا لم نجد شيء أو عطّلنا التحليل الدلالي
+    return localResult.memories
 }
 
 
