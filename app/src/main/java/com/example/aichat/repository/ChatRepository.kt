@@ -297,20 +297,28 @@ class ChatRepository(context: Context) {
     )
 
             "openrouter" ->
-                sendOpenAICompatible(
-                    baseUrl =
-                        "https://openrouter.ai/api/v1/chat/completions",
-                    apiKey = settings.openrouterKey,
-                    model = settings.openrouterModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "OpenRouter",
-                    extraHeaders = mapOf(
-                        "HTTP-Referer" to "https://github.com/",
-                        "X-Title" to "AiChat"
-                    )
-                )
+    openAICompatibleProvider.send(
+        baseUrl =
+            "https://openrouter.ai/api/v1/chat/completions",
+        apiKey = settings.openrouterKey,
+        model = settings.openrouterModel,
+        history = history,
+        userMessage = userMessage,
+        imageBase64 = imageBase64,
+        providerName = "OpenRouter",
+        maxHistory = getMaxHistory(
+            "openrouter",
+            settings.openrouterModel
+        ),
+        maxTokens = getMaxTokens(
+            "openrouter",
+            settings.openrouterModel
+        ),
+        extraHeaders = mapOf(
+            "HTTP-Referer" to "https://github.com/",
+            "X-Title" to "AiChat"
+        )
+    )
 
             "openai" ->
     openAICompatibleProvider.send(
@@ -390,31 +398,38 @@ class ChatRepository(context: Context) {
 
             "custom" -> {
 
-                val url = settings.customUrl.trim()
+    val url = settings.customUrl.trim()
 
-                if (url.isBlank()) {
-                    throw IOException(
-                        "Custom: رابط الخادم فارغ"
-                    )
-                }
+    if (url.isBlank()) {
+        throw IOException(
+            "Custom: رابط الخادم فارغ"
+        )
+    }
 
-                sendOpenAICompatible(
-                    baseUrl = url,
-                    apiKey = settings.customKey,
-                    model = settings.customModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "Custom",
-                    forceVision = true
-                )
+    openAICompatibleProvider.send(
+        baseUrl = url,
+        apiKey = settings.customKey,
+        model = settings.customModel,
+        history = history,
+        userMessage = userMessage,
+        imageBase64 = imageBase64,
+        providerName = "Custom",
+        maxHistory = getMaxHistory(
+            "custom",
+            settings.customModel
+        ),
+        maxTokens = getMaxTokens(
+            "custom",
+            settings.customModel
+        ),
+        forceVision = true,
+        onCustomRequest = {
+            _customRequestCount.update {
+                it + 1
             }
-
-            else ->
-                throw IOException(
-                    "مزود غير معروف: ${settings.provider}"
-                )
         }
+    )
+            }
     }
 
     // ============================================================
