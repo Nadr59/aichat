@@ -49,18 +49,12 @@ interface MemoryDao {
     // البحث في الذكريات المشتركة
     // ============================================================
 
-    @Query(
-        """
-        SELECT * FROM memory_items
-        WHERE isShared = 1
-        AND (
-            content LIKE '%' || :query || '%'
-            OR category LIKE '%' || :query || '%'
-        )
-        ORDER BY updatedAt DESC
-        """
-    )
-    suspend fun searchSharedMemories(query: String): List<MemoryItem>
+    @Query("""
+    SELECT * FROM memory_items
+    WHERE isShared = 1
+    ORDER BY updatedAt DESC
+""")
+suspend fun getAllSharedMemories(): List<MemoryItem>
 
     // ============================================================
     // ذكريات محادثة محددة
