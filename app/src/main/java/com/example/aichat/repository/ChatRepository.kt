@@ -184,7 +184,8 @@ class ChatRepository(context: Context) {
                 geminiProvider.send(
                     history = history,
                     userMessage = userMessage,
-                    imageBase64 = imageBase64
+                    imageBase64 = imageBase64,
+                    memoryContext = memoryContext
                 )
 
             // ----------------------------------------------------
