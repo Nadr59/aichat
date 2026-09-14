@@ -292,7 +292,7 @@ class ChatRepository(context: Context) {
                 mistralProvider.send(
                     history = history,
                     userMessage = userMessage,
-                    imageBase64 = imageBase64
+                    imageBase64 = imageBase64,
                     memoryContext = memoryContext
                 )
 
