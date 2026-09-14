@@ -166,7 +166,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     ): List<MemoryItem> {
 
         return memoryRepository.searchSharedMemories(
-            query
+            query = query,
+            useSemanticAnalysis = true,
+            ollamaUrl = "http://127.0.0.1:11434"
         )
     }
 
@@ -197,6 +199,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      *
      * يتم تجهيز السياق هنا قبل إرسال الطلب
      * إلى ChatRepository.
+     *
+     * يستخدم البحث الهجين:
+     * - بحث محلي سريع أولاً
+     * - تحليل دلالي بـ Qwen إذا كان التطابق ضعيفاً
      */
     private suspend fun prepareMemoryContext(
         userText: String
@@ -207,15 +213,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val memories =
-            memoryRepository.searchSharedMemories(
-                userText
-            )
+        try {
+            val memories =
+                memoryRepository.searchSharedMemories(
+                    query = userText,
+                    useSemanticAnalysis = true,
+                    ollamaUrl = "http://127.0.0.1:11434"
+                )
 
-        _memoryContext.value =
-            memoryContextBuilder.build(
-                memories
-            )
+            _memoryContext.value =
+                memoryContextBuilder.build(
+                    memories
+                )
+
+        } catch (e: Exception) {
+            // في حالة فشل البحث، نستمر بدون ذاكرة
+            _memoryContext.value = ""
+        }
     }
 
     // ============================================================
@@ -352,7 +366,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 _selectedImageBase64.value = null
 
-                // تجهيز سياق الذاكرة قبل إرسال الطلب.
+                // تجهيز سياق الذاكرة قبل إرسال الطلب
+                // يستخدم البحث الهجين (محلي + Qwen)
                 prepareMemoryContext(
                     userText
                 )
