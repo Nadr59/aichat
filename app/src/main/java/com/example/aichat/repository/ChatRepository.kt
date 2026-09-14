@@ -174,8 +174,22 @@ class ChatRepository(context: Context) {
     suspend fun sendMessage(
         history: List<Message>,
         userMessage: String,
-        imageBase64: String? = null
+        imageBase64: String? = null,
+
+        // سياق الذاكرة المشتركة.
+        //
+        // في هذه المرحلة يتم استقباله فقط.
+        // سيتم تمريره إلى Providers في المرحلة التالية
+        // بعد نجاح البناء.
+        memoryContext: String = ""
+
     ): String = withContext(Dispatchers.IO) {
+
+        // نحتفظ بالمتغير داخل النطاق الحالي حتى يكون
+        // واضحًا أن ChatRepository أصبح يستقبل سياق الذاكرة.
+        //
+        // لا يتم إرساله إلى أي Provider في هذه المرحلة.
+        memoryContext.trim()
 
         when (settings.provider.lowercase().trim()) {
 
