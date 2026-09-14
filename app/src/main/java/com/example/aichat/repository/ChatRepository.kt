@@ -401,10 +401,10 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "ollama" ->
-
-                ollamaProvider.send(
-                    userMessage = userMessage
-                )
+    ollamaProvider.send(
+        userMessage = userMessage,
+        memoryContext = memoryContext
+    )
 
             // ----------------------------------------------------
             // Custom
