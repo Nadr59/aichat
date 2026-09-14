@@ -18,7 +18,8 @@ class GeminiProvider(
     fun send(
         history: List<Message>,
         userMessage: String,
-        imageBase64: String?
+        imageBase64: String?,
+        memoryContext: String = ""
     ): String {
 
         val apiKey = settings.geminiKey.trim()
@@ -104,6 +105,27 @@ class GeminiProvider(
         val requestJson = JSONObject().apply {
 
             put("contents", contents)
+
+            if (memoryContext.isNotBlank()) {
+                put(
+                    "systemInstruction",
+                    JSONObject().apply {
+                        put(
+                            "parts",
+                            JSONArray().apply {
+                                put(
+                                    JSONObject().apply {
+                                        put(
+                                            "text",
+                                            memoryContext
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+            }
 
             put(
                 "generationConfig",
