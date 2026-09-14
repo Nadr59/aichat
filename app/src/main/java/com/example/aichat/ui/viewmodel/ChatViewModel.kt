@@ -10,6 +10,7 @@ import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
 import com.example.aichat.repository.ChatRepository
+import com.example.aichat.repository.ConversationRepository
 import com.example.aichat.repository.ImageProcessor
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryRepository
@@ -30,6 +31,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     val repository = ChatRepository(application)
 
+    private val conversationRepository =
+        ConversationRepository(dao)
+
     private val memoryRepository =
         MemoryRepository(memoryDao)
 
@@ -48,7 +52,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // State
     // ============================================================
 
-    val conversations = dao.getAllConversations()
+    val conversations = conversationRepository
+        .getAllConversations()
         .stateIn(
             viewModelScope,
             SharingStarted.Lazily,
@@ -249,12 +254,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         messagesCollectJob =
             viewModelScope.launch {
 
-                dao.getMessages(
-                    conversationId
-                ).collect { msgs ->
+                conversationRepository
+                    .getMessages(conversationId)
+                    .collect { msgs ->
 
-                    _messages.value = msgs
-                }
+                        _messages.value = msgs
+                    }
             }
     }
 
@@ -310,15 +315,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         ?: run {
 
                             val id =
-                                dao.insertConversation(
-                                    Conversation(
-                                        title = userText
-                                            .take(50)
-                                            .ifBlank {
-                                                "محادثة جديدة"
-                                            }
+                                conversationRepository
+                                    .insertConversation(
+                                        Conversation(
+                                            title = userText
+                                                .take(50)
+                                                .ifBlank {
+                                                    "محادثة جديدة"
+                                                }
+                                        )
                                     )
-                                )
 
                             _currentConversationId.value = id
 
@@ -328,19 +334,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
 
                 val historySnapshot =
-                    dao.getMessagesOnce(
-                        convId
-                    )
+                    conversationRepository
+                        .getMessagesOnce(
+                            convId
+                        )
 
-                dao.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role = "user",
-                        content = userText,
-                        imageBase64 = imageBase64,
-                        messageType = "text"
+                conversationRepository
+                    .insertMessage(
+                        Message(
+                            conversationId = convId,
+                            role = "user",
+                            content = userText,
+                            imageBase64 = imageBase64,
+                            messageType = "text"
+                        )
                     )
-                )
 
                 _selectedImageBase64.value = null
 
@@ -357,14 +365,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         imageBase64 = imageBase64
                     )
 
-                dao.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role = "assistant",
-                        content = response,
-                        messageType = "text"
+                conversationRepository
+                    .insertMessage(
+                        Message(
+                            conversationId = convId,
+                            role = "assistant",
+                            content = response,
+                            messageType = "text"
+                        )
                     )
-                )
 
                 val title =
                     historySnapshot
@@ -374,14 +383,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         ?.content
                         ?: userText
 
-                dao.updateConversation(
-                    Conversation(
-                        id = convId,
-                        title = title.take(50),
-                        updatedAt =
-                            System.currentTimeMillis()
+                conversationRepository
+                    .updateConversation(
+                        Conversation(
+                            id = convId,
+                            title = title.take(50),
+                            updatedAt =
+                                System.currentTimeMillis()
+                        )
                     )
-                )
 
             } catch (e: Exception) {
 
@@ -514,11 +524,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
 
-            dao.deleteMessages(
+            conversationRepository.deleteMessages(
                 conversation.id
             )
 
-            dao.deleteConversation(
+            conversationRepository.deleteConversation(
                 conversation
             )
 
