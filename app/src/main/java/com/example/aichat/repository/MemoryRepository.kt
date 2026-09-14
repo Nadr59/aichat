@@ -60,23 +60,35 @@ class MemoryRepository(
         return memoryDao.getSharedMemories()
     }
 
+    
+
     // ============================================================
-    // البحث في الذكريات المشتركة
-    // ============================================================
+// البحث في الذكريات المشتركة
+// ============================================================
 
-    suspend fun searchSharedMemories(
-        query: String
-    ): List<MemoryItem> {
+suspend fun searchSharedMemories(
+    query: String
+): List<MemoryItem> {
 
-        val cleanQuery = query.trim()
+    val cleanQuery = query.trim()
 
-        if (cleanQuery.isBlank()) {
-            return emptyList()
-        }
-
-        return memoryDao.searchSharedMemories(cleanQuery)
+    if (cleanQuery.isBlank()) {
+        return emptyList()
     }
 
+    // جلب جميع الذكريات المشتركة
+    val allMemories = memoryDao.getAllSharedMemories()
+
+    // استخدام محرك البحث الذكي
+    val result = MemorySearchEngine.search(
+        query = cleanQuery,
+        memories = allMemories,
+        limit = 8,
+        minScore = 0.1
+    )
+
+    return result.memories
+}
     // ============================================================
     // ذكريات محادثة محددة
     // ============================================================
