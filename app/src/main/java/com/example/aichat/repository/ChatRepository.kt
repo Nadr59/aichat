@@ -9,12 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -27,6 +22,10 @@ class ChatRepository(context: Context) {
         .readTimeout(180, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
+
+    // ============================================================
+    // مزودو الذكاء الاصطناعي
+    // ============================================================
 
     private val geminiProvider =
         GeminiProvider(
@@ -42,32 +41,45 @@ class ChatRepository(context: Context) {
 
     private val openAICompatibleProvider =
         OpenAICompatibleProvider(client)
-        private val ollamaProvider =
-    OllamaProvider(
-        settings = settings,
-        client = client
-    )
-    private val huggingFaceProvider =
-    HuggingFaceProvider(
-        settings = settings,
-        client = client
-    )
 
-    private val _customRequestCount = MutableStateFlow(0)
+    private val ollamaProvider =
+        OllamaProvider(
+            settings = settings,
+            client = client
+        )
+
+    private val huggingFaceProvider =
+        HuggingFaceProvider(
+            settings = settings,
+            client = client
+        )
+
+    // ============================================================
+    // عداد طلبات Custom
+    // ============================================================
+
+    private val _customRequestCount =
+        MutableStateFlow(0)
+
     val customRequestCount: StateFlow<Int> =
         _customRequestCount.asStateFlow()
+
+    // ============================================================
+    // مستودع قوائم النماذج
+    // ============================================================
 
     /**
      * Repository المسؤول عن جلب قوائم النماذج.
      *
      * تم فصل هذه المسؤولية عن ChatRepository
-     * حتى يبقى هذا الكلاس مسؤولاً عن المحادثة وإرسال الرسائل.
+     * حتى يبقى هذا الكلاس مسؤولاً عن المحادثة
+     * وتوجيه الرسائل إلى المزود المناسب.
      */
     private val modelCatalogRepository =
         ModelCatalogRepository(settings)
 
     // ============================================================
-    // إعدادات تاريخ المحادثة وعدد التوكنات
+    // إعدادات تاريخ المحادثة
     // ============================================================
 
     private fun getMaxHistory(
@@ -83,6 +95,10 @@ class ChatRepository(context: Context) {
 
         else -> 10
     }
+
+    // ============================================================
+    // الحد الأقصى للتوكنات
+    // ============================================================
 
     private fun getMaxTokens(
         provider: String,
@@ -104,51 +120,52 @@ class ChatRepository(context: Context) {
 
     /**
      * الواجهة القديمة ما زالت موجودة حتى لا نكسر
-     * أي كود يستدعي ChatRepository.getAvailableModels().
+     * أي كود يستدعي:
      *
-     * التنفيذ الفعلي أصبح الآن داخل ModelCatalogRepository.
+     * ChatRepository.getAvailableModels()
+     *
+     * التنفيذ الفعلي أصبح داخل ModelCatalogRepository.
      */
     suspend fun getAvailableModels(
         provider: String,
         forImages: Boolean = false
     ) = withContext(Dispatchers.IO) {
 
-        val apiKey = when (provider.lowercase().trim()) {
+        val apiKey =
+            when (provider.lowercase().trim()) {
 
-            "gemini" ->
-                settings.geminiKey
+                "gemini" ->
+                    settings.geminiKey
 
-            "openrouter" ->
-                settings.openrouterKey
+                "openrouter" ->
+                    settings.openrouterKey
 
-            "openai" ->
-                settings.openaiKey
+                "openai" ->
+                    settings.openaiKey
 
-            "mistral" ->
-                settings.mistralKey
+                "mistral" ->
+                    settings.mistralKey
 
-            "groq" ->
-                settings.groqKey
+                "groq" ->
+                    settings.groqKey
 
-            "nvidia" ->
-                settings.nvidiaKey
+                "nvidia" ->
+                    settings.nvidiaKey
 
-            "huggingface",
-            "hugging face",
-            "hf" ->
-                settings.huggingfaceKey
+                "huggingface",
+                "hugging face",
+                "hf" ->
+                    settings.huggingfaceKey
 
-            else ->
-                ""
-        }
+                else ->
+                    ""
+            }
 
         modelCatalogRepository.getModels(
             provider = provider,
             apiKey = apiKey
         )
     }
-
-
 
     // ============================================================
     // إرسال الرسالة الرئيسية
@@ -162,12 +179,20 @@ class ChatRepository(context: Context) {
 
         when (settings.provider.lowercase().trim()) {
 
+            // ----------------------------------------------------
+            // Gemini
+            // ----------------------------------------------------
+
             "gemini" ->
                 geminiProvider.send(
-                    history,
-                    userMessage,
-                    imageBase64
+                    history = history,
+                    userMessage = userMessage,
+                    imageBase64 = imageBase64
                 )
+
+            // ----------------------------------------------------
+            // OpenRouter
+            // ----------------------------------------------------
 
             "openrouter" ->
                 openAICompatibleProvider.send(
@@ -180,18 +205,22 @@ class ChatRepository(context: Context) {
                     imageBase64 = imageBase64,
                     providerName = "OpenRouter",
                     maxHistory = getMaxHistory(
-                        "openrouter",
-                        settings.openrouterModel
+                        provider = "openrouter",
+                        model = settings.openrouterModel
                     ),
                     maxTokens = getMaxTokens(
-                        "openrouter",
-                        settings.openrouterModel
+                        provider = "openrouter",
+                        model = settings.openrouterModel
                     ),
                     extraHeaders = mapOf(
                         "HTTP-Referer" to "https://github.com/",
                         "X-Title" to "AiChat"
                     )
                 )
+
+            // ----------------------------------------------------
+            // OpenAI
+            // ----------------------------------------------------
 
             "openai" ->
                 openAICompatibleProvider.send(
@@ -204,27 +233,39 @@ class ChatRepository(context: Context) {
                     imageBase64 = imageBase64,
                     providerName = "OpenAI",
                     maxHistory = getMaxHistory(
-                        "openai",
-                        settings.openaiModel
+                        provider = "openai",
+                        model = settings.openaiModel
                     ),
                     maxTokens = getMaxTokens(
-                        "openai",
-                        settings.openaiModel
+                        provider = "openai",
+                        model = settings.openaiModel
                     )
                 )
 
+            // ----------------------------------------------------
+            // Mistral
+            // ----------------------------------------------------
+
             "mistral" ->
                 mistralProvider.send(
-                    history,
-                    userMessage,
-                    imageBase64
+                    history = history,
+                    userMessage = userMessage,
+                    imageBase64 = imageBase64
                 )
 
+            // ----------------------------------------------------
+            // Hugging Face
+            // ----------------------------------------------------
+
             "huggingface" ->
-    huggingFaceProvider.send(
-        history = history,
-        userMessage = userMessage
-    )
+                huggingFaceProvider.send(
+                    history = history,
+                    userMessage = userMessage
+                )
+
+            // ----------------------------------------------------
+            // Groq
+            // ----------------------------------------------------
 
             "groq" ->
                 openAICompatibleProvider.send(
@@ -237,14 +278,18 @@ class ChatRepository(context: Context) {
                     imageBase64 = imageBase64,
                     providerName = "Groq",
                     maxHistory = getMaxHistory(
-                        "groq",
-                        settings.groqModel
+                        provider = "groq",
+                        model = settings.groqModel
                     ),
                     maxTokens = getMaxTokens(
-                        "groq",
-                        settings.groqModel
+                        provider = "groq",
+                        model = settings.groqModel
                     )
                 )
+
+            // ----------------------------------------------------
+            // NVIDIA
+            // ----------------------------------------------------
 
             "nvidia" ->
                 openAICompatibleProvider.send(
@@ -257,19 +302,27 @@ class ChatRepository(context: Context) {
                     imageBase64 = imageBase64,
                     providerName = "NVIDIA",
                     maxHistory = getMaxHistory(
-                        "nvidia",
-                        settings.nvidiaModel
+                        provider = "nvidia",
+                        model = settings.nvidiaModel
                     ),
                     maxTokens = getMaxTokens(
-                        "nvidia",
-                        settings.nvidiaModel
+                        provider = "nvidia",
+                        model = settings.nvidiaModel
                     )
                 )
 
+            // ----------------------------------------------------
+            // Ollama
+            // ----------------------------------------------------
+
             "ollama" ->
-    ollamaProvider.send(
-        userMessage
-    )
+                ollamaProvider.send(
+                    userMessage = userMessage
+                )
+
+            // ----------------------------------------------------
+            // Custom
+            // ----------------------------------------------------
 
             "custom" -> {
 
@@ -291,12 +344,12 @@ class ChatRepository(context: Context) {
                     imageBase64 = imageBase64,
                     providerName = "Custom",
                     maxHistory = getMaxHistory(
-                        "custom",
-                        settings.customModel
+                        provider = "custom",
+                        model = settings.customModel
                     ),
                     maxTokens = getMaxTokens(
-                        "custom",
-                        settings.customModel
+                        provider = "custom",
+                        model = settings.customModel
                     ),
                     forceVision = true,
                     onCustomRequest = {
@@ -307,12 +360,14 @@ class ChatRepository(context: Context) {
                 )
             }
 
+            // ----------------------------------------------------
+            // مزود غير معروف
+            // ----------------------------------------------------
+
             else ->
                 throw IOException(
                     "مزود غير معروف: ${settings.provider}"
                 )
         }
     }
-
-            
 }
