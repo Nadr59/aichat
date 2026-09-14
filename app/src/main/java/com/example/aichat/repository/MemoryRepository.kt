@@ -63,10 +63,9 @@ class MemoryRepository(
 // ============================================================
 // البحث في الذكريات المشتركة
 // ============================================================
-
 suspend fun searchSharedMemories(
     query: String,
-    useSemanticAnalysis: Boolean = true,
+    useSemanticAnalysis: Boolean = false,  // ✅ معطّل افتراضياً
     ollamaUrl: String = "http://127.0.0.1:11434"
 ): List<MemoryItem> {
 
@@ -82,30 +81,28 @@ suspend fun searchSharedMemories(
         query = cleanQuery,
         memories = allMemories,
         limit = 8,
-        minScore = 0.05  // ← خفضناه من 0.1 إلى 0.05
+        minScore = 0.05  // ✅ متسامح
     )
 
     if (localResult.memories.isEmpty()) {
         return emptyList()
     }
 
-    if (localResult.hasStrongMatch || localResult.averageScore >= 0.3) {
+    // ✅ نقبل أي نتيجة من البحث المحلي
+    if (!useSemanticAnalysis || localResult.averageScore >= 0.2) {
         return localResult.memories
     }
 
-    if (useSemanticAnalysis) {
-        return try {
-            SemanticMemoryAnalyzer.analyzeMemories(
-                query = cleanQuery,
-                candidates = localResult.memories,
-                ollamaUrl = ollamaUrl
-            )
-        } catch (e: Exception) {
-            localResult.memories
-        }
+    // ✅ Qwen فقط للحالات الصعبة جداً
+    return try {
+        SemanticMemoryAnalyzer.analyzeMemories(
+            query = cleanQuery,
+            candidates = localResult.memories,
+            ollamaUrl = ollamaUrl
+        )
+    } catch (e: Exception) {
+        localResult.memories
     }
-
-    return localResult.memories
 }
 
     // ============================================================
