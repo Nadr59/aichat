@@ -68,13 +68,6 @@ class ChatRepository(context: Context) {
     // مستودع قوائم النماذج
     // ============================================================
 
-    /**
-     * Repository المسؤول عن جلب قوائم النماذج.
-     *
-     * تم فصل هذه المسؤولية عن ChatRepository
-     * حتى يبقى هذا الكلاس مسؤولاً عن المحادثة
-     * وتوجيه الرسائل إلى المزود المناسب.
-     */
     private val modelCatalogRepository =
         ModelCatalogRepository(settings)
 
@@ -86,14 +79,19 @@ class ChatRepository(context: Context) {
         provider: String,
         model: String
     ): Int = when {
-        provider == "groq" -> 6
 
-        provider == "mistral" -> 6
+        provider == "groq" ->
+            6
+
+        provider == "mistral" ->
+            6
 
         provider == "openrouter" &&
-            model.contains(":free") -> 6
+            model.contains(":free") ->
+            6
 
-        else -> 10
+        else ->
+            10
     }
 
     // ============================================================
@@ -104,28 +102,25 @@ class ChatRepository(context: Context) {
         provider: String,
         model: String
     ): Int = when {
-        provider == "groq" -> 2048
 
-        provider == "mistral" -> 2048
+        provider == "groq" ->
+            2048
+
+        provider == "mistral" ->
+            2048
 
         provider == "openrouter" &&
-            model.contains(":free") -> 2048
+            model.contains(":free") ->
+            2048
 
-        else -> 4096
+        else ->
+            4096
     }
 
     // ============================================================
     // جلب النماذج
     // ============================================================
 
-    /**
-     * الواجهة القديمة ما زالت موجودة حتى لا نكسر
-     * أي كود يستدعي:
-     *
-     * ChatRepository.getAvailableModels()
-     *
-     * التنفيذ الفعلي أصبح داخل ModelCatalogRepository.
-     */
     suspend fun getAvailableModels(
         provider: String,
         forImages: Boolean = false
@@ -175,21 +170,8 @@ class ChatRepository(context: Context) {
         history: List<Message>,
         userMessage: String,
         imageBase64: String? = null,
-
-        // سياق الذاكرة المشتركة.
-        //
-        // في هذه المرحلة يتم استقباله فقط.
-        // سيتم تمريره إلى Providers في المرحلة التالية
-        // بعد نجاح البناء.
         memoryContext: String = ""
-
     ): String = withContext(Dispatchers.IO) {
-
-        // نحتفظ بالمتغير داخل النطاق الحالي حتى يكون
-        // واضحًا أن ChatRepository أصبح يستقبل سياق الذاكرة.
-        //
-        // لا يتم إرساله إلى أي Provider في هذه المرحلة.
-        memoryContext.trim()
 
         when (settings.provider.lowercase().trim()) {
 
@@ -198,6 +180,7 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "gemini" ->
+
                 geminiProvider.send(
                     history = history,
                     userMessage = userMessage,
@@ -209,26 +192,50 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "openrouter" ->
+
                 openAICompatibleProvider.send(
                     baseUrl =
                         "https://openrouter.ai/api/v1/chat/completions",
-                    apiKey = settings.openrouterKey,
-                    model = settings.openrouterModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "OpenRouter",
-                    maxHistory = getMaxHistory(
-                        provider = "openrouter",
-                        model = settings.openrouterModel
-                    ),
-                    maxTokens = getMaxTokens(
-                        provider = "openrouter",
-                        model = settings.openrouterModel
-                    ),
+
+                    apiKey =
+                        settings.openrouterKey,
+
+                    model =
+                        settings.openrouterModel,
+
+                    history =
+                        history,
+
+                    userMessage =
+                        userMessage,
+
+                    imageBase64 =
+                        imageBase64,
+
+                    providerName =
+                        "OpenRouter",
+
+                    maxHistory =
+                        getMaxHistory(
+                            provider = "openrouter",
+                            model = settings.openrouterModel
+                        ),
+
+                    maxTokens =
+                        getMaxTokens(
+                            provider = "openrouter",
+                            model = settings.openrouterModel
+                        ),
+
+                    memoryContext =
+                        memoryContext,
+
                     extraHeaders = mapOf(
-                        "HTTP-Referer" to "https://github.com/",
-                        "X-Title" to "AiChat"
+                        "HTTP-Referer" to
+                            "https://github.com/",
+
+                        "X-Title" to
+                            "AiChat"
                     )
                 )
 
@@ -237,23 +244,43 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "openai" ->
+
                 openAICompatibleProvider.send(
                     baseUrl =
                         "https://api.openai.com/v1/chat/completions",
-                    apiKey = settings.openaiKey,
-                    model = settings.openaiModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "OpenAI",
-                    maxHistory = getMaxHistory(
-                        provider = "openai",
-                        model = settings.openaiModel
-                    ),
-                    maxTokens = getMaxTokens(
-                        provider = "openai",
-                        model = settings.openaiModel
-                    )
+
+                    apiKey =
+                        settings.openaiKey,
+
+                    model =
+                        settings.openaiModel,
+
+                    history =
+                        history,
+
+                    userMessage =
+                        userMessage,
+
+                    imageBase64 =
+                        imageBase64,
+
+                    providerName =
+                        "OpenAI",
+
+                    maxHistory =
+                        getMaxHistory(
+                            provider = "openai",
+                            model = settings.openaiModel
+                        ),
+
+                    maxTokens =
+                        getMaxTokens(
+                            provider = "openai",
+                            model = settings.openaiModel
+                        ),
+
+                    memoryContext =
+                        memoryContext
                 )
 
             // ----------------------------------------------------
@@ -261,6 +288,7 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "mistral" ->
+
                 mistralProvider.send(
                     history = history,
                     userMessage = userMessage,
@@ -272,6 +300,7 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "huggingface" ->
+
                 huggingFaceProvider.send(
                     history = history,
                     userMessage = userMessage
@@ -282,23 +311,43 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "groq" ->
+
                 openAICompatibleProvider.send(
                     baseUrl =
                         "https://api.groq.com/openai/v1/chat/completions",
-                    apiKey = settings.groqKey,
-                    model = settings.groqModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "Groq",
-                    maxHistory = getMaxHistory(
-                        provider = "groq",
-                        model = settings.groqModel
-                    ),
-                    maxTokens = getMaxTokens(
-                        provider = "groq",
-                        model = settings.groqModel
-                    )
+
+                    apiKey =
+                        settings.groqKey,
+
+                    model =
+                        settings.groqModel,
+
+                    history =
+                        history,
+
+                    userMessage =
+                        userMessage,
+
+                    imageBase64 =
+                        imageBase64,
+
+                    providerName =
+                        "Groq",
+
+                    maxHistory =
+                        getMaxHistory(
+                            provider = "groq",
+                            model = settings.groqModel
+                        ),
+
+                    maxTokens =
+                        getMaxTokens(
+                            provider = "groq",
+                            model = settings.groqModel
+                        ),
+
+                    memoryContext =
+                        memoryContext
                 )
 
             // ----------------------------------------------------
@@ -306,23 +355,43 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "nvidia" ->
+
                 openAICompatibleProvider.send(
                     baseUrl =
                         "https://integrate.api.nvidia.com/v1/chat/completions",
-                    apiKey = settings.nvidiaKey,
-                    model = settings.nvidiaModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "NVIDIA",
-                    maxHistory = getMaxHistory(
-                        provider = "nvidia",
-                        model = settings.nvidiaModel
-                    ),
-                    maxTokens = getMaxTokens(
-                        provider = "nvidia",
-                        model = settings.nvidiaModel
-                    )
+
+                    apiKey =
+                        settings.nvidiaKey,
+
+                    model =
+                        settings.nvidiaModel,
+
+                    history =
+                        history,
+
+                    userMessage =
+                        userMessage,
+
+                    imageBase64 =
+                        imageBase64,
+
+                    providerName =
+                        "NVIDIA",
+
+                    maxHistory =
+                        getMaxHistory(
+                            provider = "nvidia",
+                            model = settings.nvidiaModel
+                        ),
+
+                    maxTokens =
+                        getMaxTokens(
+                            provider = "nvidia",
+                            model = settings.nvidiaModel
+                        ),
+
+                    memoryContext =
+                        memoryContext
                 )
 
             // ----------------------------------------------------
@@ -330,6 +399,7 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "ollama" ->
+
                 ollamaProvider.send(
                     userMessage = userMessage
                 )
@@ -344,29 +414,54 @@ class ChatRepository(context: Context) {
                     settings.customUrl.trim()
 
                 if (url.isBlank()) {
+
                     throw IOException(
                         "Custom: رابط الخادم فارغ"
                     )
                 }
 
                 openAICompatibleProvider.send(
-                    baseUrl = url,
-                    apiKey = settings.customKey,
-                    model = settings.customModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "Custom",
-                    maxHistory = getMaxHistory(
-                        provider = "custom",
-                        model = settings.customModel
-                    ),
-                    maxTokens = getMaxTokens(
-                        provider = "custom",
-                        model = settings.customModel
-                    ),
-                    forceVision = true,
+                    baseUrl =
+                        url,
+
+                    apiKey =
+                        settings.customKey,
+
+                    model =
+                        settings.customModel,
+
+                    history =
+                        history,
+
+                    userMessage =
+                        userMessage,
+
+                    imageBase64 =
+                        imageBase64,
+
+                    providerName =
+                        "Custom",
+
+                    maxHistory =
+                        getMaxHistory(
+                            provider = "custom",
+                            model = settings.customModel
+                        ),
+
+                    maxTokens =
+                        getMaxTokens(
+                            provider = "custom",
+                            model = settings.customModel
+                        ),
+
+                    memoryContext =
+                        memoryContext,
+
+                    forceVision =
+                        true,
+
                     onCustomRequest = {
+
                         _customRequestCount.update {
                             it + 1
                         }
@@ -379,6 +474,7 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             else ->
+
                 throw IOException(
                     "مزود غير معروف: ${settings.provider}"
                 )
