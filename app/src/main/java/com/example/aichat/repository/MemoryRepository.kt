@@ -76,22 +76,37 @@ suspend fun searchSharedMemories(
         return emptyList()
     }
 
-    // ✅✅✅ تعطيل البحث مؤقتاً - إرجاع كل الذكريات
     val allMemories = memoryDao.getAllSharedMemories()
-    return allMemories.take(8)  // ← إرجاع مباشر بدون بحث
     
-    /* 
-    // الكود القديم - معطّل مؤقتاً
     val localResult = MemorySearchEngine.search(
         query = cleanQuery,
         memories = allMemories,
         limit = 8,
-        minScore = 0.1
+        minScore = 0.05  // ← خفضناه من 0.1 إلى 0.05
     )
-    ...
-    */
-}
 
+    if (localResult.memories.isEmpty()) {
+        return emptyList()
+    }
+
+    if (localResult.hasStrongMatch || localResult.averageScore >= 0.3) {
+        return localResult.memories
+    }
+
+    if (useSemanticAnalysis) {
+        return try {
+            SemanticMemoryAnalyzer.analyzeMemories(
+                query = cleanQuery,
+                candidates = localResult.memories,
+                ollamaUrl = ollamaUrl
+            )
+        } catch (e: Exception) {
+            localResult.memories
+        }
+    }
+
+    return localResult.memories
+}
 
     // ============================================================
     // ذكريات محادثة محددة
