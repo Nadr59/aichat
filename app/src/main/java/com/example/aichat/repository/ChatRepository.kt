@@ -302,11 +302,11 @@ class ChatRepository(context: Context) {
             // ----------------------------------------------------
 
             "huggingface" ->
-
-                huggingFaceProvider.send(
-                    history = history,
-                    userMessage = userMessage
-                )
+    huggingFaceProvider.send(
+        history = history,
+        userMessage = userMessage,
+        memoryContext = memoryContext
+    )
 
             // ----------------------------------------------------
             // Groq
