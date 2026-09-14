@@ -38,13 +38,8 @@ class MistralProvider(
 
         val messages = JSONArray()
 
-        val maxHistory =
-            when {
-                true -> 6
-            }
-
-        val maxTokens = 2048
-
+        val maxHistory = 6
+val maxTokens = 2048
         history.takeLast(maxHistory).forEach { msg ->
 
             messages.put(
