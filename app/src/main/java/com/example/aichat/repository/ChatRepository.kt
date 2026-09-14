@@ -47,6 +47,11 @@ class ChatRepository(context: Context) {
         settings = settings,
         client = client
     )
+    private val huggingFaceProvider =
+    HuggingFaceProvider(
+        settings = settings,
+        client = client
+    )
 
     private val _customRequestCount = MutableStateFlow(0)
     val customRequestCount: StateFlow<Int> =
@@ -143,157 +148,7 @@ class ChatRepository(context: Context) {
         )
     }
 
-    // ============================================================
-    // Hugging Face - إرسال الرسائل
-    // ============================================================
 
-    private fun sendHuggingFace(
-        history: List<Message>,
-        userMessage: String
-    ): String {
-
-        val apiKey = settings.huggingfaceKey.trim()
-        val model = settings.huggingfaceModel.trim()
-
-        if (apiKey.isBlank()) {
-            throw IOException(
-                "Hugging Face: أدخل API Token\n" +
-                    "من: huggingface.co/settings/tokens"
-            )
-        }
-
-        if (model.isBlank()) {
-            throw IOException(
-                "Hugging Face: اختر نموذجاً"
-            )
-        }
-
-        val messages = JSONArray()
-
-        messages.put(
-            JSONObject().apply {
-                put("role", "system")
-                put(
-                    "content",
-                    "You are a helpful AI assistant."
-                )
-            }
-        )
-
-        history.takeLast(6).forEach { msg ->
-            messages.put(
-                JSONObject().apply {
-                    put("role", msg.role)
-                    put("content", msg.content)
-                }
-            )
-        }
-
-        messages.put(
-            JSONObject().apply {
-                put("role", "user")
-                put("content", userMessage)
-            }
-        )
-
-        val requestJson = JSONObject().apply {
-            put("model", model)
-            put("messages", messages)
-            put("max_tokens", 1024)
-            put("temperature", 0.7)
-            put("stream", false)
-        }
-
-        val request = Request.Builder()
-            .url(
-                "https://router.huggingface.co/v1/chat/completions"
-            )
-            .post(
-                requestJson.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .build()
-
-        client.newCall(request).execute().use { response ->
-
-            val body =
-                response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-
-                val msg = runCatching {
-                    val j = JSONObject(body)
-
-                    j.optJSONObject("error")
-                        ?.optString("message")
-                        ?: j.optString(
-                            "error",
-                            body
-                        )
-                        .ifBlank {
-                            j.optString(
-                                "message",
-                                body
-                            )
-                        }
-
-                }.getOrDefault(body)
-
-                throw IOException(
-                    when (response.code) {
-
-                        401 ->
-                            "❌ HuggingFace: التوكن غير صحيح"
-
-                        403 ->
-                            "❌ HuggingFace: لا توجد صلاحية\n" +
-                                "تأكد من قبول شروط النموذج على " +
-                                "huggingface.co/$model"
-
-                        404 ->
-                            "❌ HuggingFace: النموذج غير موجود\n$model"
-
-                        422 ->
-                            "❌ HuggingFace: النموذج لا يدعم المحادثة\n" +
-                                "جرب نموذجاً آخر"
-
-                        429 ->
-                            "⚠️ HuggingFace: تجاوزت الحد المجاني"
-
-                        503 ->
-                            "⏳ HuggingFace: الخادم مشغول - حاول لاحقاً"
-
-                        else ->
-                            "HuggingFace ${response.code}: $msg"
-                    }
-                )
-            }
-
-            val text =
-                JSONObject(body)
-                    .optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("message")
-                    ?.optString("content", "")
-                    ?.trim()
-
-            return text?.takeIf {
-                it.isNotBlank()
-            } ?: throw IOException(
-                "HuggingFace: الرد فارغ\n${body.take(200)}"
-            )
-        }
-    }
 
     // ============================================================
     // إرسال الرسالة الرئيسية
@@ -366,10 +221,10 @@ class ChatRepository(context: Context) {
                 )
 
             "huggingface" ->
-                sendHuggingFace(
-                    history,
-                    userMessage
-                )
+    huggingFaceProvider.send(
+        history = history,
+        userMessage = userMessage
+    )
 
             "groq" ->
                 openAICompatibleProvider.send(
