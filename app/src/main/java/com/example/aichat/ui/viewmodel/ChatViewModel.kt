@@ -195,8 +195,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * يبحث عن الذكريات المرتبطة بالسؤال الحالي
      * ثم يحولها إلى سياق نصي.
      *
-     * في هذه المرحلة يتم تجهيز السياق فقط.
-     * لا يتم تمريره إلى ChatRepository بعد.
+     * يتم تجهيز السياق هنا قبل إرسال الطلب
+     * إلى ChatRepository.
      */
     private suspend fun prepareMemoryContext(
         userText: String
@@ -352,8 +352,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 _selectedImageBase64.value = null
 
-                // تجهيز سياق الذاكرة فقط.
-                // لن يتم تمريره إلى ChatRepository في هذه المرحلة.
+                // تجهيز سياق الذاكرة قبل إرسال الطلب.
                 prepareMemoryContext(
                     userText
                 )
@@ -362,7 +361,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     repository.sendMessage(
                         history = historySnapshot,
                         userMessage = userText,
-                        imageBase64 = imageBase64
+                        imageBase64 = imageBase64,
+                        memoryContext = _memoryContext.value
                     )
 
                 conversationRepository
