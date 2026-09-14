@@ -42,6 +42,11 @@ class ChatRepository(context: Context) {
 
     private val openAICompatibleProvider =
         OpenAICompatibleProvider(client)
+        private val ollamaProvider =
+    OllamaProvider(
+        settings = settings,
+        client = client
+    )
 
     private val _customRequestCount = MutableStateFlow(0)
     val customRequestCount: StateFlow<Int> =
@@ -407,7 +412,9 @@ class ChatRepository(context: Context) {
                 )
 
             "ollama" ->
-                sendOllama(userMessage)
+    ollamaProvider.send(
+        userMessage
+    )
 
             "custom" -> {
 
@@ -452,81 +459,5 @@ class ChatRepository(context: Context) {
         }
     }
 
-    // ============================================================
-    // Ollama
-    // ============================================================
-
-    private fun sendOllama(
-        userMessage: String
-    ): String {
-
-        val model =
-            settings.ollamaModel
-                .trim()
-                .ifBlank {
-                    "qwen2.5:1.5b"
-                }
-
-        if (userMessage.isBlank()) {
-            throw IOException(
-                "Ollama: الرسالة فارغة"
-            )
-        }
-
-        val requestJson = JSONObject().apply {
-            put("model", model)
-            put("prompt", userMessage)
-            put("stream", false)
-        }
-
-        val request = Request.Builder()
-            .url(
-                "http://127.0.0.1:11434/api/generate"
-            )
-            .post(
-                requestJson.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .build()
-
-        client.newCall(request).execute().use { response ->
-
-            val body =
-                response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-                throw IOException(
-                    "Ollama ${response.code}: " +
-                        body.take(300)
-                )
-            }
-
-            val text =
-                runCatching {
-                    JSONObject(body)
-                        .optString(
-                            "response",
-                            ""
-                        )
-                        .trim()
-                }.getOrElse {
-                    throw IOException(
-                        "Ollama: استجابة غير صالحة\n" +
-                            body.take(300)
-                    )
-                }
-
-            return text.takeIf {
-                it.isNotBlank()
-            } ?: throw IOException(
-                "Ollama: الرد فارغ"
-            )
-        }
-    }
+            
 }
