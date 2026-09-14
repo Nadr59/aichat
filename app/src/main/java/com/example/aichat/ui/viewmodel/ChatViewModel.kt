@@ -2,9 +2,7 @@ package com.example.aichat.ui.viewmodel
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aichat.data.local.ChatDatabase
@@ -12,6 +10,7 @@ import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
 import com.example.aichat.repository.ChatRepository
+import com.example.aichat.repository.ImageProcessor
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryRepository
 import kotlinx.coroutines.Job
@@ -22,7 +21,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.ByteArrayOutputStream
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -37,6 +35,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val memoryContextBuilder =
         MemoryContextBuilder()
+
+    private val imageProcessor =
+        ImageProcessor(application)
 
     val customRequestCount: StateFlow<Int> =
         repository.customRequestCount
@@ -407,22 +408,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
 
-                val context =
-                    getApplication<Application>()
-
-                val stream =
-                    context.contentResolver
-                        .openInputStream(uri)
-                        ?: return@launch
-
-                val bitmap =
-                    BitmapFactory.decodeStream(
-                        stream
+                val base64 =
+                    imageProcessor.uriToBase64(
+                        uri
                     )
 
-                stream.close()
-
-                if (bitmap == null) {
+                if (base64 == null) {
 
                     _error.value =
                         "تعذر قراءة الصورة"
@@ -430,20 +421,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                val output =
-                    ByteArrayOutputStream()
-
-                bitmap.compress(
-                    Bitmap.CompressFormat.JPEG,
-                    85,
-                    output
-                )
-
                 _selectedImageBase64.value =
-                    Base64.encodeToString(
-                        output.toByteArray(),
-                        Base64.NO_WRAP
-                    )
+                    base64
 
             } catch (e: Exception) {
 
@@ -461,19 +440,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
 
-                val output =
-                    ByteArrayOutputStream()
-
-                bitmap.compress(
-                    Bitmap.CompressFormat.JPEG,
-                    85,
-                    output
-                )
-
                 _selectedImageBase64.value =
-                    Base64.encodeToString(
-                        output.toByteArray(),
-                        Base64.NO_WRAP
+                    imageProcessor.bitmapToBase64(
+                        bitmap
                     )
 
             } catch (e: Exception) {
