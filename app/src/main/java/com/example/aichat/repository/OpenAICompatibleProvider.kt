@@ -23,6 +23,7 @@ class OpenAICompatibleProvider(
         providerName: String,
         maxHistory: Int,
         maxTokens: Int,
+        memoryContext: String = "",
         extraHeaders: Map<String, String> = emptyMap(),
         forceVision: Boolean = false,
         onCustomRequest: (() -> Unit)? = null
@@ -50,15 +51,33 @@ class OpenAICompatibleProvider(
 
         val messages = JSONArray()
 
+        // ========================================================
+        // System message
+        // ========================================================
+
+        val systemContent =
+            buildString {
+
+                append(
+                    "You are a helpful AI assistant."
+                )
+
+                if (memoryContext.isNotBlank()) {
+                    append("\n\n")
+                    append(memoryContext)
+                }
+            }
+
         messages.put(
             JSONObject().apply {
                 put("role", "system")
-                put(
-                    "content",
-                    "You are a helpful AI assistant."
-                )
+                put("content", systemContent)
             }
         )
+
+        // ========================================================
+        // تاريخ المحادثة
+        // ========================================================
 
         history.takeLast(maxHistory).forEach { msg ->
 
@@ -69,6 +88,10 @@ class OpenAICompatibleProvider(
                 }
             )
         }
+
+        // ========================================================
+        // الرسالة الحالية + الصورة
+        // ========================================================
 
         val hasImage =
             imageBase64 != null &&
@@ -81,7 +104,6 @@ class OpenAICompatibleProvider(
 
             messages.put(
                 JSONObject().apply {
-
                     put("role", "user")
 
                     put(
@@ -90,7 +112,6 @@ class OpenAICompatibleProvider(
 
                             put(
                                 JSONObject().apply {
-
                                     put(
                                         "type",
                                         "image_url"
@@ -103,6 +124,7 @@ class OpenAICompatibleProvider(
                                                 "url",
                                                 "data:image/jpeg;base64,$imageBase64"
                                             )
+
                                             put(
                                                 "detail",
                                                 "low"
@@ -118,6 +140,7 @@ class OpenAICompatibleProvider(
                                         "type",
                                         "text"
                                     )
+
                                     put(
                                         "text",
                                         userMessage
@@ -139,12 +162,33 @@ class OpenAICompatibleProvider(
             )
         }
 
-        val requestJson = JSONObject().apply {
-            put("model", cleanModel)
-            put("messages", messages)
-            put("temperature", 0.7)
-            put("max_tokens", maxTokens)
-        }
+        // ========================================================
+        // الطلب
+        // ========================================================
+
+        val requestJson =
+            JSONObject().apply {
+
+                put(
+                    "model",
+                    cleanModel
+                )
+
+                put(
+                    "messages",
+                    messages
+                )
+
+                put(
+                    "temperature",
+                    0.7
+                )
+
+                put(
+                    "max_tokens",
+                    maxTokens
+                )
+            }
 
         val requestBuilder =
             Request.Builder()
@@ -165,7 +209,10 @@ class OpenAICompatibleProvider(
                 )
 
         extraHeaders.forEach { (key, value) ->
-            requestBuilder.addHeader(key, value)
+            requestBuilder.addHeader(
+                key,
+                value
+            )
         }
 
         client.newCall(
@@ -177,18 +224,20 @@ class OpenAICompatibleProvider(
 
             if (!response.isSuccessful) {
 
-                val msg = runCatching {
+                val msg =
+                    runCatching {
 
-                    val j = JSONObject(body)
+                        val j =
+                            JSONObject(body)
 
-                    j.optJSONObject("error")
-                        ?.optString("message")
-                        ?: j.optString(
-                            "message",
-                            body
-                        )
+                        j.optJSONObject("error")
+                            ?.optString("message")
+                            ?: j.optString(
+                                "message",
+                                body
+                            )
 
-                }.getOrDefault(body)
+                    }.getOrDefault(body)
 
                 throw IOException(
                     when (response.code) {
@@ -219,15 +268,19 @@ class OpenAICompatibleProvider(
                     .optJSONArray("choices")
                     ?.optJSONObject(0)
                     ?.optJSONObject("message")
-                    ?.optString("content", "")
+                    ?.optString(
+                        "content",
+                        ""
+                    )
                     ?.trim()
 
             val result =
                 text?.takeIf {
                     it.isNotBlank()
-                } ?: throw IOException(
-                    "$providerName: الرد فارغ"
-                )
+                }
+                    ?: throw IOException(
+                        "$providerName: الرد فارغ"
+                    )
 
             if (
                 providerName.equals(
@@ -246,7 +299,8 @@ class OpenAICompatibleProvider(
         model: String
     ): Boolean {
 
-        val m = model.lowercase()
+        val m =
+            model.lowercase()
 
         return listOf(
             "gpt-4o",
