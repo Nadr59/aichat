@@ -37,6 +37,8 @@ class ChatRepository(context: Context) {
         settings = settings,
         client = client
     )
+    private val openAICompatibleProvider =
+    OpenAICompatibleProvider(client)
 
     private val _customRequestCount = MutableStateFlow(0)
     val customRequestCount: StateFlow<Int> = _customRequestCount.asStateFlow()
@@ -311,16 +313,24 @@ class ChatRepository(context: Context) {
                 )
 
             "openai" ->
-                sendOpenAICompatible(
-                    baseUrl =
-                        "https://api.openai.com/v1/chat/completions",
-                    apiKey = settings.openaiKey,
-                    model = settings.openaiModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "OpenAI"
-                )
+    openAICompatibleProvider.send(
+        baseUrl =
+            "https://api.openai.com/v1/chat/completions",
+        apiKey = settings.openaiKey,
+        model = settings.openaiModel,
+        history = history,
+        userMessage = userMessage,
+        imageBase64 = imageBase64,
+        providerName = "OpenAI",
+        maxHistory = getMaxHistory(
+            "openai",
+            settings.openaiModel
+        ),
+        maxTokens = getMaxTokens(
+            "openai",
+            settings.openaiModel
+        )
+    )
 
             "mistral" ->
     mistralProvider.send(
@@ -336,28 +346,44 @@ class ChatRepository(context: Context) {
                 )
 
             "groq" ->
-                sendOpenAICompatible(
-                    baseUrl =
-                        "https://api.groq.com/openai/v1/chat/completions",
-                    apiKey = settings.groqKey,
-                    model = settings.groqModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "Groq"
-                )
+    openAICompatibleProvider.send(
+        baseUrl =
+            "https://api.groq.com/openai/v1/chat/completions",
+        apiKey = settings.groqKey,
+        model = settings.groqModel,
+        history = history,
+        userMessage = userMessage,
+        imageBase64 = imageBase64,
+        providerName = "Groq",
+        maxHistory = getMaxHistory(
+            "groq",
+            settings.groqModel
+        ),
+        maxTokens = getMaxTokens(
+            "groq",
+            settings.groqModel
+        )
+    )
 
             "nvidia" ->
-                sendOpenAICompatible(
-                    baseUrl =
-                        "https://integrate.api.nvidia.com/v1/chat/completions",
-                    apiKey = settings.nvidiaKey,
-                    model = settings.nvidiaModel,
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    providerName = "NVIDIA"
-                )
+    openAICompatibleProvider.send(
+        baseUrl =
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+        apiKey = settings.nvidiaKey,
+        model = settings.nvidiaModel,
+        history = history,
+        userMessage = userMessage,
+        imageBase64 = imageBase64,
+        providerName = "NVIDIA",
+        maxHistory = getMaxHistory(
+            "nvidia",
+            settings.nvidiaModel
+        ),
+        maxTokens = getMaxTokens(
+            "nvidia",
+            settings.nvidiaModel
+        )
+    )
 
             "ollama" ->
                 sendOllama(userMessage)
