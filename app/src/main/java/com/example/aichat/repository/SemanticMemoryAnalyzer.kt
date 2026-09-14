@@ -30,23 +30,23 @@ object SemanticMemoryAnalyzer {
      * @return قائمة الذكريات مُعاد ترتيبها حسب الصلة الدلالية
      */
     suspend fun analyzeMemories(
-        query: String,
-        candidates: List<MemoryItem>,
-        ollamaUrl: String = "http://127.0.0.1:11434"
-    ): List<MemoryItem> {
+    query: String,
+    candidates: List<MemoryItem>,
+    ollamaUrl: String = "http://127.0.0.1:11434"
+): List<MemoryItem> {
 
-        if (candidates.isEmpty()) return emptyList()
-        if (query.isBlank()) return candidates
+    if (candidates.isEmpty()) return emptyList()
+    if (query.isBlank()) return candidates
 
-        return try {
-            withTimeout(25000L) { // 25 ثانية timeout
-                performSemanticAnalysis(query, candidates, ollamaUrl)
-            }
-        } catch (e: Exception) {
-            // في حالة الفشل، نرجع النتائج الأصلية
-            candidates
+    return try {
+        withTimeout(2000L) { // ✅ 2 ثانية فقط
+            performSemanticAnalysis(query, candidates, ollamaUrl)
         }
+    } catch (e: Exception) {
+        candidates
     }
+    }
+    
 
     private suspend fun performSemanticAnalysis(
         query: String,
