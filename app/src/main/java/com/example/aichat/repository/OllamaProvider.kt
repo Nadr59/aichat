@@ -14,7 +14,8 @@ class OllamaProvider(
 ) {
 
     fun send(
-        userMessage: String
+        userMessage: String,
+        memoryContext: String = ""
     ): String {
 
         val model =
@@ -30,9 +31,20 @@ class OllamaProvider(
             )
         }
 
+        val prompt =
+            buildString {
+
+                if (memoryContext.isNotBlank()) {
+                    append(memoryContext)
+                    append("\n\n")
+                }
+
+                append(userMessage)
+            }
+
         val requestJson = JSONObject().apply {
             put("model", model)
-            put("prompt", userMessage)
+            put("prompt", prompt)
             put("stream", false)
         }
 
