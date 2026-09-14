@@ -86,6 +86,17 @@ suspend fun searchSharedMemories(
         limit = 8,
         minScore = 0.1
     )
+    
+// أضف هذا السطر للتحليل:
+Log.d("MemorySearch", "Query: $cleanQuery")
+Log.d("MemorySearch", "Average Score: ${result.averageScore}")
+Log.d("MemorySearch", "Has Strong Match: ${result.hasStrongMatch}")
+Log.d("MemorySearch", "Found: ${result.memories.size} memories")
+result.scores.forEach { (id, score) ->
+    Log.d("MemorySearch", "Memory $id: score=$score")
+}
+
+
 
     return result.memories
 }
