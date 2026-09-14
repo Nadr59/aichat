@@ -76,42 +76,20 @@ suspend fun searchSharedMemories(
         return emptyList()
     }
 
-    // المرحلة 1: البحث المحلي السريع
+    // ✅✅✅ تعطيل البحث مؤقتاً - إرجاع كل الذكريات
     val allMemories = memoryDao.getAllSharedMemories()
+    return allMemories.take(8)  // ← إرجاع مباشر بدون بحث
     
+    /* 
+    // الكود القديم - معطّل مؤقتاً
     val localResult = MemorySearchEngine.search(
         query = cleanQuery,
         memories = allMemories,
         limit = 8,
         minScore = 0.1
     )
-
-    // إذا لم نجد أي ذكريات
-    if (localResult.memories.isEmpty()) {
-        return emptyList()
-    }
-
-    // إذا وجدنا تطابق قوي، نرجع مباشرة
-    if (localResult.hasStrongMatch || localResult.averageScore >= 0.4) {
-        return localResult.memories
-    }
-
-    // المرحلة 2: إذا التطابق ضعيف ونريد التحليل الدلالي
-    if (useSemanticAnalysis) {
-        return try {
-            SemanticMemoryAnalyzer.analyzeMemories(
-                query = cleanQuery,
-                candidates = localResult.memories,
-                ollamaUrl = ollamaUrl
-            )
-        } catch (e: Exception) {
-            // في حالة فشل Qwen، نرجع نتيجة البحث المحلي
-            localResult.memories
-        }
-    }
-
-    // إذا عطّلنا التحليل الدلالي
-    return localResult.memories
+    ...
+    */
 }
 
 
