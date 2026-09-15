@@ -86,6 +86,25 @@ fun MemoryScreen(
             }
         }
 
+        // في Composable
+
+val filePickerLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.GetContent()
+) { uri: Uri? ->
+    uri?.let {
+        viewModel.processAndSaveFile(it)
+    }
+}
+
+Button(
+    onClick = {
+        filePickerLauncher.launch("*/*")  // أو "text/plain|application/pdf"
+    }
+) {
+    Icon(Icons.Default.AttachFile, contentDescription = null)
+    Spacer(modifier = Modifier.width(8.dp))
+    Text("رفع ملف (TXT/PDF)")
+}
     val localMemories =
         if (searchQuery.isBlank()) {
             conversationMemories.value
