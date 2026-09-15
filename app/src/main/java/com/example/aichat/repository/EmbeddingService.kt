@@ -1,5 +1,8 @@
 package com.example.aichat.repository
 
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,25 +19,37 @@ class EmbeddingService(
     private val geminiApiKey: String
 ) {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    companion object {
+        private const val TAG = "EmbeddingService"
+
+        // ✅ Client واحد مشترك بدل إنشاء واحد جديد كل مرة
+        private val client = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
 
     /**
      * تحويل النص إلى Vector باستخدام Gemini
+     * ✅ يعمل دائماً على IO dispatcher (آمن للاستدعاء من أي مكان)
      */
     suspend fun getEmbedding(text: String): List<Double> {
         if (text.isBlank()) return emptyList()
+
         if (geminiApiKey.isBlank()) {
-            throw Exception("Gemini API key is required")
+            Log.w(TAG, "⚠️ Gemini API key is blank - skipping embedding")
+            return emptyList()
         }
 
-        return try {
-            getGeminiEmbedding(text)
-        } catch (e: Exception) {
-            // في حالة الفشل، نرجع قائمة فارغة
-            emptyList()
+        // ✅ الإصلاح الجذري: التنفيذ على IO thread
+        return withContext(Dispatchers.IO) {
+            try {
+                getGeminiEmbedding(text)
+            } catch (e: Exception) {
+                // ✅ تسجيل الخطأ بدل ابتلاعه بصمت
+                Log.e(TAG, "❌ Embedding failed: ${e.message}", e)
+                emptyList()
+            }
         }
     }
 
@@ -61,20 +76,20 @@ class EmbeddingService(
 
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw Exception("Gemini Embedding failed: ${response.code}")
+                // ✅ تضمين جسم الخطأ (يكشف مشاكل المفتاح/الحصة)
+                val errorBody = response.body?.string()?.take(300)
+                throw Exception("Gemini Embedding failed: ${response.code} - $errorBody")
             }
 
-            val body = response.body?.string() 
+            val body = response.body?.string()
                 ?: throw Exception("Empty response from Gemini")
 
-            val jsonResponse = JSONObject(body)
-            
-            val valuesArray = jsonResponse
+            val valuesArray = JSONObject(body)
                 .getJSONObject("embedding")
                 .getJSONArray("values")
 
-            return (0 until valuesArray.length()).map { 
-                valuesArray.getDouble(it) 
+            return (0 until valuesArray.length()).map {
+                valuesArray.getDouble(it)
             }
         }
     }
@@ -83,13 +98,8 @@ class EmbeddingService(
      * حساب التشابه بين vectorين (Cosine Similarity)
      */
     fun cosineSimilarity(vec1: List<Double>, vec2: List<Double>): Double {
-        if (vec1.isEmpty() || vec2.isEmpty()) {
-            return 0.0
-        }
-
-        if (vec1.size != vec2.size) {
-            return 0.0
-        }
+        if (vec1.isEmpty() || vec2.isEmpty()) return 0.0
+        if (vec1.size != vec2.size) return 0.0
 
         var dotProduct = 0.0
         var norm1 = 0.0
@@ -108,19 +118,12 @@ class EmbeddingService(
         }
     }
 
-    /**
-     * تحويل Vector إلى String للحفظ في قاعدة البيانات
-     */
     fun vectorToString(vector: List<Double>): String {
         return JSONArray(vector).toString()
     }
 
-    /**
-     * تحويل String إلى Vector
-     */
     fun stringToVector(str: String): List<Double> {
         if (str.isBlank()) return emptyList()
-        
         return try {
             val array = JSONArray(str)
             (0 until array.length()).map { array.getDouble(it) }
