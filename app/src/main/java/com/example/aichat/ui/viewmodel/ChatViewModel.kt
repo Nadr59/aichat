@@ -45,6 +45,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val imageProcessor =
         ImageProcessor(application)
+        
+    private val fileProcessor = FileProcessor(getApplication())
 
     val customRequestCount: StateFlow<Int> =
         repository.customRequestCount
@@ -523,7 +525,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     
-    private val fileProcessor = FileProcessor(getApplication())
 
 /**
  * معالجة ملف ورفعه للذاكرة
