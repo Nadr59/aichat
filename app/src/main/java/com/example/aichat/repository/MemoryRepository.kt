@@ -1,8 +1,8 @@
 package com.example.aichat.repository
 
 import android.content.Context
-import com.example.aichat.data.local.MemoryDao
 import com.example.aichat.data.local.AiSettings
+import com.example.aichat.data.local.MemoryDao
 import com.example.aichat.data.model.MemoryItem
 import kotlinx.coroutines.flow.Flow
 
@@ -11,14 +11,11 @@ class MemoryRepository(
     private val context: Context
 ) {
 
-    // ✅ الحصول على Gemini API Key من SharedPreferences مباشرة
-    private fun getGeminiApiKey(): String {
-        val prefs = context.getSharedPreferences("ai_settings", Context.MODE_PRIVATE)
-        return prefs.getString("gemini_api_key", "") ?: ""
-    }
+    // ✅ استخدام AiSettings مباشرة
+    private val aiSettings = AiSettings(context)
 
     private val embeddingService: EmbeddingService
-        get() = EmbeddingService(getGeminiApiKey())
+        get() = EmbeddingService(aiSettings.geminiKey)
 
     // ============================================================
     // إضافة ذاكرة مع Embedding
@@ -38,15 +35,27 @@ class MemoryRepository(
             return 0
         }
 
-        // ✅ استخراج Embedding من Gemini
+        // ✅ محاولة استخراج Embedding
         val embedding = try {
-            val vector = embeddingService.getEmbedding(cleanContent)
-            if (vector.isNotEmpty()) {
-                embeddingService.vectorToString(vector)
-            } else {
+            val apiKey = aiSettings.geminiKey
+            
+            if (apiKey.isBlank()) {
+                android.util.Log.w("MemoryRepository", "⚠️ Skipping embedding - Gemini API key not configured")
                 ""
+            } else {
+                android.util.Log.d("MemoryRepository", "🔄 Extracting embedding for: ${cleanContent.take(50)}...")
+                val vector = embeddingService.getEmbedding(cleanContent)
+                
+                if (vector.isNotEmpty()) {
+                    android.util.Log.d("MemoryRepository", "✅ Embedding extracted: ${vector.size} dimensions")
+                    embeddingService.vectorToString(vector)
+                } else {
+                    android.util.Log.w("MemoryRepository", "⚠️ Empty embedding returned")
+                    ""
+                }
             }
         } catch (e: Exception) {
+            android.util.Log.e("MemoryRepository", "❌ Embedding extraction failed: ${e.message}")
             ""
         }
 
@@ -104,27 +113,41 @@ class MemoryRepository(
         val cleanQuery = query.trim()
 
         if (cleanQuery.isBlank()) {
+            android.util.Log.d("MemoryRepository", "⚪ Empty query")
             return emptyList()
         }
 
         val allMemories = memoryDao.getAllSharedMemories()
 
         if (allMemories.isEmpty()) {
+            android.util.Log.d("MemoryRepository", "⚪ No memories in database")
             return emptyList()
         }
 
-        // ✅ تحقق: هل الذكريات لها embeddings؟
-        val hasEmbeddings = allMemories.any { it.embedding.isNotBlank() }
+        android.util.Log.d("MemoryRepository", "📚 Total memories: ${allMemories.size}")
 
-        return if (hasEmbeddings) {
+        // ✅ تحقق: كم ذاكرة لها embeddings؟
+        val withEmbeddings = allMemories.count { it.embedding.isNotBlank() }
+        android.util.Log.d("MemoryRepository", "🧠 Memories with embeddings: $withEmbeddings/${allMemories.size}")
+
+        val hasEmbeddings = withEmbeddings > 0
+        val hasApiKey = aiSettings.geminiKey.isNotBlank()
+
+        return if (hasEmbeddings && hasApiKey) {
+            android.util.Log.d("MemoryRepository", "🔍 Using semantic search (Embeddings)")
             searchWithEmbeddings(cleanQuery, allMemories)
         } else {
+            if (!hasApiKey) {
+                android.util.Log.w("MemoryRepository", "⚠️ Gemini API key not configured, using traditional search")
+            }
+            android.util.Log.d("MemoryRepository", "🔍 Using traditional search (Keywords)")
             val result = MemorySearchEngine.search(
                 query = cleanQuery,
                 memories = allMemories,
                 limit = 8,
                 minScore = 0.05
             )
+            android.util.Log.d("MemoryRepository", "📊 Found: ${result.memories.size} memories")
             result.memories
         }
     }
@@ -138,20 +161,19 @@ class MemoryRepository(
     ): List<MemoryItem> {
 
         val queryVector = try {
+            android.util.Log.d("MemoryRepository", "🔄 Getting query embedding for: $query")
             embeddingService.getEmbedding(query)
         } catch (e: Exception) {
-            return emptyList()
+            android.util.Log.e("MemoryRepository", "❌ Query embedding failed: ${e.message}")
+            return fallbackSearch(query, memories)
         }
 
         if (queryVector.isEmpty()) {
-            val result = MemorySearchEngine.search(
-                query = query,
-                memories = memories,
-                limit = 8,
-                minScore = 0.05
-            )
-            return result.memories
+            android.util.Log.w("MemoryRepository", "⚠️ Empty query vector, using fallback")
+            return fallbackSearch(query, memories)
         }
+
+        android.util.Log.d("MemoryRepository", "✅ Query embedding: ${queryVector.size} dimensions")
 
         val scored = memories.mapNotNull { memory ->
             if (memory.embedding.isBlank()) {
@@ -164,10 +186,9 @@ class MemoryRepository(
                 return@mapNotNull null
             }
 
-            val similarity = embeddingService.cosineSimilarity(
-                queryVector, 
-                memoryVector
-            )
+            val similarity = embeddingService.cosineSimilarity(queryVector, memoryVector)
+            
+            android.util.Log.d("MemoryRepository", "📊 Similarity: ${String.format("%.3f", similarity)} - ${memory.content.take(50)}...")
             
             if (similarity >= 0.5) {
                 Pair(memory, similarity)
@@ -176,10 +197,29 @@ class MemoryRepository(
             }
         }
 
-        return scored
+        val results = scored
             .sortedByDescending { it.second }
             .take(8)
             .map { it.first }
+
+        android.util.Log.d("MemoryRepository", "✅ Found ${results.size} semantically similar memories")
+
+        return results
+    }
+
+    /**
+     * Fallback للبحث التقليدي
+     */
+    private fun fallbackSearch(query: String, memories: List<MemoryItem>): List<MemoryItem> {
+        android.util.Log.d("MemoryRepository", "🔄 Falling back to traditional keyword search")
+        val result = MemorySearchEngine.search(
+            query = query,
+            memories = memories,
+            limit = 8,
+            minScore = 0.05
+        )
+        android.util.Log.d("MemoryRepository", "📊 Fallback found: ${result.memories.size} memories")
+        return result.memories
     }
 
     // ============================================================
