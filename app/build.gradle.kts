@@ -14,6 +14,36 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        
+        // ✅ فقط ARM (أجهزة حقيقية)
+        ndk {
+            abiFilters.clear()
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+    }
+
+    buildTypes {
+        debug {
+            isMinifyEnabled = false
+        }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    
+    // ✅ تقسيم APK حسب ABI
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = true  // APK واحد universal للتطوير
+        }
     }
 
     buildFeatures {
@@ -31,6 +61,29 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    
+    // ✅ تنظيف الملفات الزائدة
+    packagingOptions {
+        resources {
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/license.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/notice.txt",
+                "META-INF/ASL2.0",
+                "META-INF/*.kotlin_module",
+                "META-INF/INDEX.LIST"
+            )
+        }
+        
+        // ✅ الاحتفاظ فقط بـ native libs الضرورية
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 }
 
@@ -66,7 +119,10 @@ dependencies {
 
     // JSON
     implementation("com.google.code.gson:gson:2.10.1")
-// GeckoView
-implementation("org.mozilla.geckoview:geckoview:130.0.20240913135723")
+
+    // ✅ GeckoView - محسّن
+    implementation("org.mozilla.geckoview:geckoview:130.0.20240913135723")
+
+    // Debug
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.8")
 }
