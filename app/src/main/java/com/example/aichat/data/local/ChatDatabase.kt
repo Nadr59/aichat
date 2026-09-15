@@ -7,8 +7,8 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.aichat.data.model.Conversation
-import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
+import com.example.aichat.data.model.MemoryItem
 
 @Database(
     entities = [
@@ -16,31 +16,38 @@ import com.example.aichat.data.model.Message
         Message::class,
         MemoryItem::class
     ],
-    version = 2,
+    version = 3,  // ← زيادة من 2 إلى 3
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
 
     abstract fun chatDao(): ChatDao
-
-    // ============================================================
-    // Memory
-    // ============================================================
-
     abstract fun memoryDao(): MemoryDao
 
     companion object {
-
         @Volatile
         private var INSTANCE: ChatDatabase? = null
 
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        fun getInstance(context: Context): ChatDatabase {
+            return INSTANCE ?: synchronized(this) {
+                val instance = Room.databaseBuilder(
+                    context.applicationContext,
+                    ChatDatabase::class.java,
+                    "aichat_database"
+                )
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3  // ✅ Migration جديد
+                    )
+                    .build()
+                INSTANCE = instance
+                instance
+            }
+        }
 
-            override fun migrate(
-                database: SupportSQLiteDatabase
-            ) {
-                database.execSQL(
-                    """
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
                     CREATE TABLE IF NOT EXISTS memory_items (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         content TEXT NOT NULL,
@@ -51,24 +58,17 @@ abstract class ChatDatabase : RoomDatabase() {
                         createdAt INTEGER NOT NULL,
                         updatedAt INTEGER NOT NULL
                     )
-                    """.trimIndent()
-                )
+                """.trimIndent())
             }
         }
 
-        fun getInstance(context: Context): ChatDatabase {
-            return INSTANCE ?: synchronized(this) {
-
-                Room.databaseBuilder(
-                    context.applicationContext,
-                    ChatDatabase::class.java,
-                    "chat_database"
-                )
-                    .addMigrations(MIGRATION_1_2)
-                    .build()
-                    .also {
-                        INSTANCE = it
-                    }
+        // ✅ Migration من 2 إلى 3
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    ALTER TABLE memory_items 
+                    ADD COLUMN embedding TEXT NOT NULL DEFAULT ''
+                """.trimIndent())
             }
         }
     }
