@@ -11,6 +11,7 @@ import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
 import com.example.aichat.repository.ChatRepository
 import com.example.aichat.repository.ConversationRepository
+import com.example.aichat.repository.FileProcessor
 import com.example.aichat.repository.ImageProcessor
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryRepository
@@ -35,18 +36,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         ConversationRepository(dao)
 
     private val memoryRepository =
-    MemoryRepository(
-        memoryDao,
-        getApplication()  // ✅ Context
-    )
+        MemoryRepository(
+            memoryDao,
+            getApplication()
+        )
 
     private val memoryContextBuilder =
         MemoryContextBuilder()
 
     private val imageProcessor =
         ImageProcessor(application)
-        
-    private val fileProcessor = FileProcessor(getApplication())
+
+    private val fileProcessor =
+        FileProcessor(getApplication())
 
     val customRequestCount: StateFlow<Int> =
         repository.customRequestCount
@@ -207,36 +209,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      *
      * يستخدم البحث الهجين:
      * - بحث محلي سريع أولاً
-     * - تحليل دلالي بـ Qwen إذا كان التطابق ضعيفاً
+     * - تحليل دلالي بـ Embeddings إذا لزم
      */
     private suspend fun prepareMemoryContext(
-    userText: String
-) {
-    if (userText.isBlank()) {
-        _memoryContext.value = ""
-        return
+        userText: String
+    ) {
+        if (userText.isBlank()) {
+            _memoryContext.value = ""
+            return
+        }
+
+        try {
+            android.util.Log.d("ChatViewModel", "🔍 Preparing memory context for: ${userText.take(50)}...")
+
+            val memories = memoryRepository.searchSharedMemories(
+                query = userText,
+                useSemanticAnalysis = true,
+                ollamaUrl = "http://127.0.0.1:11434"
+            )
+
+            android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
+
+            _memoryContext.value = memoryContextBuilder.build(memories)
+
+            android.util.Log.d("ChatViewModel", "✅ Memory context length: ${_memoryContext.value.length}")
+
+            if (_memoryContext.value.isNotBlank()) {
+                android.util.Log.d("ChatViewModel", "✅ Memory context will be sent to model")
+            } else {
+                android.util.Log.w("ChatViewModel", "⚠️ Memory context is empty")
+            }
+
+        } catch (e: Exception) {
+            android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext failed: ${e.message}", e)
+            _memoryContext.value = ""
+        }
     }
-
-    try {
-        val memories = memoryRepository.searchSharedMemories(
-            query = userText,
-            useSemanticAnalysis = false,
-            ollamaUrl = "http://127.0.0.1:11434"
-        )
-
-        android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
-
-        _memoryContext.value = memoryContextBuilder.build(memories)
-
-        android.util.Log.d("ChatViewModel", "✅ Memory context length: ${_memoryContext.value.length}")
-
-    } catch (e: Exception) {
-        android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext failed: ${e.message}", e)
-        _memoryContext.value = ""
-    }
-    }
-    
-    
 
     // ============================================================
     // المحادثات
@@ -373,7 +381,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedImageBase64.value = null
 
                 // تجهيز سياق الذاكرة قبل إرسال الطلب
-                // يستخدم البحث الهجين (محلي + Qwen)
                 prepareMemoryContext(
                     userText
                 )
@@ -484,7 +491,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    
     fun selectFile(
         uri: Uri
     ) {
@@ -524,65 +530,62 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    
+    // ============================================================
+    // معالجة الملفات (TXT, PDF)
+    // ============================================================
 
-/**
- * معالجة ملف ورفعه للذاكرة
- */
-fun processAndSaveFile(uri: Uri) {
-    viewModelScope.launch {
-        _isLoading.value = true
-        _error.value = null
+    /**
+     * معالجة ملف ورفعه للذاكرة
+     */
+    fun processAndSaveFile(uri: Uri) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
 
-        try {
-            android.util.Log.d("ChatViewModel", "📄 Processing file: $uri")
+            try {
+                android.util.Log.d("ChatViewModel", "📄 Processing file: $uri")
 
-            // قراءة الملف
-            val content = fileProcessor.readFile(uri)
+                // قراءة الملف
+                val content = fileProcessor.readFile(uri)
 
-            if (content.isBlank()) {
-                _error.value = "⚠️ الملف فارغ"
-                return@launch
-            }
-
-            android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} characters")
-
-            // تقسيم إلى أجزاء إذا كان طويلاً
-            val chunks = if (content.length > 2000) {
-                fileProcessor.chunkText(content, maxChunkSize = 1500, overlap = 200)
-            } else {
-                listOf(content)
-            }
-
-            android.util.Log.d("ChatViewModel", "📦 Split into ${chunks.size} chunks")
-
-            // حفظ كل جزء في الذاكرة
-            chunks.forEachIndexed { index, chunk ->
-                val title = if (chunks.size > 1) {
-                    "ملف - جزء ${index + 1}/${chunks.size}"
-                } else {
-                    "ملف"
+                if (content.isBlank()) {
+                    _error.value = "⚠️ الملف فارغ"
+                    return@launch
                 }
 
-                memoryRepository.addMemory(
-                    content = chunk,
-                    category = "KNOWLEDGE",
-                    isShared = true
-                )
+                android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} characters")
 
-                android.util.Log.d("ChatViewModel", "✅ Saved chunk ${index + 1}")
+                // تقسيم إلى أجزاء إذا كان طويلاً
+                val chunks = if (content.length > 2000) {
+                    fileProcessor.chunkText(content, maxChunkSize = 1500, overlap = 200)
+                } else {
+                    listOf(content)
+                }
+
+                android.util.Log.d("ChatViewModel", "📦 Split into ${chunks.size} chunks")
+
+                // حفظ كل جزء في الذاكرة
+                chunks.forEachIndexed { index, chunk ->
+                    memoryRepository.addMemory(
+                        content = chunk,
+                        category = "KNOWLEDGE",
+                        isShared = true
+                    )
+
+                    android.util.Log.d("ChatViewModel", "✅ Saved chunk ${index + 1}/${chunks.size}")
+                }
+
+                _error.value = "✅ تم حفظ ${chunks.size} ${if (chunks.size > 1) "أجزاء" else "جزء"} في الذاكرة"
+
+            } catch (e: Exception) {
+                android.util.Log.e("ChatViewModel", "❌ File processing failed: ${e.message}", e)
+                _error.value = "❌ ${e.message}"
+            } finally {
+                _isLoading.value = false
             }
-
-            _error.value = "✅ تم حفظ ${chunks.size} ${if (chunks.size > 1) "أجزاء" else "جزء"} في الذاكرة"
-
-        } catch (e: Exception) {
-            android.util.Log.e("ChatViewModel", "❌ File processing failed: ${e.message}")
-            _error.value = "❌ ${e.message}"
-        } finally {
-            _isLoading.value = false
         }
     }
-}
+
     // ============================================================
     // Helpers
     // ============================================================
