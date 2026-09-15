@@ -216,22 +216,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     try {
-        val memories =
-            memoryRepository.searchSharedMemories(
-                query = userText,
-                useSemanticAnalysis = false,  // ✅ معطّل
-                ollamaUrl = "http://127.0.0.1:11434"
-            )
+        val memories = memoryRepository.searchSharedMemories(
+            query = userText,
+            useSemanticAnalysis = false,
+            ollamaUrl = "http://127.0.0.1:11434"
+        )
 
-        _memoryContext.value =
-            memoryContextBuilder.build(
-                memories
-            )
+        android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
+
+        _memoryContext.value = memoryContextBuilder.build(memories)
+
+        android.util.Log.d("ChatViewModel", "✅ Memory context length: ${_memoryContext.value.length}")
 
     } catch (e: Exception) {
+        android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext failed: ${e.message}", e)
         _memoryContext.value = ""
     }
     }
+    
     
 
     // ============================================================
