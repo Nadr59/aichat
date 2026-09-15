@@ -50,31 +50,62 @@ class MemoryRepository(
     // ============================================================
     // إضافة ذاكرة مع Embedding
     // ============================================================
+suspend fun addMemory(
+    content: String,
+    sourceConversationId: Long? = null,
+    sourceMessageId: Long? = null,
+    category: String = "OTHER",
+    isShared: Boolean = true
+): Long {
 
-    suspend fun addMemory(
-        content: String,
-        sourceConversationId: Long? = null,
-        sourceMessageId: Long? = null,
-        category: String = "OTHER",
-        isShared: Boolean = true
-    ): Long {
+    val cleanContent = content.trim()
 
-        val cleanContent = content.trim()
-        if (cleanContent.isBlank()) return 0
-
-        val embedding = extractEmbedding(cleanContent)
-
-        val memory = MemoryItem(
-            content = cleanContent,
-            embedding = embedding,
-            sourceConversationId = sourceConversationId,
-            sourceMessageId = sourceMessageId,
-            category = category,
-            isShared = isShared
-        )
-
-        return memoryDao.insertMemory(memory)
+    if (cleanContent.isBlank()) {
+        return 0
     }
+
+    val embedding = try {
+        val apiKey = aiSettings.geminiKey
+        
+        if (apiKey.isBlank()) {
+            android.util.Log.w("MemoryRepository", "⚠️ Skipping embedding - Gemini API key not configured")
+            ""
+        } else {
+            android.util.Log.d("MemoryRepository", "🔄 Extracting embedding for: ${cleanContent.take(50)}...")
+            val vector = embeddingService.getEmbedding(cleanContent)
+            
+            if (vector.isNotEmpty()) {
+                android.util.Log.d("MemoryRepository", "✅ Embedding extracted: ${vector.size} dimensions")
+                
+                // ✅ ضغط بـ Float (50% توفير)
+                val compressed = embeddingService.vectorToString(vector, compress = true)
+                
+                android.util.Log.d("MemoryRepository", "🗜️ Compressed size: ${compressed.length} chars")
+                
+                compressed
+            } else {
+                android.util.Log.w("MemoryRepository", "⚠️ Empty embedding returned")
+                ""
+            }
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("MemoryRepository", "❌ Embedding extraction failed: ${e.message}")
+        ""
+    }
+
+    val memory = MemoryItem(
+        content = cleanContent,
+        embedding = embedding,
+        sourceConversationId = sourceConversationId,
+        sourceMessageId = sourceMessageId,
+        category = category,
+        isShared = isShared
+    )
+
+    return memoryDao.insertMemory(memory)
+}
+    
+        
 
     // ============================================================
     // تعديل ذاكرة (✅ مع إعادة حساب الـ Embedding)
