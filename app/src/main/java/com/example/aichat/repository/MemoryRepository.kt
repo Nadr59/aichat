@@ -2,7 +2,7 @@ package com.example.aichat.repository
 
 import android.content.Context
 import com.example.aichat.data.local.MemoryDao
-import com.example.aichat.data.local.SettingsManager
+import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.MemoryItem
 import kotlinx.coroutines.flow.Flow
 
@@ -11,8 +11,14 @@ class MemoryRepository(
     private val context: Context
 ) {
 
-    private val settings = SettingsManager.getSettings(context)
-    private val embeddingService = EmbeddingService(settings.geminiApiKey)
+    // ✅ الحصول على Gemini API Key من SharedPreferences مباشرة
+    private fun getGeminiApiKey(): String {
+        val prefs = context.getSharedPreferences("ai_settings", Context.MODE_PRIVATE)
+        return prefs.getString("gemini_api_key", "") ?: ""
+    }
+
+    private val embeddingService: EmbeddingService
+        get() = EmbeddingService(getGeminiApiKey())
 
     // ============================================================
     // إضافة ذاكرة مع Embedding
@@ -41,7 +47,7 @@ class MemoryRepository(
                 ""
             }
         } catch (e: Exception) {
-            ""  // في حالة الفشل، نحفظ بدون embedding
+            ""
         }
 
         val memory = MemoryItem(
@@ -111,10 +117,8 @@ class MemoryRepository(
         val hasEmbeddings = allMemories.any { it.embedding.isNotBlank() }
 
         return if (hasEmbeddings) {
-            // ✅ بحث دلالي بـ Embeddings
             searchWithEmbeddings(cleanQuery, allMemories)
         } else {
-            // ⚠️ Fallback للبحث التقليدي
             val result = MemorySearchEngine.search(
                 query = cleanQuery,
                 memories = allMemories,
@@ -126,14 +130,13 @@ class MemoryRepository(
     }
 
     /**
-     * البحث باستخدام Embeddings (الطريقة الذكية)
+     * البحث باستخدام Embeddings
      */
     private suspend fun searchWithEmbeddings(
         query: String,
         memories: List<MemoryItem>
     ): List<MemoryItem> {
 
-        // استخراج embedding للسؤال
         val queryVector = try {
             embeddingService.getEmbedding(query)
         } catch (e: Exception) {
@@ -141,7 +144,6 @@ class MemoryRepository(
         }
 
         if (queryVector.isEmpty()) {
-            // Fallback للبحث التقليدي
             val result = MemorySearchEngine.search(
                 query = query,
                 memories = memories,
@@ -151,7 +153,6 @@ class MemoryRepository(
             return result.memories
         }
 
-        // حساب التشابه مع كل ذاكرة
         val scored = memories.mapNotNull { memory ->
             if (memory.embedding.isBlank()) {
                 return@mapNotNull null
@@ -168,7 +169,6 @@ class MemoryRepository(
                 memoryVector
             )
             
-            // ✅ عتبة التشابه: 0.5 = 50%
             if (similarity >= 0.5) {
                 Pair(memory, similarity)
             } else {
@@ -176,7 +176,6 @@ class MemoryRepository(
             }
         }
 
-        // ترتيب حسب التشابه (الأعلى أولاً)
         return scored
             .sortedByDescending { it.second }
             .take(8)
