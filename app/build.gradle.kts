@@ -106,6 +106,8 @@ dependencies {
 
     // GeckoView (ضروري للويب)
     implementation("org.mozilla.geckoview:geckoview:130.0.20240913135723")
+    //pdf
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.8")
