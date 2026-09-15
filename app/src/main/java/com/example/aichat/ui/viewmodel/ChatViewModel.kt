@@ -35,7 +35,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         ConversationRepository(dao)
 
     private val memoryRepository =
-        MemoryRepository(memoryDao)
+    MemoryRepository(
+        memoryDao,
+        getApplication()  // ✅ Context
+    )
 
     private val memoryContextBuilder =
         MemoryContextBuilder()
