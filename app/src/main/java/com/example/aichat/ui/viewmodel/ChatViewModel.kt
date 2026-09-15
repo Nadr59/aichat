@@ -482,6 +482,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    
     fun selectFile(
         uri: Uri
     ) {
@@ -521,6 +522,66 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    
+    private val fileProcessor = FileProcessor(getApplication())
+
+/**
+ * معالجة ملف ورفعه للذاكرة
+ */
+fun processAndSaveFile(uri: Uri) {
+    viewModelScope.launch {
+        _isLoading.value = true
+        _error.value = null
+
+        try {
+            android.util.Log.d("ChatViewModel", "📄 Processing file: $uri")
+
+            // قراءة الملف
+            val content = fileProcessor.readFile(uri)
+
+            if (content.isBlank()) {
+                _error.value = "⚠️ الملف فارغ"
+                return@launch
+            }
+
+            android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} characters")
+
+            // تقسيم إلى أجزاء إذا كان طويلاً
+            val chunks = if (content.length > 2000) {
+                fileProcessor.chunkText(content, maxChunkSize = 1500, overlap = 200)
+            } else {
+                listOf(content)
+            }
+
+            android.util.Log.d("ChatViewModel", "📦 Split into ${chunks.size} chunks")
+
+            // حفظ كل جزء في الذاكرة
+            chunks.forEachIndexed { index, chunk ->
+                val title = if (chunks.size > 1) {
+                    "ملف - جزء ${index + 1}/${chunks.size}"
+                } else {
+                    "ملف"
+                }
+
+                memoryRepository.addMemory(
+                    content = chunk,
+                    category = "KNOWLEDGE",
+                    isShared = true
+                )
+
+                android.util.Log.d("ChatViewModel", "✅ Saved chunk ${index + 1}")
+            }
+
+            _error.value = "✅ تم حفظ ${chunks.size} ${if (chunks.size > 1) "أجزاء" else "جزء"} في الذاكرة"
+
+        } catch (e: Exception) {
+            android.util.Log.e("ChatViewModel", "❌ File processing failed: ${e.message}")
+            _error.value = "❌ ${e.message}"
+        } finally {
+            _isLoading.value = false
+        }
+    }
+}
     // ============================================================
     // Helpers
     // ============================================================
