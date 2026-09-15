@@ -1,6 +1,8 @@
-   
 package com.example.aichat.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,11 +16,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,6 +74,15 @@ fun MemoryScreen(
         mutableStateOf<MemoryItem?>(null)
     }
 
+    // ✅ File picker launcher - يدعم TXT و PDF
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.processAndSaveFile(it)
+        }
+    }
+
     val filteredShared =
         if (searchQuery.isBlank()) {
             sharedMemories
@@ -86,25 +99,6 @@ fun MemoryScreen(
             }
         }
 
-        // في Composable
-
-val filePickerLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.GetContent()
-) { uri: Uri? ->
-    uri?.let {
-        viewModel.processAndSaveFile(it)
-    }
-}
-
-Button(
-    onClick = {
-        filePickerLauncher.launch("*/*")  // أو "text/plain|application/pdf"
-    }
-) {
-    Icon(Icons.Default.AttachFile, contentDescription = null)
-    Spacer(modifier = Modifier.width(8.dp))
-    Text("رفع ملف (TXT/PDF)")
-}
     val localMemories =
         if (searchQuery.isBlank()) {
             conversationMemories.value
@@ -146,6 +140,23 @@ Button(
                 .padding(horizontal = 12.dp)
         ) {
 
+            // ✅ زر رفع الملفات (TXT و PDF)
+            Button(
+                onClick = {
+                    filePickerLauncher.launch("*/*")
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AttachFile,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("رفع ملف (TXT أو PDF)")
+            }
+
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = {
@@ -175,7 +186,6 @@ Button(
             ) {
 
                 item {
-
                     Text(
                         text = "🌐 الذكريات المشتركة",
                         style =
@@ -191,7 +201,6 @@ Button(
                 if (filteredShared.isEmpty()) {
 
                     item {
-
                         EmptyMemoryText(
                             text = "لا توجد ذكريات مشتركة."
                         )
@@ -237,7 +246,6 @@ Button(
                 if (conversationId == null) {
 
                     item {
-
                         EmptyMemoryText(
                             text =
                                 "لا توجد محادثة مفتوحة حاليًا."
@@ -247,7 +255,6 @@ Button(
                 } else if (localMemories.isEmpty()) {
 
                     item {
-
                         EmptyMemoryText(
                             text =
                                 "لا توجد ذكريات خاصة بهذه المحادثة."
