@@ -15,12 +15,16 @@ import org.mozilla.geckoview.GeckoView
 
 @Composable
 fun GeckoTestScreen(
+    platform: String,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
 
+    val platformInfo =
+        webPlatforms[platform] ?: webPlatforms["huggingchat"]!!
+
     /*
-     * GeckoRuntime لا يتم إغلاقه عند مغادرة هذه الشاشة.
+     * GeckoRuntime لا يتم إغلاقه عند مغادرة الشاشة.
      *
      * السبب:
      * GeckoRuntime مورد ثقيل ويُفضّل أن يعيش على مستوى
@@ -54,7 +58,7 @@ fun GeckoTestScreen(
 
                 if (!session.isOpen) {
                     session.open(runtime)
-                    session.loadUri("https://venice.ai/chat")
+                    session.loadUri(platformInfo.url)
                 }
             }
         }
@@ -65,7 +69,7 @@ fun GeckoTestScreen(
         onDispose {
 
             /*
-             * افصل الجلسة عن GeckoView أولاً.
+             * إغلاق الجلسة فقط.
              * لا نغلق GeckoRuntime هنا.
              */
             session.close()
