@@ -1,28 +1,38 @@
 package com.example.aichat
 
 import android.app.Application
+import android.util.Log
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 
 class AichatApp : Application() {
 
-    // ✅ GeckoRuntime واحد لكل التطبيق
-    // السبب: GeckoRuntime مورد ثقيل ولا يسمح بأكثر من نسخة واحدة
-    // إذا أنشأنا نسختين → crash فوري
-    lateinit var geckoRuntime: GeckoRuntime
+    var geckoRuntime: GeckoRuntime? = null
         private set
 
     override fun onCreate() {
         super.onCreate()
+        // ✅ لا نهيئ GeckoRuntime هنا
+        // سيتم عند الحاجة فقط (Lazy)
+        Log.d("AichatApp", "✅ App started")
+    }
 
-        // تهيئة GeckoRuntime مرة واحدة عند بدء التطبيق
-        val runtimeSettings = GeckoRuntimeSettings.Builder()
-            .aboutConfigEnabled(false)
-            .build()
+    // ✅ تهيئة عند الطلب فقط - Lazy
+    fun getOrCreateGeckoRuntime(): GeckoRuntime? {
+        if (geckoRuntime != null) return geckoRuntime
 
-        geckoRuntime = GeckoRuntime.create(
-            applicationContext,
-            runtimeSettings
-        )
+        return try {
+            val settings = GeckoRuntimeSettings.Builder()
+                .aboutConfigEnabled(false)
+                .build()
+
+            GeckoRuntime.create(applicationContext, settings).also {
+                geckoRuntime = it
+                Log.d("AichatApp", "✅ GeckoRuntime created on demand")
+            }
+        } catch (e: Exception) {
+            Log.e("AichatApp", "❌ GeckoRuntime failed: ${e.message}")
+            null
+        }
     }
 }
