@@ -108,6 +108,8 @@ dependencies {
     implementation("org.mozilla.geckoview:geckoview:130.0.20240913135723")
     //pdf
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+   //web
+    implementation("org.jsoup:jsoup:1.17.2")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.8")
