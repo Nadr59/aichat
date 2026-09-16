@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.flow.flowOf
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,29 +57,17 @@ fun MemoryScreen(
     val sharedMemories by viewModel.sharedMemories.collectAsState()
     val conversationId by viewModel.currentConversationId.collectAsState()
 
-    // ✅ استبدل هذا الجزء فقط في MemoryScreen.kt
+    val conversationMemories by remember(conversationId) {
+        if (conversationId != null) {
+            viewModel.getConversationMemories(conversationId!!)
+        } else {
+            flowOf(emptyList<MemoryItem>())
+        }
+    }.collectAsState(initial = emptyList())
 
+    var searchQuery by remember { mutableStateOf("") }
+    var editingMemory by remember { mutableStateOf<MemoryItem?>(null) }
 
-
-
-// ✅ الجديد - آمن
-val conversationMemories by remember(conversationId) {
-    if (conversationId != null) {
-        viewModel.getConversationMemories(conversationId!!)
-    } else {
-        kotlinx.coroutines.flow.flowOf(emptyList<com.example.aichat.data.model.MemoryItem>())
-    }
-}.collectAsState(initial = emptyList())
-
-    var searchQuery by remember {
-        mutableStateOf("")
-    }
-
-    var editingMemory by remember {
-        mutableStateOf<MemoryItem?>(null)
-    }
-
-    // ✅ File picker launcher - يدعم TXT و PDF
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -87,44 +76,28 @@ val conversationMemories by remember(conversationId) {
         }
     }
 
-    val filteredShared =
-        if (searchQuery.isBlank()) {
-            sharedMemories
-        } else {
-            sharedMemories.filter {
-                it.content.contains(
-                    searchQuery,
-                    ignoreCase = true
-                ) ||
-                it.category.contains(
-                    searchQuery,
-                    ignoreCase = true
-                )
-            }
+    val filteredShared = if (searchQuery.isBlank()) {
+        sharedMemories
+    } else {
+        sharedMemories.filter {
+            it.content.contains(searchQuery, ignoreCase = true) ||
+            it.category.contains(searchQuery, ignoreCase = true)
         }
+    }
 
-    val localMemories =
-        if (searchQuery.isBlank()) {
-            conversationMemories.value
-        } else {
-            conversationMemories.value.filter {
-                it.content.contains(
-                    searchQuery,
-                    ignoreCase = true
-                ) ||
-                it.category.contains(
-                    searchQuery,
-                    ignoreCase = true
-                )
-            }
+    val localMemories = if (searchQuery.isBlank()) {
+        conversationMemories
+    } else {
+        conversationMemories.filter {
+            it.content.contains(searchQuery, ignoreCase = true) ||
+            it.category.contains(searchQuery, ignoreCase = true)
         }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text("الذكريات")
-                },
+                title = { Text("الذكريات") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -144,11 +117,8 @@ val conversationMemories by remember(conversationId) {
                 .padding(horizontal = 12.dp)
         ) {
 
-            // ✅ زر رفع الملفات (TXT و PDF)
             Button(
-                onClick = {
-                    filePickerLauncher.launch("*/*")
-                },
+                onClick = { filePickerLauncher.launch("*/*") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
@@ -163,14 +133,10 @@ val conversationMemories by remember(conversationId) {
 
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = {
-                    searchQuery = it
-                },
+                onValueChange = { searchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = {
-                    Text("البحث في الذكريات")
-                },
+                label = { Text("البحث في الذكريات") },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Filled.Search,
@@ -179,135 +145,91 @@ val conversationMemories by remember(conversationId) {
                 }
             )
 
-            Spacer(
-                modifier = Modifier.height(12.dp)
-            )
+            Spacer(modifier = Modifier.height(12.dp))
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement =
-                    Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
 
                 item {
                     Text(
                         text = "🌐 الذكريات المشتركة",
-                        style =
-                            MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier =
-                            Modifier.padding(
-                                vertical = 6.dp
-                            )
+                        modifier = Modifier.padding(vertical = 6.dp)
                     )
                 }
 
                 if (filteredShared.isEmpty()) {
-
                     item {
-                        EmptyMemoryText(
-                            text = "لا توجد ذكريات مشتركة."
-                        )
+                        EmptyMemoryText(text = "لا توجد ذكريات مشتركة.")
                     }
-
                 } else {
-
                     items(
                         items = filteredShared,
                         key = { it.id }
                     ) { memory ->
-
                         MemoryCard(
                             memory = memory,
-                            onEdit = {
-                                editingMemory = memory
-                            },
-                            onDelete = {
-                                viewModel.deleteMemory(memory)
-                            }
+                            onEdit = { editingMemory = memory },
+                            onDelete = { viewModel.deleteMemory(memory) }
                         )
                     }
                 }
 
                 item {
-
-                    Spacer(
-                        modifier = Modifier.height(12.dp)
-                    )
-
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "💬 ذكريات هذه المحادثة",
-                        style =
-                            MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier =
-                            Modifier.padding(
-                                vertical = 6.dp
-                            )
+                        modifier = Modifier.padding(vertical = 6.dp)
                     )
                 }
 
-                if (conversationId == null) {
-
-                    item {
-                        EmptyMemoryText(
-                            text =
-                                "لا توجد محادثة مفتوحة حاليًا."
-                        )
+                when {
+                    conversationId == null -> {
+                        item {
+                            EmptyMemoryText(
+                                text = "لا توجد محادثة مفتوحة حاليًا."
+                            )
+                        }
                     }
-
-                } else if (localMemories.isEmpty()) {
-
-                    item {
-                        EmptyMemoryText(
-                            text =
-                                "لا توجد ذكريات خاصة بهذه المحادثة."
-                        )
+                    localMemories.isEmpty() -> {
+                        item {
+                            EmptyMemoryText(
+                                text = "لا توجد ذكريات خاصة بهذه المحادثة."
+                            )
+                        }
                     }
-
-                } else {
-
-                    items(
-                        items = localMemories,
-                        key = { it.id }
-                    ) { memory ->
-
-                        MemoryCard(
-                            memory = memory,
-                            onEdit = {
-                                editingMemory = memory
-                            },
-                            onDelete = {
-                                viewModel.deleteMemory(memory)
-                            }
-                        )
+                    else -> {
+                        items(
+                            items = localMemories,
+                            key = { it.id }
+                        ) { memory ->
+                            MemoryCard(
+                                memory = memory,
+                                onEdit = { editingMemory = memory },
+                                onDelete = { viewModel.deleteMemory(memory) }
+                            )
+                        }
                     }
                 }
 
                 item {
-                    Spacer(
-                        modifier = Modifier.height(24.dp)
-                    )
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
             }
         }
     }
 
     editingMemory?.let { memory ->
-
         EditMemoryDialog(
             memory = memory,
-            onDismiss = {
-                editingMemory = null
-            },
+            onDismiss = { editingMemory = null },
             onSave = { updatedContent ->
-
-                viewModel.updateMemory(
-                    memory.copy(
-                        content = updatedContent
-                    )
-                )
-
+                viewModel.updateMemory(memory.copy(content = updatedContent))
                 editingMemory = null
             }
         )
@@ -323,30 +245,20 @@ private fun MemoryCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor =
-                MaterialTheme.colorScheme.surfaceVariant
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
+        Column(modifier = Modifier.padding(12.dp)) {
 
-        Column(
-            modifier = Modifier.padding(12.dp)
-        ) {
-
-            Row(
-                verticalAlignment =
-                    Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
 
                 Icon(
                     imageVector = Icons.Filled.Memory,
                     contentDescription = null,
-                    tint =
-                        MaterialTheme.colorScheme.primary
+                    tint = MaterialTheme.colorScheme.primary
                 )
 
-                Spacer(
-                    modifier = Modifier.width(8.dp)
-                )
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Text(
                     text = categoryName(memory.category),
@@ -354,18 +266,14 @@ private fun MemoryCard(
                     modifier = Modifier.weight(1f)
                 )
 
-                IconButton(
-                    onClick = onEdit
-                ) {
+                IconButton(onClick = onEdit) {
                     Icon(
                         imageVector = Icons.Filled.Edit,
                         contentDescription = "تعديل"
                     )
                 }
 
-                IconButton(
-                    onClick = onDelete
-                ) {
+                IconButton(onClick = onDelete) {
                     Icon(
                         imageVector = Icons.Filled.Delete,
                         contentDescription = "حذف"
@@ -373,48 +281,33 @@ private fun MemoryCard(
                 }
             }
 
-            Spacer(
-                modifier = Modifier.height(6.dp)
-            )
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
                 text = memory.content,
                 style = MaterialTheme.typography.bodyMedium
             )
 
-            Spacer(
-                modifier = Modifier.height(6.dp)
-            )
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text =
-                    if (memory.isShared) {
-                        "🌐 ذاكرة مشتركة"
-                    } else {
-                        "💬 لهذه المحادثة فقط"
-                    },
+                text = if (memory.isShared) "🌐 ذاكرة مشتركة" else "💬 لهذه المحادثة فقط",
                 style = MaterialTheme.typography.labelSmall,
-                color =
-                    MaterialTheme.colorScheme
-                        .onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
 
 @Composable
-private fun EmptyMemoryText(
-    text: String
-) {
+private fun EmptyMemoryText(text: String) {
     Text(
         text = text,
         modifier = Modifier
             .fillMaxWidth()
             .padding(12.dp),
         style = MaterialTheme.typography.bodySmall,
-        color =
-            MaterialTheme.colorScheme
-                .onSurfaceVariant
+        color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }
 
@@ -424,32 +317,21 @@ private fun EditMemoryDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit
 ) {
-    var content by remember {
-        mutableStateOf(memory.content)
-    }
+    var content by remember { mutableStateOf(memory.content) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-
-        title = {
-            Text("تعديل الذاكرة")
-        },
-
+        title = { Text("تعديل الذاكرة") },
         text = {
-
             OutlinedTextField(
                 value = content,
-                onValueChange = {
-                    content = it
-                },
+                onValueChange = { content = it },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 4,
                 maxLines = 10
             )
         },
-
         confirmButton = {
-
             TextButton(
                 onClick = {
                     if (content.trim().isNotBlank()) {
@@ -460,25 +342,19 @@ private fun EditMemoryDialog(
                 Text("حفظ")
             }
         },
-
         dismissButton = {
-
-            TextButton(
-                onClick = onDismiss
-            ) {
+            TextButton(onClick = onDismiss) {
                 Text("إلغاء")
             }
         }
     )
 }
 
-private fun categoryName(
-    category: String
-): String {
+private fun categoryName(category: String): String {
     return when (category) {
         "KNOWLEDGE" -> "📚 معرفة"
-        "PROJECT" -> "🛠️ مشروع"
+        "PROJECT"   -> "🛠️ مشروع"
         "PREFERENCE" -> "⭐ تفضيل"
-        else -> "📝 أخرى"
+        else        -> "📝 أخرى"
     }
 }
