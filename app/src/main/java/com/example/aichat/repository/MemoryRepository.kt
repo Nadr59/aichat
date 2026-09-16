@@ -221,60 +221,57 @@ suspend fun addMemory(
      * - تقليدي للذكريات التي لا تملكه
      * - Fallback كامل عند صفر نتائج
      */
-    private suspend fun searchWithEmbeddings(
-        query: String,
-        memories: List<MemoryItem>
-    ): List<MemoryItem> {
+     private suspend fun searchWithEmbeddings(
+    query: String,
+    memories: List<MemoryItem>
+): List<MemoryItem> {
 
-        val (withEmb, withoutEmb) = memories.partition { it.embedding.isNotBlank() }
-
-        val queryVector = embeddingService.getEmbedding(query)
-
-        if (queryVector.isEmpty()) {
-            Log.w(TAG, "⚠️ Empty query vector, using full fallback")
-            return fallbackSearch(query, memories)
-        }
-
-        Log.d(TAG, "✅ Query embedding: ${queryVector.size} dimensions")
-
-        // البحث الدلالي
-        val semanticResults = withEmb.mapNotNull { memory ->
-            val memoryVector = embeddingService.stringToVector(memory.embedding)
-            if (memoryVector.isEmpty()) return@mapNotNull null
-
-            val similarity = embeddingService.cosineSimilarity(queryVector, memoryVector)
-            Log.d(TAG, "📊 Similarity: ${String.format("%.3f", similarity)} - ${memory.content.take(50)}...")
-
-            if (similarity >= SIMILARITY_THRESHOLD) Pair(memory, similarity) else null
-        }
-            .sortedByDescending { it.second }
-            .map { it.first }
-
-        // ✅ البحث التقليدي على الذكريات بلا embedding (كانت غير مرئية سابقاً)
-        val keywordResults = if (withoutEmb.isNotEmpty()) {
-            MemorySearchEngine.search(
-                query = query,
-                memories = withoutEmb,
-                limit = MAX_RESULTS,
-                minScore = 0.05
-            ).memories
-        } else {
-            emptyList()
-        }
-
-        val combined = (semanticResults + keywordResults)
-            .distinctBy { it.id }
-            .take(MAX_RESULTS)
-
-        // ✅ Fallback نهائي: صفر نتائج → بحث تقليدي على الكل
-        if (combined.isEmpty()) {
-            Log.w(TAG, "⚠️ No semantic matches above $SIMILARITY_THRESHOLD, trying full fallback")
-            return fallbackSearch(query, memories)
-        }
-
-        Log.d(TAG, "✅ Found ${combined.size} memories (${semanticResults.size} semantic + ${keywordResults.size} keyword)")
-        return combined
+    val queryVector = try {
+        android.util.Log.d("MemoryRepository", "🔄 Getting query embedding for: $query")
+        embeddingService.getEmbedding(query)
+    } catch (e: Exception) {
+        android.util.Log.e("MemoryRepository", "❌ Query embedding failed: ${e.message}")
+        return fallbackSearch(query, memories)
     }
+
+    if (queryVector.isEmpty()) {
+        android.util.Log.w("MemoryRepository", "⚠️ Empty query vector, using fallback")
+        return fallbackSearch(query, memories)
+    }
+
+    android.util.Log.d("MemoryRepository", "✅ Query embedding: ${queryVector.size} dimensions")
+
+    val scored = memories.mapNotNull { memory ->
+        if (memory.embedding.isBlank()) {
+            return@mapNotNull null
+        }
+
+        val memoryVector = embeddingService.stringToVector(memory.embedding)
+        
+        if (memoryVector.isEmpty()) {
+            return@mapNotNull null
+        }
+
+        val similarity = embeddingService.cosineSimilarity(queryVector, memoryVector)
+        
+        android.util.Log.d("MemoryRepository", "📊 Similarity: ${String.format("%.3f", similarity)} - ${memory.content.take(50)}...")
+        
+        if (similarity >= 0.5) {
+            Pair(memory, similarity)
+        } else {
+            null
+        }
+    }
+
+    val results = scored
+        .sortedByDescending { it.second }
+        .take(3)  // ← كان 8، خفضناه إلى 3 فقط!
+        .map { it.first }
+
+    android.util.Log.d("MemoryRepository", "✅ Found ${results.size} semantically similar memories")
+
+    return results
+     }
 
     /**
      * Fallback للبحث التقليدي
