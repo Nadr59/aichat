@@ -16,7 +16,7 @@ import com.example.aichat.data.model.MemoryItem
         Message::class,
         MemoryItem::class
     ],
-    version = 4, // ✅ مُحدَّث: من 3 إلى 4
+    version = 5, // ✅ مُحدَّث: من 4 إلى 5
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -38,7 +38,8 @@ abstract class ChatDatabase : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_1_2,
                         MIGRATION_2_3,
-                        MIGRATION_3_4 // ✅ مُضاف
+                        MIGRATION_3_4,
+                        MIGRATION_4_5 // ✅ مُضاف
                     )
                     .build()
                 INSTANCE = instance
@@ -78,8 +79,7 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
-        // ✅ Migration 3 → 4: إضافة embeddingModel و embeddingDimensions
-        // السبب: تتبع النموذج المستخدم لكل vector لضمان التوافق مستقبلاً
+        // Migration 3 → 4: إضافة embeddingModel و embeddingDimensions
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL(
@@ -92,6 +92,33 @@ abstract class ChatDatabase : RoomDatabase() {
                     """
                     ALTER TABLE memory_items 
                     ADD COLUMN embeddingDimensions INTEGER NOT NULL DEFAULT 768
+                    """.trimIndent()
+                )
+            }
+        }
+
+        // ✅ Migration 4 → 5: إضافة contentHash لمنع التكرار
+        // السبب: نريد منع حفظ نفس المحتوى مرتين في الذاكرة
+        // القيمة الافتراضية '' للذكريات القديمة (سيتم ملؤها بـ backfillEmbeddings)
+        // ملاحظة: Index UNIQUE لا يمنع تعدد القيم الفارغة '' في SQLite
+        // لأن SQLite يعامل '' كقيمة عادية → يمنع التكرار فقط للـ hash الحقيقي
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // إضافة العمود أولاً
+                database.execSQL(
+                    """
+                    ALTER TABLE memory_items 
+                    ADD COLUMN contentHash TEXT NOT NULL DEFAULT ''
+                    """.trimIndent()
+                )
+
+                // ✅ إنشاء Index للبحث السريع
+                // ملاحظة: لا نضع UNIQUE هنا لأن القيم الفارغة '' ستتعارض
+                // الـ UNIQUE يُطبَّق منطقياً في MemoryRepository.addMemory
+                database.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_memory_items_contentHash 
+                    ON memory_items(contentHash)
                     """.trimIndent()
                 )
             }
