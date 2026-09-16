@@ -37,9 +37,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,6 +55,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,6 +70,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -87,235 +91,161 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val successMessage by viewModel.successMessage.collectAsState()
     val selectedImage by viewModel.selectedImageBase64.collectAsState()
     val customRequestCount by viewModel.customRequestCount.collectAsState()
 
-    var inputText by remember {
-        mutableStateOf("")
-    }
-
+    var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val context = LocalContext.current
 
-    var cameraImageUri by remember {
-        mutableStateOf<Uri?>(null)
+    var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
+    var memoryMessage by remember { mutableStateOf<Message?>(null) }
+
+    // ✅ مُضاف: حالة Dialog استيراد صفحة الويب
+    var showWebImportDialog by remember { mutableStateOf(false) }
+
+    // ============================================================
+    // Launchers
+    // ============================================================
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.selectImage(it) }
     }
 
-    var memoryMessage by remember {
-        mutableStateOf<Message?>(null)
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            cameraImageUri?.let { viewModel.selectImage(it) }
+        }
     }
 
-    val galleryLauncher =
-        rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.GetContent()
-        ) { uri ->
-            uri?.let {
-                viewModel.selectImage(it)
-            }
-        }
+    // ✅ مُصحَّح: فلتر الملفات ليشمل TXT و PDF فقط
+    val fileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.processAndSaveFile(it) }
+    }
 
-    val cameraLauncher =
-        rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.TakePicture()
-        ) { success ->
-            if (success) {
-                cameraImageUri?.let {
-                    viewModel.selectImage(it)
-                }
-            }
-        }
-
-    val fileLauncher =
-        rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.GetContent()
-        ) { uri ->
-            uri?.let {
-                viewModel.selectFile(it)
-            }
-        }
+    // ============================================================
+    // Helpers
+    // ============================================================
 
     fun openCamera() {
         try {
-            val photoFile =
-                File.createTempFile(
-                    "camera_photo_",
-                    ".jpg",
-                    context.cacheDir
-                )
-
-            val uri =
-                FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.provider",
-                    photoFile
-                )
-
+            val photoFile = File.createTempFile(
+                "camera_photo_",
+                ".jpg",
+                context.cacheDir
+            )
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.provider",
+                photoFile
+            )
             cameraImageUri = uri
             cameraLauncher.launch(uri)
-
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("ChatScreen", "Camera error: ${e.message}")
         }
     }
 
     fun copyToClipboard(text: String) {
-        val clipboard =
-            context.getSystemService(
-                Context.CLIPBOARD_SERVICE
-            ) as ClipboardManager
-
+        val clipboard = context.getSystemService(
+            Context.CLIPBOARD_SERVICE
+        ) as ClipboardManager
         clipboard.setPrimaryClip(
-            ClipData.newPlainText(
-                "message",
-                text
-            )
+            ClipData.newPlainText("message", text)
         )
     }
 
-    LaunchedEffect(
-        messages.size,
-        isLoading
-    ) {
-        val totalItems =
-            messages.size +
-                if (isLoading) 1 else 0
+    // ============================================================
+    // Auto scroll
+    // ============================================================
 
+    LaunchedEffect(messages.size, isLoading) {
+        val totalItems = messages.size + if (isLoading) 1 else 0
         if (totalItems > 0) {
-            listState.animateScrollToItem(
-                totalItems - 1
-            )
+            listState.animateScrollToItem(totalItems - 1)
         }
     }
+
+    // ============================================================
+    // ✅ مُضاف: تنظيف successMessage تلقائياً بعد 3 ثوان
+    // ============================================================
+
+    LaunchedEffect(successMessage) {
+        if (successMessage != null) {
+            delay(3500)
+            viewModel.clearSuccessMessage()
+        }
+    }
+
+    // ============================================================
+    // Scaffold
+    // ============================================================
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-
                         Text(
                             text = "المحادثة",
-                            fontWeight =
-                                FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold
                         )
-
                         Text(
-                            text =
-                                settings
-                                    .getActiveModel()
-                                    .take(35),
-                            style =
-                                MaterialTheme
-                                    .typography
-                                    .labelSmall,
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onSurfaceVariant
+                            text = settings.getActiveModel().take(35),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-
-                        if (
-                            settings.provider
-                                .trim()
-                                .lowercase() == "custom"
-                        ) {
+                        if (settings.provider.trim().lowercase() == "custom") {
                             Text(
-                                text =
-                                    "الطلبات: $customRequestCount",
-                                style =
-                                    MaterialTheme
-                                        .typography
-                                        .labelSmall,
-                                color =
-                                    MaterialTheme
-                                        .colorScheme
-                                        .primary
+                                text = "الطلبات: $customRequestCount",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
                 },
-
                 navigationIcon = {
-                    IconButton(
-                        onClick = onBack
-                    ) {
+                    IconButton(onClick = onBack) {
                         Icon(
-                            imageVector =
-                                Icons.Filled.ArrowBack,
-                            contentDescription =
-                                "رجوع"
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = "رجوع"
                         )
                     }
                 },
-
                 actions = {
                     Icon(
-                        imageVector =
-                            Icons.Filled.Chat,
-                        contentDescription =
-                            null,
-                        tint =
-                            MaterialTheme
-                                .colorScheme
-                                .primary,
-                        modifier =
-                            Modifier.padding(
-                                horizontal = 16.dp
-                            )
+                        imageVector = Icons.Filled.Chat,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 },
-
-                colors =
-                    TopAppBarDefaults
-                        .topAppBarColors(
-                            containerColor =
-                                MaterialTheme
-                                    .colorScheme
-                                    .background
-                        )
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         },
-
         bottomBar = {
             InputBar(
                 inputText = inputText,
                 isLoading = isLoading,
-                hasSelectedImage =
-                    selectedImage != null,
-
-                onOpenGallery = {
-                    galleryLauncher.launch(
-                        "image/*"
-                    )
-                },
-
-                onOpenCamera = {
-                    openCamera()
-                },
-
-                onOpenFile = {
-                    fileLauncher.launch("*/*")
-                },
-
-                onRemoveImage = {
-                    viewModel.clearSelectedImage()
-                },
-
-                onTextChange = {
-                    inputText = it
-                },
-
+                hasSelectedImage = selectedImage != null,
+                onOpenGallery = { galleryLauncher.launch("image/*") },
+                onOpenCamera = { openCamera() },
+                onOpenFile = { fileLauncher.launch("*/*") },
+                onOpenWebImport = { showWebImportDialog = true },
+                onRemoveImage = { viewModel.clearSelectedImage() },
+                onTextChange = { inputText = it },
                 onSend = {
-                    if (
-                        !isLoading &&
-                        (
-                            inputText.isNotBlank() ||
-                                selectedImage != null
-                        )
-                    ) {
-                        viewModel.sendMessage(
-                            inputText.trim()
-                        )
-
+                    if (!isLoading && (inputText.isNotBlank() || selectedImage != null)) {
+                        viewModel.sendMessage(inputText.trim())
                         inputText = ""
                     }
                 }
@@ -329,186 +259,245 @@ fun ChatScreen(
                 .padding(padding)
         ) {
 
+            // ✅ مُضاف: Snackbar للنجاح (أخضر)
+            successMessage?.let { msg ->
+                Snackbar(
+                    modifier = Modifier.padding(
+                        horizontal = 10.dp,
+                        vertical = 4.dp
+                    ),
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    dismissAction = {
+                        IconButton(onClick = { viewModel.clearSuccessMessage() }) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "إغلاق",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                ) {
+                    Text(
+                        text = msg,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
             if (messages.isEmpty()) {
-
                 EmptyChatView()
-
             } else {
-
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-
-                    contentPadding =
-                        PaddingValues(
-                            horizontal = 12.dp,
-                            vertical = 16.dp
-                        ),
-
-                    verticalArrangement =
-                        Arrangement.spacedBy(14.dp)
+                    contentPadding = PaddingValues(
+                        horizontal = 12.dp,
+                        vertical = 16.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-
                     items(
                         items = messages,
-                        key = {
-                            it.id
-                        }
+                        key = { it.id }
                     ) { message ->
-
                         MessageBubble(
                             message = message,
-
-                            onCopy = {
-                                copyToClipboard(it)
-                            },
-
-                            onSaveMemory = {
-                                memoryMessage = it
-                            }
+                            onCopy = { copyToClipboard(it) },
+                            onSaveMemory = { memoryMessage = it }
                         )
                     }
 
                     if (isLoading) {
-
-                        item(
-                            key = "thinking"
-                        ) {
+                        item(key = "thinking") {
                             ThinkingBubble()
                         }
                     }
                 }
             }
 
+            // رسائل الخطأ
             error?.let { err ->
-
                 ErrorMessage(
                     error = err,
-
-                    onDismiss = {
-                        viewModel.clearError()
-                    },
-
-                    onCopy = {
-                        copyToClipboard(err)
-                    }
+                    onDismiss = { viewModel.clearError() },
+                    onCopy = { copyToClipboard(err) }
                 )
             }
         }
     }
 
     // ============================================================
-    // حفظ الرسالة في الذاكرة
+    // Dialog حفظ في الذاكرة
     // ============================================================
 
     memoryMessage?.let { message ->
-
         SaveMemoryDialog(
             message = message,
-
-            conversationId =
-                viewModel
-                    .currentConversationId
-                    .collectAsState()
-                    .value,
-
-            onDismiss = {
-                memoryMessage = null
-            },
-
+            conversationId = viewModel.currentConversationId.collectAsState().value,
+            onDismiss = { memoryMessage = null },
             onSave = { category, isShared ->
-
                 viewModel.addMemory(
                     content = message.content,
                     category = category,
                     isShared = isShared,
                     sourceMessageId = message.id
                 )
-
                 memoryMessage = null
+            }
+        )
+    }
+
+    // ============================================================
+    // ✅ مُضاف: Dialog استيراد صفحة الويب
+    // ============================================================
+
+    if (showWebImportDialog) {
+        WebPageImportDialog(
+            onDismiss = { showWebImportDialog = false },
+            onConfirm = { url ->
+                viewModel.saveWebPage(url)
+                showWebImportDialog = false
             }
         )
     }
 }
 
+// ============================================================
+// ✅ مُضاف: Dialog استيراد صفحة الويب
+// ============================================================
+
+@Composable
+private fun WebPageImportDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var url by remember { mutableStateOf("") }
+    var isValidUrl by remember { mutableStateOf(true) }
+
+    fun validateUrl(input: String): Boolean {
+        return input.isBlank() ||
+            input.startsWith("http://") ||
+            input.startsWith("https://")
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "🌐 استيراد صفحة ويب",
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "أدخل رابط الصفحة لحفظ محتواها في الذاكرة",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = {
+                        url = it
+                        isValidUrl = validateUrl(it)
+                    },
+                    label = { Text("https://example.com") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = null
+                        )
+                    },
+                    isError = !isValidUrl,
+                    supportingText = {
+                        if (!isValidUrl) {
+                            Text("❌ يجب أن يبدأ الرابط بـ https://")
+                        } else {
+                            Text(
+                                text = "💡 مثال: https://developer.android.com",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val trimmed = url.trim()
+                    if (trimmed.isNotBlank() && isValidUrl) {
+                        onConfirm(trimmed)
+                    }
+                },
+                enabled = url.isNotBlank() && isValidUrl
+            ) {
+                Text("📥 استيراد")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء")
+            }
+        }
+    )
+}
+
+// ============================================================
+// EmptyChatView
+// ============================================================
+
 @Composable
 private fun EmptyChatView() {
-
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-
         Column(
-            horizontalAlignment =
-                Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
             Surface(
                 modifier = Modifier.size(64.dp),
                 shape = CircleShape,
-                color =
-                    MaterialTheme
-                        .colorScheme
-                        .primaryContainer
+                color = MaterialTheme.colorScheme.primaryContainer
             ) {
-
-                Box(
-                    contentAlignment =
-                        Alignment.Center
-                ) {
-
+                Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        imageVector =
-                            Icons.Filled.Chat,
-                        contentDescription =
-                            null,
-                        modifier =
-                            Modifier.size(30.dp),
-                        tint =
-                            MaterialTheme
-                                .colorScheme
-                                .onPrimaryContainer
+                        imageVector = Icons.Filled.Chat,
+                        contentDescription = null,
+                        modifier = Modifier.size(30.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
 
-            Spacer(
-                Modifier.size(16.dp)
-            )
+            Spacer(Modifier.size(16.dp))
 
             Text(
-                text =
-                    "كيف يمكنني مساعدتك؟",
-                style =
-                    MaterialTheme
-                        .typography
-                        .titleLarge,
-                fontWeight =
-                    FontWeight.SemiBold
+                text = "كيف يمكنني مساعدتك؟",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
             )
 
-            Spacer(
-                Modifier.size(6.dp)
-            )
+            Spacer(Modifier.size(6.dp))
 
             Text(
-                text =
-                    "اكتب رسالتك لبدء المحادثة",
-                style =
-                    MaterialTheme
-                        .typography
-                        .bodyMedium,
-                color =
-                    MaterialTheme
-                        .colorScheme
-                        .onSurfaceVariant
+                text = "اكتب رسالتك لبدء المحادثة",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
+
+// ============================================================
+// SaveMemoryDialog
+// ============================================================
 
 @Composable
 private fun SaveMemoryDialog(
@@ -517,159 +506,83 @@ private fun SaveMemoryDialog(
     onDismiss: () -> Unit,
     onSave: (String, Boolean) -> Unit
 ) {
-    var category by remember {
-        mutableStateOf("OTHER")
-    }
-
-    var isShared by remember {
-        mutableStateOf(true)
-    }
+    var category by remember { mutableStateOf("OTHER") }
+    var isShared by remember { mutableStateOf(true) }
 
     AlertDialog(
-
         onDismissRequest = onDismiss,
-
         icon = {
             Icon(
-                imageVector =
-                    Icons.Filled.Memory,
-                contentDescription =
-                    null
+                imageVector = Icons.Filled.Memory,
+                contentDescription = null
             )
         },
-
-        title = {
-            Text("حفظ في الذاكرة")
-        },
-
+        title = { Text("حفظ في الذاكرة") },
         text = {
-
             Column {
-
                 Text(
                     text = message.content,
-                    style =
-                        MaterialTheme
-                            .typography
-                            .bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 8
                 )
 
-                Spacer(
-                    Modifier.size(16.dp)
-                )
+                Spacer(Modifier.size(16.dp))
 
-                Text(
-                    text = "التصنيف",
-                    fontWeight =
-                        FontWeight.SemiBold
-                )
+                Text(text = "التصنيف", fontWeight = FontWeight.SemiBold)
 
                 MemoryCategoryOption(
                     text = "معرفة",
-                    selected =
-                        category == "KNOWLEDGE",
-                    onClick = {
-                        category = "KNOWLEDGE"
-                    }
+                    selected = category == "KNOWLEDGE",
+                    onClick = { category = "KNOWLEDGE" }
                 )
-
                 MemoryCategoryOption(
                     text = "مشروع",
-                    selected =
-                        category == "PROJECT",
-                    onClick = {
-                        category = "PROJECT"
-                    }
+                    selected = category == "PROJECT",
+                    onClick = { category = "PROJECT" }
                 )
-
                 MemoryCategoryOption(
                     text = "تفضيل",
-                    selected =
-                        category == "PREFERENCE",
-                    onClick = {
-                        category = "PREFERENCE"
-                    }
+                    selected = category == "PREFERENCE",
+                    onClick = { category = "PREFERENCE" }
                 )
-
                 MemoryCategoryOption(
                     text = "أخرى",
-                    selected =
-                        category == "OTHER",
-                    onClick = {
-                        category = "OTHER"
-                    }
+                    selected = category == "OTHER",
+                    onClick = { category = "OTHER" }
                 )
 
-                Spacer(
-                    Modifier.size(10.dp)
-                )
+                Spacer(Modifier.size(10.dp))
 
-                Text(
-                    text = "نطاق الذاكرة",
-                    fontWeight =
-                        FontWeight.SemiBold
-                )
+                Text(text = "نطاق الذاكرة", fontWeight = FontWeight.SemiBold)
 
                 MemoryCategoryOption(
-                    text =
-                        "🌐 ذاكرة مشتركة مع جميع النماذج",
+                    text = "🌐 ذاكرة مشتركة مع جميع النماذج",
                     selected = isShared,
-                    onClick = {
-                        isShared = true
-                    }
+                    onClick = { isShared = true }
                 )
-
                 MemoryCategoryOption(
-                    text =
-                        "💬 هذه المحادثة فقط",
+                    text = "💬 هذه المحادثة فقط",
                     selected = !isShared,
-                    onClick = {
-                        isShared = false
-                    }
+                    onClick = { isShared = false }
                 )
 
                 if (conversationId == null) {
-
                     Text(
-                        text =
-                            "سيتم ربط الذاكرة بالمحادثة الحالية عند توفرها.",
-                        style =
-                            MaterialTheme
-                                .typography
-                                .labelSmall,
-                        color =
-                            MaterialTheme
-                                .colorScheme
-                                .onSurfaceVariant,
-                        modifier =
-                            Modifier.padding(
-                                top = 6.dp
-                            )
+                        text = "سيتم ربط الذاكرة بالمحادثة الحالية عند توفرها.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp)
                     )
                 }
             }
         },
-
         confirmButton = {
-
-            TextButton(
-                onClick = {
-                    onSave(
-                        category,
-                        isShared
-                    )
-                }
-            ) {
+            TextButton(onClick = { onSave(category, isShared) }) {
                 Text("حفظ")
             }
         },
-
         dismissButton = {
-
-            TextButton(
-                onClick = onDismiss
-            ) {
+            TextButton(onClick = onDismiss) {
                 Text("إلغاء")
             }
         }
@@ -682,35 +595,24 @@ private fun MemoryCategoryOption(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                onClick = onClick
-            )
-            .padding(
-                vertical = 2.dp
-            ),
-
-        verticalAlignment =
-            Alignment.CenterVertically
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-
-        RadioButton(
-            selected = selected,
-            onClick = onClick
-        )
-
+        RadioButton(selected = selected, onClick = onClick)
         Text(
             text = text,
-            style =
-                MaterialTheme
-                    .typography
-                    .bodyMedium
+            style = MaterialTheme.typography.bodyMedium
         )
     }
 }
+
+// ============================================================
+// InputBar - مُحسَّن: إضافة زر استيراد الويب
+// ============================================================
 
 @Composable
 private fun InputBar(
@@ -720,26 +622,20 @@ private fun InputBar(
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
     onOpenFile: () -> Unit,
+    onOpenWebImport: () -> Unit,
     onRemoveImage: () -> Unit,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit
 ) {
-
-    var showAttachMenu by remember {
-        mutableStateOf(false)
-    }
+    var showAttachMenu by remember { mutableStateOf(false) }
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .imePadding()
             .navigationBarsPadding(),
-        color =
-            MaterialTheme
-                .colorScheme
-                .background
+        color = MaterialTheme.colorScheme.background
     ) {
-
         Column(
             modifier = Modifier.padding(
                 horizontal = 10.dp,
@@ -747,78 +643,41 @@ private fun InputBar(
             )
         ) {
 
+            // مؤشر الصورة المحددة
             if (hasSelectedImage) {
-
                 Surface(
-                    modifier =
-                        Modifier.padding(
-                            bottom = 6.dp
-                        ),
-                    shape =
-                        RoundedCornerShape(12.dp),
-                    color =
-                        MaterialTheme
-                            .colorScheme
-                            .secondaryContainer
+                    modifier = Modifier.padding(bottom = 6.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer
                 ) {
-
                     Row(
-                        modifier =
-                            Modifier.padding(
-                                horizontal = 10.dp,
-                                vertical = 6.dp
-                            ),
-
-                        verticalAlignment =
-                            Alignment.CenterVertically
+                        modifier = Modifier.padding(
+                            horizontal = 10.dp,
+                            vertical = 6.dp
+                        ),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-
                         Icon(
-                            imageVector =
-                                Icons.Filled.Image,
-                            contentDescription =
-                                null,
-                            modifier =
-                                Modifier.size(20.dp),
-                            tint =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onSecondaryContainer
+                            imageVector = Icons.Filled.Image,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
                         )
-
-                        Spacer(
-                            Modifier.width(8.dp)
-                        )
-
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            text =
-                                "✅ صورة جاهزة للإرسال",
-                            modifier =
-                                Modifier.weight(1f),
-                            style =
-                                MaterialTheme
-                                    .typography
-                                    .bodySmall,
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onSecondaryContainer
+                            text = "✅ صورة جاهزة للإرسال",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
-
                         IconButton(
-                            onClick =
-                                onRemoveImage,
-                            modifier =
-                                Modifier.size(28.dp)
+                            onClick = onRemoveImage,
+                            modifier = Modifier.size(28.dp)
                         ) {
-
                             Icon(
-                                imageVector =
-                                    Icons.Filled.Close,
-                                contentDescription =
-                                    "إزالة الصورة",
-                                modifier =
-                                    Modifier.size(18.dp)
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "إزالة الصورة",
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -826,165 +685,108 @@ private fun InputBar(
             }
 
             Row(
-                modifier =
-                    Modifier.fillMaxWidth(),
-                verticalAlignment =
-                    Alignment.Bottom
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom
             ) {
-
                 Surface(
-                    modifier =
-                        Modifier.weight(1f),
-                    shape =
-                        RoundedCornerShape(26.dp),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(26.dp),
                     tonalElevation = 2.dp,
-                    color =
-                        MaterialTheme
-                            .colorScheme
-                            .surfaceVariant
+                    color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
-
                     Row(
-                        modifier =
-                            Modifier.fillMaxWidth(),
-                        verticalAlignment =
-                            Alignment.Bottom
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Bottom
                     ) {
-
                         Box {
-
                             IconButton(
-                                onClick = {
-                                    showAttachMenu = true
-                                },
+                                onClick = { showAttachMenu = true },
                                 enabled = !isLoading
                             ) {
-
                                 Icon(
-                                    imageVector =
-                                        Icons.Filled.AttachFile,
-                                    contentDescription =
-                                        "إرفاق"
+                                    imageVector = Icons.Filled.AttachFile,
+                                    contentDescription = "إرفاق"
                                 )
                             }
 
                             DropdownMenu(
-                                expanded =
-                                    showAttachMenu,
-
-                                onDismissRequest = {
-                                    showAttachMenu = false
-                                }
+                                expanded = showAttachMenu,
+                                onDismissRequest = { showAttachMenu = false }
                             ) {
 
+                                // كاميرا
                                 DropdownMenuItem(
                                     text = {
-
-                                        Row(
-                                            verticalAlignment =
-                                                Alignment.CenterVertically
-                                        ) {
-
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(
-                                                imageVector =
-                                                    Icons.Filled.Camera,
-                                                contentDescription =
-                                                    null,
-                                                modifier =
-                                                    Modifier.size(
-                                                        20.dp
-                                                    )
+                                                imageVector = Icons.Filled.Camera,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
                                             )
-
-                                            Spacer(
-                                                Modifier.width(
-                                                    10.dp
-                                                )
-                                            )
-
-                                            Text(
-                                                "📷 التقاط صورة بالكاميرا"
-                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text("📷 التقاط صورة بالكاميرا")
                                         }
                                     },
-
                                     onClick = {
                                         showAttachMenu = false
                                         onOpenCamera()
                                     }
                                 )
 
+                                // معرض الصور
                                 DropdownMenuItem(
                                     text = {
-
-                                        Row(
-                                            verticalAlignment =
-                                                Alignment.CenterVertically
-                                        ) {
-
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(
-                                                imageVector =
-                                                    Icons.Filled.Image,
-                                                contentDescription =
-                                                    null,
-                                                modifier =
-                                                    Modifier.size(
-                                                        20.dp
-                                                    )
+                                                imageVector = Icons.Filled.Image,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
                                             )
-
-                                            Spacer(
-                                                Modifier.width(
-                                                    10.dp
-                                                )
-                                            )
-
-                                            Text(
-                                                "🖼️ اختيار صورة من المعرض"
-                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text("🖼️ اختيار صورة من المعرض")
                                         }
                                     },
-
                                     onClick = {
                                         showAttachMenu = false
                                         onOpenGallery()
                                     }
                                 )
 
+                                // ملف TXT أو PDF
                                 DropdownMenuItem(
                                     text = {
-
-                                        Row(
-                                            verticalAlignment =
-                                                Alignment.CenterVertically
-                                        ) {
-
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(
-                                                imageVector =
-                                                    Icons.Filled.Description,
-                                                contentDescription =
-                                                    null,
-                                                modifier =
-                                                    Modifier.size(
-                                                        20.dp
-                                                    )
+                                                imageVector = Icons.Filled.Description,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
                                             )
-
-                                            Spacer(
-                                                Modifier.width(
-                                                    10.dp
-                                                )
-                                            )
-
-                                            Text(
-                                                "📄 اختيار ملف"
-                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text("📄 استيراد ملف (TXT/PDF)")
                                         }
                                     },
-
                                     onClick = {
                                         showAttachMenu = false
                                         onOpenFile()
+                                    }
+                                )
+
+                                // ✅ مُضاف: استيراد صفحة ويب
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Language,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text("🌐 استيراد صفحة ويب")
+                                        }
+                                    },
+                                    onClick = {
+                                        showAttachMenu = false
+                                        onOpenWebImport()
                                     }
                                 )
                             }
@@ -992,210 +794,113 @@ private fun InputBar(
 
                         OutlinedTextField(
                             value = inputText,
-                            onValueChange =
-                                onTextChange,
-                            modifier =
-                                Modifier.weight(1f),
-                            placeholder = {
-                                Text(
-                                    "اكتب رسالة..."
-                                )
-                            },
+                            onValueChange = onTextChange,
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("اكتب رسالة...") },
                             enabled = !isLoading,
                             maxLines = 5,
-                            shape =
-                                RoundedCornerShape(
-                                    26.dp
-                                ),
-                            colors =
-                                androidx.compose.material3
-                                    .OutlinedTextFieldDefaults
-                                    .colors(
-
-                                        unfocusedContainerColor =
-                                            androidx.compose
-                                                .ui
-                                                .graphics
-                                                .Color
-                                                .Transparent,
-
-                                        focusedContainerColor =
-                                            androidx.compose
-                                                .ui
-                                                .graphics
-                                                .Color
-                                                .Transparent,
-
-                                        unfocusedBorderColor =
-                                            androidx.compose
-                                                .ui
-                                                .graphics
-                                                .Color
-                                                .Transparent,
-
-                                        focusedBorderColor =
-                                            androidx.compose
-                                                .ui
-                                                .graphics
-                                                .Color
-                                                .Transparent
-                                    )
+                            shape = RoundedCornerShape(26.dp),
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedBorderColor = Color.Transparent
+                            )
                         )
                     }
                 }
 
-                Spacer(
-                    Modifier.width(8.dp)
-                )
+                Spacer(Modifier.width(8.dp))
 
-                val canSend =
-                    !isLoading &&
-                        (
-                            inputText.isNotBlank() ||
-                                hasSelectedImage
-                        )
+                val canSend = !isLoading && (inputText.isNotBlank() || hasSelectedImage)
 
                 FloatingActionButton(
                     onClick = onSend,
-                    modifier =
-                        Modifier.size(50.dp),
+                    modifier = Modifier.size(50.dp),
                     shape = CircleShape,
-                    containerColor =
-                        if (canSend)
-                            MaterialTheme
-                                .colorScheme
-                                .primary
-                        else
-                            MaterialTheme
-                                .colorScheme
-                                .surfaceVariant
+                    containerColor = if (canSend)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
                 ) {
-
                     if (isLoading) {
-
                         CircularProgressIndicator(
-                            modifier =
-                                Modifier.size(
-                                    21.dp
-                                ),
+                            modifier = Modifier.size(21.dp),
                             strokeWidth = 2.dp,
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .primary
+                            color = MaterialTheme.colorScheme.primary
                         )
-
                     } else {
-
                         Icon(
-                            imageVector =
-                                Icons.Filled.Send,
-                            contentDescription =
-                                "إرسال",
-                            tint =
-                                if (canSend)
-                                    MaterialTheme
-                                        .colorScheme
-                                        .onPrimary
-                                else
-                                    MaterialTheme
-                                        .colorScheme
-                                        .onSurfaceVariant
+                            imageVector = Icons.Filled.Send,
+                            contentDescription = "إرسال",
+                            tint = if (canSend)
+                                MaterialTheme.colorScheme.onPrimary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
 
             Text(
-                text =
-                    if (hasSelectedImage)
-                        "الصورة ستُرسل مع رسالتك للتحليل"
-                    else
-                        "اضغط مطولاً على الرسالة للنسخ أو حفظها في الذاكرة",
-
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            top = 4.dp
-                        ),
-
-                style =
-                    MaterialTheme
-                        .typography
-                        .labelSmall,
-
-                color =
-                    MaterialTheme
-                        .colorScheme
-                        .onSurfaceVariant
-                        .copy(alpha = 0.55f)
+                text = when {
+                    hasSelectedImage -> "الصورة ستُرسل مع رسالتك للتحليل"
+                    else -> "اضغط مطولاً على الرسالة للنسخ أو حفظها في الذاكرة"
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
             )
         }
     }
 }
 
+// ============================================================
+// ThinkingBubble
+// ============================================================
+
 @Composable
 private fun ThinkingBubble() {
-
     Row(
-        modifier =
-            Modifier.fillMaxWidth(),
-        horizontalArrangement =
-            Arrangement.Start
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start
     ) {
-
         Surface(
-            shape =
-                RoundedCornerShape(
-                    topStart = 6.dp,
-                    topEnd = 18.dp,
-                    bottomStart = 18.dp,
-                    bottomEnd = 18.dp
-                ),
-            color =
-                MaterialTheme
-                    .colorScheme
-                    .surfaceVariant
+            shape = RoundedCornerShape(
+                topStart = 6.dp,
+                topEnd = 18.dp,
+                bottomStart = 18.dp,
+                bottomEnd = 18.dp
+            ),
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
-
             Row(
-                modifier =
-                    Modifier.padding(
-                        horizontal = 16.dp,
-                        vertical = 12.dp
-                    ),
-
-                verticalAlignment =
-                    Alignment.CenterVertically
+                modifier = Modifier.padding(
+                    horizontal = 16.dp,
+                    vertical = 12.dp
+                ),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-
                 CircularProgressIndicator(
-                    modifier =
-                        Modifier.size(16.dp),
+                    modifier = Modifier.size(16.dp),
                     strokeWidth = 2.dp
                 )
-
-                Spacer(
-                    Modifier.width(9.dp)
-                )
-
+                Spacer(Modifier.width(9.dp))
                 Text(
-                    text =
-                        "جاري التفكير...",
-                    style =
-                        MaterialTheme
-                            .typography
-                            .bodySmall,
-                    color =
-                        MaterialTheme
-                            .colorScheme
-                            .onSurfaceVariant
+                    text = "جاري التفكير...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
     }
 }
+
+// ============================================================
+// MessageBubble
+// ============================================================
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1204,20 +909,11 @@ private fun MessageBubble(
     onCopy: (String) -> Unit,
     onSaveMemory: (Message) -> Unit
 ) {
-
-    val isUser =
-        message.role == "user"
-
-    var showActions by remember {
-        mutableStateOf(false)
-    }
-
-    var showCopied by remember {
-        mutableStateOf(false)
-    }
+    val isUser = message.role == "user"
+    var showActions by remember { mutableStateOf(false) }
+    var showCopied by remember { mutableStateOf(false) }
 
     LaunchedEffect(showCopied) {
-
         if (showCopied) {
             delay(1500)
             showCopied = false
@@ -1225,118 +921,51 @@ private fun MessageBubble(
     }
 
     Column(
-        modifier =
-            Modifier.fillMaxWidth(),
-
-        horizontalAlignment =
-            if (isUser)
-                Alignment.End
-            else
-                Alignment.Start
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-
         Surface(
-            modifier =
-                Modifier
-                    .widthIn(
-                        max =
-                            if (isUser)
-                                320.dp
-                            else
-                                360.dp
-                    )
-                    .combinedClickable(
-                        onClick = {},
-
-                        onLongClick = {
-                            showActions = true
-                        }
-                    ),
-
-            shape =
-                RoundedCornerShape(
-                    topStart =
-                        if (isUser)
-                            18.dp
-                        else
-                            6.dp,
-
-                    topEnd =
-                        if (isUser)
-                            6.dp
-                        else
-                            18.dp,
-
-                    bottomStart = 18.dp,
-                    bottomEnd = 18.dp
+            modifier = Modifier
+                .widthIn(max = if (isUser) 320.dp else 360.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { showActions = true }
                 ),
-
-            color =
-                if (isUser)
-                    MaterialTheme
-                        .colorScheme
-                        .primary
-                else
-                    MaterialTheme
-                        .colorScheme
-                        .surfaceVariant
+            shape = RoundedCornerShape(
+                topStart = if (isUser) 18.dp else 6.dp,
+                topEnd = if (isUser) 6.dp else 18.dp,
+                bottomStart = 18.dp,
+                bottomEnd = 18.dp
+            ),
+            color = if (isUser)
+                MaterialTheme.colorScheme.primary
+            else
+                MaterialTheme.colorScheme.surfaceVariant
         ) {
-
             Column(
-                modifier =
-                    Modifier.padding(
-                        horizontal = 14.dp,
-                        vertical = 11.dp
-                    )
+                modifier = Modifier.padding(
+                    horizontal = 14.dp,
+                    vertical = 11.dp
+                )
             ) {
-
                 Text(
-                    text =
-                        message.content,
-
-                    style =
-                        MaterialTheme
-                            .typography
-                            .bodyLarge,
-
-                    color =
-                        if (isUser)
-                            MaterialTheme
-                                .colorScheme
-                                .onPrimary
-                        else
-                            MaterialTheme
-                                .colorScheme
-                                .onSurfaceVariant
+                    text = message.content,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (isUser)
+                        MaterialTheme.colorScheme.onPrimary
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 if (showCopied) {
-
-                    Spacer(
-                        Modifier.size(5.dp)
-                    )
-
+                    Spacer(Modifier.size(5.dp))
                     Text(
-                        text =
-                            "✓ تم النسخ",
-
-                        style =
-                            MaterialTheme
-                                .typography
-                                .labelSmall,
-
-                        color =
-                            if (isUser)
-                                MaterialTheme
-                                    .colorScheme
-                                    .onPrimary
-                                    .copy(
-                                        alpha = 0.7f
-                                    )
-                            else
-                                MaterialTheme
-                                    .colorScheme
-                                    .primary
+                        text = "✓ تم النسخ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isUser)
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                        else
+                            MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -1344,23 +973,14 @@ private fun MessageBubble(
     }
 
     if (showActions) {
-
         MessageActionsDialog(
-
-            onDismiss = {
-                showActions = false
-            },
-
+            onDismiss = { showActions = false },
             onCopy = {
-
                 onCopy(message.content)
-
                 showCopied = true
                 showActions = false
             },
-
             onSaveMemory = {
-
                 showActions = false
                 onSaveMemory(message)
             }
@@ -1368,84 +988,58 @@ private fun MessageBubble(
     }
 }
 
+// ============================================================
+// MessageActionsDialog
+// ============================================================
+
 @Composable
 private fun MessageActionsDialog(
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
     onSaveMemory: () -> Unit
 ) {
-
     AlertDialog(
-
         onDismissRequest = onDismiss,
-
-        title = {
-            Text("خيارات الرسالة")
-        },
-
+        title = { Text("خيارات الرسالة") },
         text = {
-
             Column {
-
                 TextButton(
                     onClick = onCopy,
-                    modifier =
-                        Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-
                     Icon(
-                        imageVector =
-                            Icons.Filled.ContentCopy,
-                        contentDescription =
-                            null
+                        imageVector = Icons.Filled.ContentCopy,
+                        contentDescription = null
                     )
-
-                    Spacer(
-                        Modifier.width(10.dp)
-                    )
-
-                    Text(
-                        text = "نسخ الرسالة"
-                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(text = "نسخ الرسالة")
                 }
 
                 TextButton(
                     onClick = onSaveMemory,
-                    modifier =
-                        Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-
                     Icon(
-                        imageVector =
-                            Icons.Filled.Memory,
-                        contentDescription =
-                            null
+                        imageVector = Icons.Filled.Memory,
+                        contentDescription = null
                     )
-
-                    Spacer(
-                        Modifier.width(10.dp)
-                    )
-
-                    Text(
-                        text =
-                            "حفظ في الذاكرة"
-                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(text = "حفظ في الذاكرة")
                 }
             }
         },
-
         confirmButton = {},
-
         dismissButton = {
-
-            TextButton(
-                onClick = onDismiss
-            ) {
+            TextButton(onClick = onDismiss) {
                 Text("إلغاء")
             }
         }
     )
 }
+
+// ============================================================
+// ErrorMessage
+// ============================================================
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1454,70 +1048,34 @@ private fun ErrorMessage(
     onDismiss: () -> Unit,
     onCopy: () -> Unit
 ) {
-
     Card(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = 10.dp,
-                    vertical = 4.dp
-                )
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = onCopy
-                ),
-
-        colors =
-            CardDefaults.cardColors(
-                containerColor =
-                    MaterialTheme
-                        .colorScheme
-                        .errorContainer
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .combinedClickable(
+                onClick = {},
+                onLongClick = onCopy
             ),
-
-        shape =
-            RoundedCornerShape(14.dp)
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        ),
+        shape = RoundedCornerShape(14.dp)
     ) {
-
         Row(
-            modifier =
-                Modifier.padding(10.dp),
-
-            verticalAlignment =
-                Alignment.CenterVertically
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-
             Text(
                 text = error,
-
-                modifier =
-                    Modifier.weight(1f),
-
-                style =
-                    MaterialTheme
-                        .typography
-                        .bodySmall,
-
-                color =
-                    MaterialTheme
-                        .colorScheme
-                        .onErrorContainer
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
-
-            IconButton(
-                onClick = onDismiss
-            ) {
-
+            IconButton(onClick = onDismiss) {
                 Icon(
-                    imageVector =
-                        Icons.Filled.Close,
-                    contentDescription =
-                        "إغلاق",
-                    tint =
-                        MaterialTheme
-                            .colorScheme
-                            .onErrorContainer
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "إغلاق",
+                    tint = MaterialTheme.colorScheme.onErrorContainer
                 )
             }
         }
