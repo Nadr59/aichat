@@ -91,6 +91,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val error: StateFlow<String?> =
         _error.asStateFlow()
 
+    // مُصحَّح: إضافة StateFlow منفصل للنجاح بدل استخدام _error للرسائل الإيجابية
+    private val _successMessage =
+        MutableStateFlow<String?>(null)
+
+    val successMessage: StateFlow<String?> =
+        _successMessage.asStateFlow()
+
     private val _selectedImageBase64 =
         MutableStateFlow<String?>(null)
 
@@ -140,7 +147,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-
             memoryRepository.addMemory(
                 content = cleanContent,
                 sourceConversationId =
@@ -153,17 +159,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateMemory(memory: MemoryItem) {
-
         viewModelScope.launch {
-
             memoryRepository.updateMemory(memory)
         }
     }
 
     fun deleteMemory(memory: MemoryItem) {
-
         viewModelScope.launch {
-
             memoryRepository.deleteMemory(memory)
         }
     }
@@ -171,7 +173,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun searchSharedMemories(
         query: String
     ): List<MemoryItem> {
-
         return memoryRepository.searchSharedMemories(
             query = query,
             useSemanticAnalysis = true,
@@ -182,7 +183,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun getMemoryById(
         memoryId: Long
     ): MemoryItem? {
-
         return memoryRepository.getMemoryById(
             memoryId
         )
@@ -191,9 +191,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteConversationMemories(
         conversationId: Long
     ) {
-
         viewModelScope.launch {
-
             memoryRepository.deleteConversationMemories(
                 conversationId
             )
@@ -220,7 +218,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         try {
-            android.util.Log.d("ChatViewModel", "🔍 Preparing memory context for: ${userText.take(50)}...")
+            android.util.Log.d(
+                "ChatViewModel",
+                "🔍 Preparing memory context for: ${userText.take(50)}..."
+            )
 
             val memories = memoryRepository.searchSharedMemories(
                 query = userText,
@@ -232,7 +233,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             _memoryContext.value = memoryContextBuilder.build(memories)
 
-            android.util.Log.d("ChatViewModel", "✅ Memory context length: ${_memoryContext.value.length}")
+            android.util.Log.d(
+                "ChatViewModel",
+                "✅ Memory context length: ${_memoryContext.value.length}"
+            )
 
             if (_memoryContext.value.isNotBlank()) {
                 android.util.Log.d("ChatViewModel", "✅ Memory context will be sent to model")
@@ -241,7 +245,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
 
         } catch (e: Exception) {
-            android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext failed: ${e.message}", e)
+            android.util.Log.e(
+                "ChatViewModel",
+                "❌ prepareMemoryContext failed: ${e.message}",
+                e
+            )
             _memoryContext.value = ""
         }
     }
@@ -259,7 +267,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun newConversation() {
-
         messagesCollectJob?.cancel()
         messagesCollectJob = null
 
@@ -268,6 +275,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _selectedImageBase64.value = null
         _memoryContext.value = ""
         _error.value = null
+        _successMessage.value = null
     }
 
     // ============================================================
@@ -281,11 +289,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         messagesCollectJob =
             viewModelScope.launch {
-
                 conversationRepository
                     .getMessages(conversationId)
                     .collect { msgs ->
-
                         _messages.value = msgs
                     }
             }
@@ -302,13 +308,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val image =
-            _selectedImageBase64.value
+        val image = _selectedImageBase64.value
 
-        if (
-            userText.isBlank() &&
-            image == null
-        ) {
+        if (userText.isBlank() && image == null) {
             return
         }
 
@@ -322,7 +324,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun sendChatMessage(
         userText: String
     ) {
-
         if (_isLoading.value) {
             return
         }
@@ -335,55 +336,43 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
 
-                val imageBase64 =
-                    _selectedImageBase64.value
+                val imageBase64 = _selectedImageBase64.value
 
                 val convId =
                     _currentConversationId.value
                         ?: run {
-
                             val id =
                                 conversationRepository
                                     .insertConversation(
                                         Conversation(
                                             title = userText
                                                 .take(50)
-                                                .ifBlank {
-                                                    "محادثة جديدة"
-                                                }
+                                                .ifBlank { "محادثة جديدة" }
                                         )
                                     )
 
                             _currentConversationId.value = id
-
                             startCollecting(id)
-
                             id
                         }
 
                 val historySnapshot =
-                    conversationRepository
-                        .getMessagesOnce(
-                            convId
-                        )
+                    conversationRepository.getMessagesOnce(convId)
 
-                conversationRepository
-                    .insertMessage(
-                        Message(
-                            conversationId = convId,
-                            role = "user",
-                            content = userText,
-                            imageBase64 = imageBase64,
-                            messageType = "text"
-                        )
+                conversationRepository.insertMessage(
+                    Message(
+                        conversationId = convId,
+                        role = "user",
+                        content = userText,
+                        imageBase64 = imageBase64,
+                        messageType = "text"
                     )
+                )
 
                 _selectedImageBase64.value = null
 
                 // تجهيز سياق الذاكرة قبل إرسال الطلب
-                prepareMemoryContext(
-                    userText
-                )
+                prepareMemoryContext(userText)
 
                 val response =
                     repository.sendMessage(
@@ -393,42 +382,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         memoryContext = _memoryContext.value
                     )
 
-                conversationRepository
-                    .insertMessage(
-                        Message(
-                            conversationId = convId,
-                            role = "assistant",
-                            content = response,
-                            messageType = "text"
-                        )
+                conversationRepository.insertMessage(
+                    Message(
+                        conversationId = convId,
+                        role = "assistant",
+                        content = response,
+                        messageType = "text"
                     )
+                )
 
                 val title =
                     historySnapshot
-                        .firstOrNull {
-                            it.role == "user"
-                        }
+                        .firstOrNull { it.role == "user" }
                         ?.content
                         ?: userText
 
-                conversationRepository
-                    .updateConversation(
-                        Conversation(
-                            id = convId,
-                            title = title.take(50),
-                            updatedAt =
-                                System.currentTimeMillis()
-                        )
+                conversationRepository.updateConversation(
+                    Conversation(
+                        id = convId,
+                        title = title.take(50),
+                        updatedAt = System.currentTimeMillis()
                     )
+                )
 
             } catch (e: Exception) {
-
-                _error.value =
-                    e.message
-                        ?: "حدث خطأ غير معروف"
-
+                _error.value = e.message ?: "حدث خطأ غير معروف"
             } finally {
-
                 _isLoading.value = false
             }
         }
@@ -438,94 +417,52 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // الصور
     // ============================================================
 
-    fun selectImage(
-        uri: Uri
-    ) {
-
+    fun selectImage(uri: Uri) {
         viewModelScope.launch {
-
             try {
-
-                val base64 =
-                    imageProcessor.uriToBase64(
-                        uri
-                    )
+                val base64 = imageProcessor.uriToBase64(uri)
 
                 if (base64 == null) {
-
-                    _error.value =
-                        "تعذر قراءة الصورة"
-
+                    _error.value = "تعذر قراءة الصورة"
                     return@launch
                 }
 
-                _selectedImageBase64.value =
-                    base64
+                _selectedImageBase64.value = base64
 
             } catch (e: Exception) {
-
-                _error.value =
-                    "فشل تحميل الصورة: ${e.message}"
+                _error.value = "فشل تحميل الصورة: ${e.message}"
             }
         }
     }
 
-    fun selectBitmap(
-        bitmap: Bitmap
-    ) {
-
+    fun selectBitmap(bitmap: Bitmap) {
         viewModelScope.launch {
-
             try {
-
                 _selectedImageBase64.value =
-                    imageProcessor.bitmapToBase64(
-                        bitmap
-                    )
-
+                    imageProcessor.bitmapToBase64(bitmap)
             } catch (e: Exception) {
-
-                _error.value =
-                    "فشل تحميل الصورة: ${e.message}"
+                _error.value = "فشل تحميل الصورة: ${e.message}"
             }
         }
     }
 
-    fun selectFile(
-        uri: Uri
-    ) {
-
+    // مُصحَّح: استخدام getFileName من FileProcessor بدل lastPathSegment
+    fun selectFile(uri: Uri) {
         viewModelScope.launch {
-
             try {
-
-                val context =
-                    getApplication<Application>()
-
-                val mimeType =
-                    context.contentResolver
-                        .getType(uri)
-                        ?: ""
+                val context = getApplication<Application>()
+                val mimeType = context.contentResolver.getType(uri) ?: ""
 
                 if (mimeType.startsWith("image/")) {
-
                     selectImage(uri)
-
                 } else {
-
-                    val name =
-                        uri.lastPathSegment
-                            ?.substringAfterLast("/")
-                            ?: "ملف"
-
-                    _error.value =
-                        "⚠️ الملفات غير الصورة غير مدعومة: $name"
+                    // مُصحَّح: الاستعلام عن الاسم الحقيقي بدل lastPathSegment
+                    val fileName = getDisplayName(uri)
+                    _error.value = "⚠️ الملفات غير الصورة غير مدعومة: $fileName"
                 }
 
             } catch (e: Exception) {
-
-                _error.value =
-                    "فشل تحميل الملف: ${e.message}"
+                _error.value = "فشل تحميل الملف: ${e.message}"
             }
         }
     }
@@ -536,74 +473,78 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * معالجة ملف ورفعه للذاكرة
+     * مُصحَّح: fileProcessor.readFile أصبحت suspend → تعمل صح داخل launch
+     * مُصحَّح: رسالة النجاح عبر _successMessage بدل _error
+     * مُصحَّح: عدد الأجزاء المحفوظة صحيح
      */
-    
-      fun processAndSaveFile(uri: Uri) {
-    viewModelScope.launch {
-        _isLoading.value = true
-        _error.value = null
+    fun processAndSaveFile(uri: Uri) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            _successMessage.value = null
 
-        try {
-            android.util.Log.d("ChatViewModel", "📄 Processing file: $uri")
+            try {
+                android.util.Log.d("ChatViewModel", "📄 Processing file: $uri")
 
-            val content = fileProcessor.readFile(uri)
+                // مُصحَّح: readFile الآن suspend وتعمل على Dispatchers.IO تلقائياً
+                val content = fileProcessor.readFile(uri)
 
-            if (content.isBlank()) {
-                _error.value = "⚠️ الملف فارغ"
-                return@launch
-            }
+                if (content.isBlank()) {
+                    _error.value = "⚠️ الملف فارغ أو لا يحتوي على نص قابل للقراءة"
+                    return@launch
+                }
 
-            android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} characters")
+                android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} characters")
 
-            // ✅ تقسيم بأجزاء أصغر + overlap أقل
-            val chunks = if (content.length > 1000) {
-                fileProcessor.chunkText(
-                    content, 
-                    maxChunkSize = 800,   // ← كان 1500، خفضناه
-                    overlap = 100         // ← كان 200، خفضناه
+                val chunks = if (content.length > 1000) {
+                    fileProcessor.chunkText(
+                        text = content,
+                        maxChunkSize = 800,
+                        overlap = 100
+                    )
+                } else {
+                    listOf(content)
+                }
+
+                val totalChunks = chunks.size
+                android.util.Log.d("ChatViewModel", "📦 Split into $totalChunks chunks")
+
+                // حد أقصى 20 جزء
+                val limitedChunks = chunks.take(20)
+                val savedCount = limitedChunks.size
+
+                limitedChunks.forEachIndexed { index, chunk ->
+                    memoryRepository.addMemory(
+                        content = chunk,
+                        category = "KNOWLEDGE",
+                        isShared = true
+                    )
+                    android.util.Log.d(
+                        "ChatViewModel",
+                        "✅ Saved chunk ${index + 1}/$savedCount"
+                    )
+                }
+
+                // مُصحَّح: رسالة النجاح عبر _successMessage وليس _error
+                // مُصحَّح: العدد المعروض هو savedCount الفعلي وليس totalChunks
+                _successMessage.value = if (totalChunks > 20) {
+                    "✅ تم حفظ $savedCount من أصل $totalChunks جزء\n⚠️ تم تجاهل ${totalChunks - savedCount} جزء (الحد الأقصى 20)"
+                } else {
+                    "✅ تم حفظ $savedCount ${if (savedCount > 1) "أجزاء" else "جزء"} في الذاكرة"
+                }
+
+            } catch (e: Exception) {
+                android.util.Log.e(
+                    "ChatViewModel",
+                    "❌ File processing failed: ${e.message}",
+                    e
                 )
-            } else {
-                listOf(content)
+                _error.value = "❌ ${e.message}"
+            } finally {
+                _isLoading.value = false
             }
-
-            android.util.Log.d("ChatViewModel", "📦 Split into ${chunks.size} chunks")
-
-            // ✅ حد أقصى 20 جزء
-            val limitedChunks = chunks.take(20)
-            
-            if (chunks.size > 20) {
-                android.util.Log.w("ChatViewModel", "⚠️ File too large, saving only first 20 chunks")
-            }
-
-            limitedChunks.forEachIndexed { index, chunk ->
-                memoryRepository.addMemory(
-                    content = chunk,
-                    category = "KNOWLEDGE",
-                    isShared = true
-                )
-
-                android.util.Log.d("ChatViewModel", "✅ Saved chunk ${index + 1}/${limitedChunks.size}")
-            }
-
-            val savedCount = limitedChunks.size
-            val totalCount = chunks.size
-            
-            _error.value = if (totalCount > 20) {
-                "✅ تم حفظ $savedCount من أصل $totalCount جزء (حد أقصى 20)"
-            } else {
-                "✅ تم حفظ $savedCount ${if (savedCount > 1) "أجزاء" else "جزء"} في الذاكرة"
-            }
-
-        } catch (e: Exception) {
-            android.util.Log.e("ChatViewModel", "❌ File processing failed: ${e.message}", e)
-            _error.value = "❌ ${e.message}"
-        } finally {
-            _isLoading.value = false
         }
     }
-      }      
-        
-    
 
     // ============================================================
     // Helpers
@@ -617,28 +558,44 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _error.value = null
     }
 
+    // مُضاف: تنظيف رسالة النجاح بعد عرضها
+    fun clearSuccessMessage() {
+        _successMessage.value = null
+    }
+
+    // مُضاف: الحصول على اسم الملف الحقيقي (مساعد لـ selectFile)
+    private fun getDisplayName(uri: Uri): String {
+        return try {
+            val context = getApplication<Application>()
+            context.contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(
+                        android.provider.OpenableColumns.DISPLAY_NAME
+                    )
+                    if (index >= 0) cursor.getString(index) else null
+                } else null
+            } ?: uri.lastPathSegment ?: "ملف"
+        } catch (e: Exception) {
+            uri.lastPathSegment ?: "ملف"
+        }
+    }
+
     // ============================================================
     // حذف المحادثة
     // ============================================================
 
-    fun deleteConversation(
-        conversation: Conversation
-    ) {
-
+    fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {
+            conversationRepository.deleteMessages(conversation.id)
+            conversationRepository.deleteConversation(conversation)
 
-            conversationRepository.deleteMessages(
-                conversation.id
-            )
-
-            conversationRepository.deleteConversation(
-                conversation
-            )
-
-            if (
-                _currentConversationId.value ==
-                conversation.id
-            ) {
+            if (_currentConversationId.value == conversation.id) {
                 newConversation()
             }
         }
