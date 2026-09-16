@@ -152,6 +152,40 @@ fun WebScreen(
         }
     }
 }
+// في WebScreen.kt - إضافة JavaScript لإخفاء WebView
+
+webViewClient = object : WebViewClient() {
+    override fun onPageStarted(
+        view: WebView?,
+        url: String?,
+        favicon: Bitmap?
+    ) {
+        isLoading = true
+
+        // ✅ إخفاء علامات WebView
+        view?.evaluateJavascript("""
+            (function() {
+                // إخفاء webdriver
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+                
+                // محاكاة Chrome حقيقي
+                window.chrome = {
+                    runtime: {},
+                    loadTimes: function() {},
+                    csi: function() {},
+                    app: {}
+                };
+                
+                // إخفاء علامة wv من userAgent
+                Object.defineProperty(navigator, 'userAgent', {
+                    get: () => navigator.userAgent.replace('; wv)', ')')
+                });
+            })();
+        """.trimIndent(), null)
+    }
+}
 
 data class WebPlatformInfo(
     val title: String,
