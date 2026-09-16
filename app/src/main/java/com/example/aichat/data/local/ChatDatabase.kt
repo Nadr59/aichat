@@ -16,7 +16,7 @@ import com.example.aichat.data.model.MemoryItem
         Message::class,
         MemoryItem::class
     ],
-    version = 3,  // ← زيادة من 2 إلى 3
+    version = 4, // ✅ مُحدَّث: من 3 إلى 4
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -37,7 +37,8 @@ abstract class ChatDatabase : RoomDatabase() {
                 )
                     .addMigrations(
                         MIGRATION_1_2,
-                        MIGRATION_2_3  // ✅ Migration جديد
+                        MIGRATION_2_3,
+                        MIGRATION_3_4 // ✅ مُضاف
                     )
                     .build()
                 INSTANCE = instance
@@ -45,9 +46,11 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        // Migration 1 → 2: إنشاء جدول memory_items
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("""
+                database.execSQL(
+                    """
                     CREATE TABLE IF NOT EXISTS memory_items (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         content TEXT NOT NULL,
@@ -58,17 +61,39 @@ abstract class ChatDatabase : RoomDatabase() {
                         createdAt INTEGER NOT NULL,
                         updatedAt INTEGER NOT NULL
                     )
-                """.trimIndent())
+                    """.trimIndent()
+                )
             }
         }
 
-        // ✅ Migration من 2 إلى 3
+        // Migration 2 → 3: إضافة عمود embedding
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("""
+                database.execSQL(
+                    """
                     ALTER TABLE memory_items 
                     ADD COLUMN embedding TEXT NOT NULL DEFAULT ''
-                """.trimIndent())
+                    """.trimIndent()
+                )
+            }
+        }
+
+        // ✅ Migration 3 → 4: إضافة embeddingModel و embeddingDimensions
+        // السبب: تتبع النموذج المستخدم لكل vector لضمان التوافق مستقبلاً
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    ALTER TABLE memory_items 
+                    ADD COLUMN embeddingModel TEXT NOT NULL DEFAULT 'text-embedding-004'
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    """
+                    ALTER TABLE memory_items 
+                    ADD COLUMN embeddingDimensions INTEGER NOT NULL DEFAULT 768
+                    """.trimIndent()
+                )
             }
         }
     }
