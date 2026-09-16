@@ -8,161 +8,144 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.ui.screens.ChatScreen
 import com.example.aichat.ui.screens.ConversationsScreen
-import com.example.aichat.ui.screens.GeckoTestScreen
 import com.example.aichat.ui.screens.MemoryScreen
 import com.example.aichat.ui.screens.SettingsScreen
+import com.example.aichat.ui.screens.WebScreen
 import com.example.aichat.ui.theme.AiChatTheme
 import com.example.aichat.ui.viewmodel.ChatViewModel
 
 class MainActivity : ComponentActivity() {
 
-override fun onCreate(
-    savedInstanceState: Bundle?
-) {
-    super.onCreate(savedInstanceState)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-    enableEdgeToEdge()
+        enableEdgeToEdge()
 
-    setContent {
+        setContent {
+            AiChatTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
 
-        AiChatTheme {
+                    val navController = rememberNavController()
+                    val viewModel: ChatViewModel = viewModel()
+                    val settings = AiSettings(this)
 
-            Surface(
-                modifier = Modifier.fillMaxSize()
-            ) {
+                    NavHost(
+                        navController = navController,
+                        startDestination = "conversations"
+                    ) {
 
-                val navController =
-                    rememberNavController()
+                        // ============================================
+                        // المحادثات
+                        // ============================================
 
-                val viewModel: ChatViewModel =
-                    viewModel()
+                        composable("conversations") {
+                            ConversationsScreen(
+                                viewModel = viewModel,
 
-                val settings =
-                    AiSettings(this)
+                                onOpenChat = { conversationId ->
+                                    viewModel.openConversation(conversationId)
+                                    navController.navigate("chat")
+                                },
 
-                NavHost(
-                    navController = navController,
-                    startDestination = "conversations"
-                ) {
+                                onNewChat = {
+                                    viewModel.newConversation()
+                                    navController.navigate("chat")
+                                },
 
-                    // ====================================================
-                    // المحادثات
-                    // ====================================================
+                                onSettings = {
+                                    navController.navigate("settings")
+                                },
 
-                    composable("conversations") {
+                                // ✅ مُصحَّح: يمرر platform كـ argument
+                                onOpenWeb = { platform ->
+                                    navController.navigate("web/$platform")
+                                }
+                            )
+                        }
 
-                        ConversationsScreen(
-                            viewModel = viewModel,
+                        // ============================================
+                        // المحادثة
+                        // ============================================
 
-                            onOpenChat = { conversationId ->
+                        composable("chat") {
+                            ChatScreen(
+                                viewModel = viewModel,
+                                settings = settings,
+                                onBack = {
+                                    navController.popBackStack()
+                                }
+                            )
+                        }
 
-                                viewModel.openConversation(
-                                    conversationId
-                                )
+                        // ============================================
+                        // الإعدادات
+                        // ============================================
 
-                                navController.navigate(
-                                    "chat"
-                                )
-                            },
+                        composable("settings") {
+                            SettingsScreen(
+                                settings = settings,
+                                onBack = {
+                                    navController.popBackStack()
+                                },
+                                onOpenMemory = {
+                                    navController.navigate("memory")
+                                }
+                            )
+                        }
 
-                            onNewChat = {
+                        // ============================================
+                        // الذاكرة المشتركة
+                        // ============================================
 
-                                viewModel.newConversation()
+                        composable("memory") {
+                            MemoryScreen(
+                                viewModel = viewModel,
+                                onBack = {
+                                    navController.popBackStack()
+                                }
+                            )
+                        }
 
-                                navController.navigate(
-                                    "chat"
-                                )
-                            },
+                        // ============================================
+                        // ✅ الويب - مع argument للمنصة
+                        // مثال: web/huggingchat أو web/chatgpt
+                        // ============================================
 
-                            onSettings = {
+                        composable(
+                            route = "web/{platform}",
+                            arguments = listOf(
+                                navArgument("platform") {
+                                    type = NavType.StringType
+                                    defaultValue = "huggingchat"
+                                }
+                            )
+                        ) { backStackEntry ->
 
-                                navController.navigate(
-                                    "settings"
-                                )
-                            },
+                            val platform = backStackEntry
+                                .arguments
+                                ?.getString("platform")
+                                ?: "huggingchat"
 
-                            onOpenWeb = {
-
-                                navController.navigate(
-                                    "web"
-                                )
-                            }
-                        )
-                    }
-
-                    // ====================================================
-                    // المحادثة
-                    // ====================================================
-
-                    composable("chat") {
-
-                        ChatScreen(
-                            viewModel = viewModel,
-                            settings = settings,
-                            onBack = {
-                                navController.popBackStack()
-                            }
-                        )
-                    }
-
-                    // ====================================================
-                    // الإعدادات
-                    // ====================================================
-
-                    composable("settings") {
-
-                        SettingsScreen(
-                            settings = settings,
-
-                            onBack = {
-                                navController.popBackStack()
-                            },
-
-                            onOpenMemory = {
-                                navController.navigate(
-                                    "memory"
-                                )
-                            }
-                        )
-                    }
-
-                    // ====================================================
-                    // الذاكرة المشتركة
-                    // ====================================================
-
-                    composable("memory") {
-
-                        MemoryScreen(
-                            viewModel = viewModel,
-
-                            onBack = {
-                                navController.popBackStack()
-                            }
-                        )
-                    }
-
-                    // ====================================================
-                    // الويب / GeckoView
-                    // ====================================================
-
-                    composable("web") {
-
-                        GeckoTestScreen(
-                            onBack = {
-                                navController.popBackStack()
-                            }
-                        )
+                            // ✅ WebScreen يحتوي على اختيار المحرك
+                            // (WebView أو GeckoView أو متصفح خارجي)
+                            WebScreen(
+                                platform = platform,
+                                onBack = {
+                                    navController.popBackStack()
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
     }
-}
-
 }
