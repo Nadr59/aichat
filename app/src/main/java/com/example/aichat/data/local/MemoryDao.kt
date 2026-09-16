@@ -3,6 +3,7 @@ package com.example.aichat.data.local
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.example.aichat.data.model.MemoryItem
@@ -13,9 +14,11 @@ interface MemoryDao {
 
     // ============================================================
     // إضافة ذاكرة
+    // مُصحَّح: إضافة OnConflictStrategy.IGNORE
+    // السبب: إذا تكرر contentHash (مرحلة 3) لن يحدث crash
     // ============================================================
 
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMemory(memory: MemoryItem): Long
 
     // ============================================================
@@ -33,7 +36,7 @@ interface MemoryDao {
     suspend fun deleteMemory(memory: MemoryItem)
 
     // ============================================================
-    // جميع الذكريات المشتركة
+    // جميع الذكريات المشتركة (Flow - للمراقبة المستمرة)
     // ============================================================
 
     @Query(
@@ -46,15 +49,50 @@ interface MemoryDao {
     fun getSharedMemories(): Flow<List<MemoryItem>>
 
     // ============================================================
-    // البحث في الذكريات المشتركة
+    // جميع الذكريات المشتركة (List - للبحث والمعالجة)
     // ============================================================
 
-    @Query("""
-    SELECT * FROM memory_items
-    WHERE isShared = 1
-    ORDER BY updatedAt DESC
-""")
-suspend fun getAllSharedMemories(): List<MemoryItem>
+    @Query(
+        """
+        SELECT * FROM memory_items
+        WHERE isShared = 1
+        ORDER BY updatedAt DESC
+        """
+    )
+    suspend fun getAllSharedMemories(): List<MemoryItem>
+
+    // ============================================================
+    // ✅ مُضاف: البحث بالـ Hash لمنع التكرار (مرحلة 3)
+    // السبب: قبل إضافة ذاكرة جديدة نتحقق إذا المحتوى موجود مسبقاً
+    // ============================================================
+
+    @Query(
+        """
+        SELECT * FROM memory_items
+        WHERE contentHash = :hash
+        LIMIT 1
+        """
+    )
+    suspend fun getByHash(hash: String): MemoryItem?
+
+    // ============================================================
+    // ✅ مُضاف: البحث النصي المباشر في المحتوى
+    // السبب: بحث سريع بدون Embeddings كـ fallback
+    // ============================================================
+
+    @Query(
+        """
+        SELECT * FROM memory_items
+        WHERE isShared = 1
+        AND content LIKE '%' || :query || '%'
+        ORDER BY updatedAt DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun searchByContent(
+        query: String,
+        limit: Int = 10
+    ): List<MemoryItem>
 
     // ============================================================
     // ذكريات محادثة محددة
@@ -72,7 +110,7 @@ suspend fun getAllSharedMemories(): List<MemoryItem>
     ): Flow<List<MemoryItem>>
 
     // ============================================================
-    // الحصول على ذاكرة محددة
+    // الحصول على ذاكرة محددة بالـ ID
     // ============================================================
 
     @Query(
@@ -95,4 +133,35 @@ suspend fun getAllSharedMemories(): List<MemoryItem>
         """
     )
     suspend fun deleteConversationMemories(conversationId: Long)
+
+    // ============================================================
+    // ✅ مُضاف: عدد الذكريات الكلي
+    // السبب: إحصائيات + تحديد إذا الذاكرة ممتلئة
+    // ============================================================
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM memory_items
+        WHERE isShared = 1
+        """
+    )
+    suspend fun getSharedMemoriesCount(): Int
+
+    // ============================================================
+    // ✅ مُضاف: حذف الذكريات القديمة إذا تجاوز الحد
+    // السبب: منع تضخم قاعدة البيانات مع الوقت
+    // ============================================================
+
+    @Query(
+        """
+        DELETE FROM memory_items
+        WHERE id IN (
+            SELECT id FROM memory_items
+            WHERE isShared = 1
+            ORDER BY updatedAt ASC
+            LIMIT :count
+        )
+        """
+    )
+    suspend fun deleteOldestMemories(count: Int)
 }
