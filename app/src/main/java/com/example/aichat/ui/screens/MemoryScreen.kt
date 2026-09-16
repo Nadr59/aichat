@@ -56,15 +56,19 @@ fun MemoryScreen(
     val sharedMemories by viewModel.sharedMemories.collectAsState()
     val conversationId by viewModel.currentConversationId.collectAsState()
 
-    val conversationMemories =
-        if (conversationId != null) {
-            viewModel.getConversationMemories(conversationId!!)
-                .collectAsState(initial = emptyList())
-        } else {
-            remember {
-                mutableStateOf(emptyList())
-            }
-        }
+    // ✅ استبدل هذا الجزء فقط في MemoryScreen.kt
+
+
+
+
+// ✅ الجديد - آمن
+val conversationMemories by remember(conversationId) {
+    if (conversationId != null) {
+        viewModel.getConversationMemories(conversationId!!)
+    } else {
+        kotlinx.coroutines.flow.flowOf(emptyList<com.example.aichat.data.model.MemoryItem>())
+    }
+}.collectAsState(initial = emptyList())
 
     var searchQuery by remember {
         mutableStateOf("")
