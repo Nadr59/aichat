@@ -537,54 +537,73 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * معالجة ملف ورفعه للذاكرة
      */
-    fun processAndSaveFile(uri: Uri) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            _error.value = null
+    
+      fun processAndSaveFile(uri: Uri) {
+    viewModelScope.launch {
+        _isLoading.value = true
+        _error.value = null
 
-            try {
-                android.util.Log.d("ChatViewModel", "📄 Processing file: $uri")
+        try {
+            android.util.Log.d("ChatViewModel", "📄 Processing file: $uri")
 
-                // قراءة الملف
-                val content = fileProcessor.readFile(uri)
+            val content = fileProcessor.readFile(uri)
 
-                if (content.isBlank()) {
-                    _error.value = "⚠️ الملف فارغ"
-                    return@launch
-                }
-
-                android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} characters")
-
-                // تقسيم إلى أجزاء إذا كان طويلاً
-                val chunks = if (content.length > 2000) {
-                    fileProcessor.chunkText(content, maxChunkSize = 1500, overlap = 200)
-                } else {
-                    listOf(content)
-                }
-
-                android.util.Log.d("ChatViewModel", "📦 Split into ${chunks.size} chunks")
-
-                // حفظ كل جزء في الذاكرة
-                chunks.forEachIndexed { index, chunk ->
-                    memoryRepository.addMemory(
-                        content = chunk,
-                        category = "KNOWLEDGE",
-                        isShared = true
-                    )
-
-                    android.util.Log.d("ChatViewModel", "✅ Saved chunk ${index + 1}/${chunks.size}")
-                }
-
-                _error.value = "✅ تم حفظ ${chunks.size} ${if (chunks.size > 1) "أجزاء" else "جزء"} في الذاكرة"
-
-            } catch (e: Exception) {
-                android.util.Log.e("ChatViewModel", "❌ File processing failed: ${e.message}", e)
-                _error.value = "❌ ${e.message}"
-            } finally {
-                _isLoading.value = false
+            if (content.isBlank()) {
+                _error.value = "⚠️ الملف فارغ"
+                return@launch
             }
+
+            android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} characters")
+
+            // ✅ تقسيم بأجزاء أصغر + overlap أقل
+            val chunks = if (content.length > 1000) {
+                fileProcessor.chunkText(
+                    content, 
+                    maxChunkSize = 800,   // ← كان 1500، خفضناه
+                    overlap = 100         // ← كان 200، خفضناه
+                )
+            } else {
+                listOf(content)
+            }
+
+            android.util.Log.d("ChatViewModel", "📦 Split into ${chunks.size} chunks")
+
+            // ✅ حد أقصى 20 جزء
+            val limitedChunks = chunks.take(20)
+            
+            if (chunks.size > 20) {
+                android.util.Log.w("ChatViewModel", "⚠️ File too large, saving only first 20 chunks")
+            }
+
+            limitedChunks.forEachIndexed { index, chunk ->
+                memoryRepository.addMemory(
+                    content = chunk,
+                    category = "KNOWLEDGE",
+                    isShared = true
+                )
+
+                android.util.Log.d("ChatViewModel", "✅ Saved chunk ${index + 1}/${limitedChunks.size}")
+            }
+
+            val savedCount = limitedChunks.size
+            val totalCount = chunks.size
+            
+            _error.value = if (totalCount > 20) {
+                "✅ تم حفظ $savedCount من أصل $totalCount جزء (حد أقصى 20)"
+            } else {
+                "✅ تم حفظ $savedCount ${if (savedCount > 1) "أجزاء" else "جزء"} في الذاكرة"
+            }
+
+        } catch (e: Exception) {
+            android.util.Log.e("ChatViewModel", "❌ File processing failed: ${e.message}", e)
+            _error.value = "❌ ${e.message}"
+        } finally {
+            _isLoading.value = false
         }
     }
+      }      
+        
+    
 
     // ============================================================
     // Helpers
