@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -55,10 +58,14 @@ fun ConversationsScreen(
     onOpenChat: (Long) -> Unit,
     onNewChat: () -> Unit,
     onSettings: () -> Unit,
-    onOpenWeb: () -> Unit
+    // ✅ مُصحَّح: يستقبل اسم المنصة
+    onOpenWeb: (String) -> Unit
 ) {
     val conversations by viewModel.conversations.collectAsState()
     var conversationToDelete by remember { mutableStateOf<Conversation?>(null) }
+
+    // ✅ حالة قائمة منصات الويب
+    var showWebMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -67,12 +74,121 @@ fun ConversationsScreen(
                     Text("المحادثات", fontWeight = FontWeight.Bold)
                 },
                 actions = {
-                    IconButton(onClick = onOpenWeb) {
-                        Icon(
-                            Icons.Filled.Language,
-                            contentDescription = "فتح منصة ويب"
-                        )
+
+                    // ✅ زر الويب مع قائمة منسدلة للمنصات
+                    Box {
+                        IconButton(onClick = { showWebMenu = true }) {
+                            Icon(
+                                Icons.Filled.Language,
+                                contentDescription = "فتح منصة ويب"
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showWebMenu,
+                            onDismissRequest = { showWebMenu = false }
+                        ) {
+                            // عنوان القائمة
+                            Text(
+                                text = "اختر منصة",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(
+                                    horizontal = 16.dp,
+                                    vertical = 4.dp
+                                )
+                            )
+
+                            // ✅ مجاني بدون تسجيل
+                            WebMenuSection(title = "🆓 مجاني بدون تسجيل")
+
+                            WebMenuItem(
+                                title = "HuggingChat 🤗",
+                                subtitle = "Llama, Mistral, Qwen",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("huggingchat")
+                                }
+                            )
+                            WebMenuItem(
+                                title = "You.com 🔍",
+                                subtitle = "بحث + AI",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("you")
+                                }
+                            )
+                            WebMenuItem(
+                                title = "Perplexity 🔵",
+                                subtitle = "بحث ذكي",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("perplexity")
+                                }
+                            )
+                            WebMenuItem(
+                                title = "Venice AI 🔒",
+                                subtitle = "خصوصية كاملة",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("venice")
+                                }
+                            )
+
+                            // ✅ يحتاج حساب مجاني
+                            WebMenuSection(title = "👤 يحتاج حساب مجاني")
+
+                            WebMenuItem(
+                                title = "ChatGPT 🟢",
+                                subtitle = "OpenAI",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("chatgpt")
+                                }
+                            )
+                            WebMenuItem(
+                                title = "Claude 🟠",
+                                subtitle = "Anthropic",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("claude")
+                                }
+                            )
+                            WebMenuItem(
+                                title = "Gemini 🟦",
+                                subtitle = "Google",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("gemini_web")
+                                }
+                            )
+                            WebMenuItem(
+                                title = "Grok ✖️",
+                                subtitle = "xAI",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("grok")
+                                }
+                            )
+                            WebMenuItem(
+                                title = "Copilot 🪟",
+                                subtitle = "Microsoft",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("copilot")
+                                }
+                            )
+                            WebMenuItem(
+                                title = "Le Chat 🇫🇷",
+                                subtitle = "Mistral",
+                                onClick = {
+                                    showWebMenu = false
+                                    onOpenWeb("mistral_web")
+                                }
+                            )
+                        }
                     }
+
                     IconButton(onClick = onSettings) {
                         Icon(
                             Icons.Filled.Settings,
@@ -93,7 +209,6 @@ fun ConversationsScreen(
     ) { padding ->
 
         if (conversations.isEmpty()) {
-
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -107,7 +222,9 @@ fun ConversationsScreen(
                     Icon(
                         Icons.Filled.Chat,
                         contentDescription = null,
-                        modifier = Modifier.padding(8.dp),
+                        modifier = Modifier
+                            .size(64.dp)
+                            .padding(8.dp),
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                     )
                     Text(
@@ -122,9 +239,7 @@ fun ConversationsScreen(
                     )
                 }
             }
-
         } else {
-
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -150,6 +265,7 @@ fun ConversationsScreen(
         }
     }
 
+    // Dialog حذف المحادثة
     conversationToDelete?.let { conversation ->
         AlertDialog(
             onDismissRequest = { conversationToDelete = null },
@@ -173,6 +289,53 @@ fun ConversationsScreen(
         )
     }
 }
+
+// ============================================================
+// مكوّنات مساعدة للقائمة
+// ============================================================
+
+@Composable
+private fun WebMenuSection(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(
+            horizontal = 16.dp,
+            vertical = 6.dp
+        )
+    )
+}
+
+@Composable
+private fun WebMenuItem(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = {
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        onClick = onClick
+    )
+}
+
+// ============================================================
+// بطاقة المحادثة
+// ============================================================
 
 @Composable
 private fun ConversationCard(
