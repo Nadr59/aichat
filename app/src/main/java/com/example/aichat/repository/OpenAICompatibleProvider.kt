@@ -29,13 +29,12 @@ class OpenAICompatibleProvider(
         onCustomRequest: (() -> Unit)? = null
     ): String {
 
-        // ✅ تشخيص
         android.util.Log.d("OpenAIProvider", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         android.util.Log.d("OpenAIProvider", "📤 Sending to: $providerName")
         android.util.Log.d("OpenAIProvider", "🤖 Model: $model")
         android.util.Log.d("OpenAIProvider", "💬 User message: ${userMessage.take(50)}...")
         android.util.Log.d("OpenAIProvider", "🧠 Memory context length: ${memoryContext.length}")
-        
+
         if (memoryContext.isNotBlank()) {
             android.util.Log.d("OpenAIProvider", "✅ Memory context PRESENT")
             android.util.Log.d("OpenAIProvider", "Preview: ${memoryContext.take(100)}...")
@@ -45,67 +44,65 @@ class OpenAICompatibleProvider(
 
         val cleanModel = model.trim()
 
-        if (apiKey.isBlank()) {
-            throw IOException("$providerName: المفتاح فارغ")
-        }
-
-        if (cleanModel.isBlank()) {
-            throw IOException("$providerName: النموذج فارغ")
-        }
-
-        if (baseUrl.isBlank()) {
-            throw IOException("$providerName: الرابط فارغ")
-        }
-
-        val messages = JSONArray()
-
-        // ========================================================
-        // System message
-        // ========================================================
-
-        val systemContent = buildString {
-            append("You are a helpful AI assistant.")
-            
-            if (memoryContext.isNotBlank()) {
-                append("\n\n")
-                append(memoryContext)
-            }
-        }
-
-        // ✅ تشخيص
-        android.util.Log.d("OpenAIProvider", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        android.util.Log.d("OpenAIProvider", "📋 System message length: ${systemContent.length}")
-        android.util.Log.d("OpenAIProvider", "System message:")
-        android.util.Log.d("OpenAIProvider", systemContent.take(300))
-        android.util.Log.d("OpenAIProvider", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-        messages.put(
-            JSONObject().apply {
-                put("role", "system")
-                put("content", systemContent)
-            }
-        )
-
-        // ========================================================
-        // تاريخ المحادثة
-        // ========================================================
-
-        history.takeLast(maxHistory).forEach { msg ->
-            messages.put(
-                JSONObject().apply {
-                    put("role", msg.role)
-                    put("content", msg.content)
-                }
-            )
-        }
-
-        // ========================================================
-        // الرسالة الحالية + الصورة
-        // ========================================================
+        if (apiKey.isBlank()) throw IOException("$providerName: المفتاح فارغ")
+        if (cleanModel.isBlank()) throw IOException("$providerName: النموذج فارغ")
+        if (baseUrl.isBlank()) throw IOException("$providerName: الرابط فارغ")
 
         val hasImage = imageBase64 != null && (forceVision || supportsVision(cleanModel))
 
+        // ============================================================
+        // تقدير الـ tokens المتاحة للتاريخ
+        // مُصحَّح: العربية تستهلك tokens أكثر من الإنجليزية
+        // ============================================================
+
+        // نحجز 30% من maxTokens للرد، والباقي للمحادثة
+        val tokensForHistory = (maxTokens * 0.4).toInt()
+
+        val limitedHistory = limitHistoryByTokens(
+            history = history.takeLast(maxHistory),
+            maxTokens = tokensForHistory
+        )
+
+        android.util.Log.d(
+            "OpenAIProvider",
+            "📜 History: ${history.size} messages → limited to ${limitedHistory.size}"
+        )
+
+        val messages = JSONArray()
+
+        // ============================================================
+        // مُصحَّح: Vision + system message
+        // Groq Vision لا يقبل system message منفصل مع الصورة
+        // الحل: دمج memoryContext في رسالة المستخدم عند وجود صورة
+        // ============================================================
+
         if (hasImage) {
+            // ✅ Vision: بدون system message منفصل
+            // نضع التاريخ النصي فقط (بدون صور في التاريخ)
+            limitedHistory.forEach { msg ->
+                if (msg.imageBase64 == null) {
+                    messages.put(
+                        JSONObject().apply {
+                            put("role", msg.role)
+                            put("content", msg.content)
+                        }
+                    )
+                }
+            }
+
+            // ✅ دمج memoryContext في رسالة المستخدم
+            val userTextWithContext = buildString {
+                if (memoryContext.isNotBlank()) {
+                    append("السياق المرجعي:\n")
+                    append(memoryContext)
+                    append("\n\n")
+                }
+                append(userMessage)
+            }
+
+            android.util.Log.d("OpenAIProvider", "🖼️ Vision mode: merging context into user message")
+            android.util.Log.d("OpenAIProvider", "📋 Combined message length: ${userTextWithContext.length}")
+
             messages.put(
                 JSONObject().apply {
                     put("role", "user")
@@ -119,12 +116,45 @@ class OpenAICompatibleProvider(
                         })
                         put(JSONObject().apply {
                             put("type", "text")
-                            put("text", userMessage)
+                            put("text", userTextWithContext)
                         })
                     })
                 }
             )
+
         } else {
+            // ✅ بدون صورة: system message عادي
+            val systemContent = buildString {
+                append("You are a helpful AI assistant.")
+                if (memoryContext.isNotBlank()) {
+                    append("\n\n")
+                    append(memoryContext)
+                }
+            }
+
+            android.util.Log.d("OpenAIProvider", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            android.util.Log.d("OpenAIProvider", "📋 System message length: ${systemContent.length}")
+            android.util.Log.d("OpenAIProvider", systemContent.take(300))
+            android.util.Log.d("OpenAIProvider", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+            messages.put(
+                JSONObject().apply {
+                    put("role", "system")
+                    put("content", systemContent)
+                }
+            )
+
+            // ✅ التاريخ المحدود بالـ tokens
+            limitedHistory.forEach { msg ->
+                messages.put(
+                    JSONObject().apply {
+                        put("role", msg.role)
+                        put("content", msg.content)
+                    }
+                )
+            }
+
+            // ✅ رسالة المستخدم
             messages.put(
                 JSONObject().apply {
                     put("role", "user")
@@ -133,9 +163,9 @@ class OpenAICompatibleProvider(
             )
         }
 
-        // ========================================================
-        // الطلب
-        // ========================================================
+        // ============================================================
+        // بناء الطلب
+        // ============================================================
 
         val requestJson = JSONObject().apply {
             put("model", cleanModel)
@@ -143,6 +173,8 @@ class OpenAICompatibleProvider(
             put("temperature", 0.7)
             put("max_tokens", maxTokens)
         }
+
+        android.util.Log.d("OpenAIProvider", "📦 Total messages in request: ${messages.length()}")
 
         val requestBuilder = Request.Builder()
             .url(baseUrl)
@@ -165,12 +197,15 @@ class OpenAICompatibleProvider(
                         ?: j.optString("message", body)
                 }.getOrDefault(body)
 
+                android.util.Log.e("OpenAIProvider", "❌ HTTP ${response.code}: $msg")
+
                 throw IOException(
                     when (response.code) {
-                        429 -> "⚠️ $providerName: تجاوزت حد الطلبات"
+                        400 -> "❌ $providerName: طلب غير صالح (400) - $msg"
                         401 -> "❌ $providerName: المفتاح غير صحيح"
                         403 -> "❌ $providerName: لا توجد صلاحية"
                         422 -> "❌ $providerName: صيغة خاطئة: $msg"
+                        429 -> "⚠️ $providerName: تجاوزت حد الطلبات"
                         500 -> "❌ $providerName: خطأ في الخادم"
                         else -> "$providerName ${response.code}: $msg"
                     }
@@ -196,6 +231,58 @@ class OpenAICompatibleProvider(
             return result
         }
     }
+
+    // ============================================================
+    // تقدير tokens ومحدودية التاريخ
+    // مُصحَّح: العربية تستهلك 2-3x tokens مقارنة بالإنجليزية
+    // ============================================================
+
+    private fun estimateTokens(text: String): Int {
+        if (text.isBlank()) return 0
+
+        val arabicChars = text.count { it in '\u0600'..'\u06FF' }
+        val arabicRatio = arabicChars.toDouble() / text.length
+
+        return if (arabicRatio > 0.3) {
+            // نص عربي: كل حرف ≈ 0.6 token (العربية تُقسَّم إلى subwords أكثر)
+            (text.length * 0.6).toInt().coerceAtLeast(1)
+        } else {
+            // نص إنجليزي: كل 4 أحرف ≈ 1 token
+            (text.length / 4).coerceAtLeast(1)
+        }
+    }
+
+    private fun limitHistoryByTokens(
+        history: List<Message>,
+        maxTokens: Int
+    ): List<Message> {
+        if (history.isEmpty()) return emptyList()
+
+        var tokenCount = 0
+        val result = mutableListOf<Message>()
+
+        // من الأحدث للأقدم للحفاظ على السياق الأخير
+        for (message in history.reversed()) {
+            val msgTokens = estimateTokens(message.content)
+
+            if (tokenCount + msgTokens > maxTokens) {
+                android.util.Log.d(
+                    "OpenAIProvider",
+                    "✂️ History cut at ${result.size} messages (${tokenCount} tokens)"
+                )
+                break
+            }
+
+            result.add(0, message)
+            tokenCount += msgTokens
+        }
+
+        return result
+    }
+
+    // ============================================================
+    // التحقق من دعم Vision
+    // ============================================================
 
     private fun supportsVision(model: String): Boolean {
         val m = model.lowercase()
