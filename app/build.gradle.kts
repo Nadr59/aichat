@@ -14,8 +14,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-        
-        // ✅ تقليل ABIs (فقط ARM)
+
+        // ✅ ARM فقط في release — x86_64 يُضاف في debug تلقائياً
         ndk {
             abiFilters.clear()
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
@@ -25,6 +25,15 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // ✅ في debug: دعم x86_64 للمحاكي
+            ndk {
+                abiFilters.clear()
+                abiFilters += listOf(
+                    "armeabi-v7a",
+                    "arm64-v8a",
+                    "x86_64"        // ← المحاكي
+                )
+            }
         }
         release {
             isMinifyEnabled = true
@@ -33,6 +42,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // release: ARM فقط (حجم أصغر للجهاز الحقيقي)
+            ndk {
+                abiFilters.clear()
+                abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+            }
         }
     }
 
@@ -52,7 +66,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    
+
     packagingOptions {
         resources {
             excludes += setOf(
@@ -104,11 +118,13 @@ dependencies {
     // JSON
     implementation("com.google.code.gson:gson:2.10.1")
 
-    // GeckoView (ضروري للويب)
+    // GeckoView
     implementation("org.mozilla.geckoview:geckoview:130.0.20240913135723")
-    //pdf
+
+    // PDF
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-   //web
+
+    // Web scraping
     implementation("org.jsoup:jsoup:1.17.2")
 
     // Debug
