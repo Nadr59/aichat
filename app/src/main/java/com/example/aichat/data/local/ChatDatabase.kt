@@ -1,11 +1,11 @@
 package com.example.aichat.data.local
 
+import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import android.content.Context
 import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
@@ -16,23 +16,23 @@ import com.example.aichat.data.model.WebPlatform
         Conversation::class,
         Message::class,
         MemoryItem::class,
-        WebPlatform::class          // ← جديد
+        WebPlatform::class
     ],
-    version = 6,                    // ← رُفع من 5 إلى 6
+    version = 6,
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
 
     abstract fun chatDao(): ChatDao
     abstract fun memoryDao(): MemoryDao
-    abstract fun webPlatformDao(): WebPlatformDao   // ← جديد
+    abstract fun webPlatformDao(): WebPlatformDao
 
     companion object {
 
         @Volatile
         private var INSTANCE: ChatDatabase? = null
 
-        // ======== Migrations ========
+        // ── Migrations ──────────────────────────────────────────────────────
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -65,10 +65,12 @@ abstract class ChatDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
-                    "ALTER TABLE memory_items ADD COLUMN embeddingModel TEXT NOT NULL DEFAULT 'text-embedding-004'"
+                    "ALTER TABLE memory_items " +
+                    "ADD COLUMN embeddingModel TEXT NOT NULL DEFAULT 'text-embedding-004'"
                 )
                 db.execSQL(
-                    "ALTER TABLE memory_items ADD COLUMN embeddingDimensions INTEGER NOT NULL DEFAULT 768"
+                    "ALTER TABLE memory_items " +
+                    "ADD COLUMN embeddingDimensions INTEGER NOT NULL DEFAULT 768"
                 )
             }
         }
@@ -76,15 +78,16 @@ abstract class ChatDatabase : RoomDatabase() {
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
-                    "ALTER TABLE memory_items ADD COLUMN contentHash TEXT NOT NULL DEFAULT ''"
+                    "ALTER TABLE memory_items " +
+                    "ADD COLUMN contentHash TEXT NOT NULL DEFAULT ''"
                 )
                 db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS index_memory_items_contentHash ON memory_items(contentHash)"
+                    "CREATE INDEX IF NOT EXISTS index_memory_items_contentHash " +
+                    "ON memory_items(contentHash)"
                 )
             }
         }
 
-        /** Migration 5→6: إنشاء جدول web_platforms */
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -106,25 +109,35 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
-        // ======== Builder ========
+        // ── Builder ─────────────────────────────────────────────────────────
 
-        fun getDatabase(context: Context): ChatDatabase {
-            return INSTANCE ?: synchronized(this) {
-                Room.databaseBuilder(
-                    context.applicationContext,
-                    ChatDatabase::class.java,
-                    "aichat_database"
+        private fun buildDatabase(context: Context): ChatDatabase =
+            Room.databaseBuilder(
+                context.applicationContext,
+                ChatDatabase::class.java,
+                "aichat_database"
+            )
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6
                 )
-                    .addMigrations(
-                        MIGRATION_1_2,
-                        MIGRATION_2_3,
-                        MIGRATION_3_4,
-                        MIGRATION_4_5,
-                        MIGRATION_5_6   // ← جديد
-                    )
-                    .build()
-                    .also { INSTANCE = it }
+                .build()
+
+        /**
+         * الاسم الجديد — يُستخدم من AichatApp
+         */
+        fun getDatabase(context: Context): ChatDatabase =
+            INSTANCE ?: synchronized(this) {
+                INSTANCE ?: buildDatabase(context).also { INSTANCE = it }
             }
-        }
+
+        /**
+         * alias للتوافق مع ChatViewModel الحالي
+         * يستدعي getDatabase داخلياً
+         */
+        fun getInstance(context: Context): ChatDatabase = getDatabase(context)
     }
 }
