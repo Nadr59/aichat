@@ -55,25 +55,35 @@ import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
 
+/**
+ * شاشة GeckoView المدمجة.
+ *
+ * @param url   الرابط المطلوب فتحه
+ * @param title عنوان المنصة (للـ TopAppBar)
+ * @param onBack دالة الرجوع
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GeckoTestScreen(
-    platform: String,
+    url: String,
+    title: String,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val platformInfo = webPlatforms[platform] ?: webPlatforms["huggingchat"]!!
 
+    // ── الحصول على GeckoRuntime من AichatApp ──────────────────────────────
     val runtime = remember {
-        (context.applicationContext as AichatApp).getOrCreateGeckoRuntime()
+        (context.applicationContext as AichatApp).geckoRuntime
     }
 
+    // إذا لم يكن Runtime متاحاً (نادر جداً)
     if (runtime == null) {
         GeckoUnavailableDialog(
-            platformInfo = platformInfo,
+            platformTitle = title,
+            platformUrl   = url,
             onOpenBrowser = {
-                openExternal(context, platformInfo.url)
+                openExternal(context, url)
                 onBack()
             },
             onBack = onBack
@@ -81,31 +91,29 @@ fun GeckoTestScreen(
         return
     }
 
-    // ---------- الحالة ----------
-    var isLoading by remember { mutableStateOf(true) }
-    var progress by remember { mutableIntStateOf(0) }
-    var canGoBack by remember { mutableStateOf(false) }
-    var currentUrl by remember { mutableStateOf(platformInfo.url) }
-    var currentTitle by remember { mutableStateOf(platformInfo.title) }
-    var loadError by remember { mutableStateOf<String?>(null) }
-    var geckoViewRef by remember { mutableStateOf<GeckoView?>(null) }
+    // ── الحالة ────────────────────────────────────────────────────────────
+    var isLoading     by remember { mutableStateOf(true) }
+    var progress      by remember { mutableIntStateOf(0) }
+    var canGoBack     by remember { mutableStateOf(false) }
+    var currentUrl    by remember { mutableStateOf(url) }
+    var currentTitle  by remember { mutableStateOf(title) }
+    var loadError     by remember { mutableStateOf<String?>(null) }
+    var geckoViewRef  by remember { mutableStateOf<GeckoView?>(null) }
 
-    // ---------- الجلسة ----------
+    // ── الجلسة ────────────────────────────────────────────────────────────
     val session = remember {
         GeckoSession().also { s ->
 
             s.progressDelegate = object : GeckoSession.ProgressDelegate {
                 override fun onPageStart(session: GeckoSession, url: String) {
-                    isLoading = true
-                    progress = 0
-                    loadError = null
+                    isLoading  = true
+                    progress   = 0
+                    loadError  = null
                     currentUrl = url
                 }
-
                 override fun onProgressChange(session: GeckoSession, progress_: Int) {
                     progress = progress_
                 }
-
                 override fun onPageStop(session: GeckoSession, success: Boolean) {
                     isLoading = false
                 }
@@ -118,20 +126,16 @@ fun GeckoTestScreen(
             }
 
             s.navigationDelegate = object : GeckoSession.NavigationDelegate {
-                // ✅ يحل مشكلة حبس المستخدم في الشاشة
                 override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
                     canGoBack = canGoBack_
                 }
 
-                // ✅ الروابط غير http/https تُفتح خارجياً
                 override fun onLoadRequest(
                     session: GeckoSession,
                     request: GeckoSession.NavigationDelegate.LoadRequest
                 ): GeckoResult<AllowOrDeny>? {
                     val scheme = Uri.parse(request.uri).scheme?.lowercase()
-                    return if (scheme == "http" || scheme == "https" ||
-                        scheme == "about" || scheme == "blob" || scheme == "data"
-                    ) {
+                    return if (scheme in listOf("http", "https", "about", "blob", "data")) {
                         GeckoResult.allow()
                     } else {
                         openExternal(context, request.uri)
@@ -139,7 +143,6 @@ fun GeckoTestScreen(
                     }
                 }
 
-                // ✅ معالجة أخطاء التحميل
                 override fun onLoadError(
                     session: GeckoSession,
                     uri: String?,
@@ -147,13 +150,10 @@ fun GeckoTestScreen(
                 ): GeckoResult<String>? {
                     isLoading = false
                     loadError = when (error.category) {
-                        WebRequestError.ERROR_CATEGORY_NETWORK ->
-                            "تعذر الاتصال بالإنترنت"
-                        WebRequestError.ERROR_CATEGORY_URI ->
-                            "الرابط غير صالح"
-                        WebRequestError.ERROR_CATEGORY_SECURITY ->
-                            "مشكلة في شهادة الأمان"
-                        else -> "حدث خطأ أثناء تحميل الصفحة"
+                        WebRequestError.ERROR_CATEGORY_NETWORK  -> "تعذر الاتصال بالإنترنت"
+                        WebRequestError.ERROR_CATEGORY_URI      -> "الرابط غير صالح"
+                        WebRequestError.ERROR_CATEGORY_SECURITY -> "مشكلة في شهادة الأمان"
+                        else                                    -> "حدث خطأ أثناء تحميل الصفحة"
                     }
                     return null
                 }
@@ -161,26 +161,26 @@ fun GeckoTestScreen(
         }
     }
 
-    // ✅ رجوع ذكي: داخل الصفحة أولاً ثم الخروج من الشاشة
+    // ── رجوع ذكي ─────────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
         if (canGoBack) session.goBack() else onBack()
     }
     BackHandler(onBack = handleBack)
 
-    // ✅ إيقاف الجلسة في الخلفية لتوفير البطارية
+    // ── دورة حياة الجلسة ─────────────────────────────────────────────────
     DisposableEffect(lifecycleOwner, session) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_STOP -> session.setActive(false)
+                Lifecycle.Event.ON_STOP  -> session.setActive(false)
                 Lifecycle.Event.ON_START -> session.setActive(true)
-                else -> Unit
+                else                     -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ✅ تنظيف الموارد
+    // ── تنظيف الموارد ─────────────────────────────────────────────────────
     DisposableEffect(session) {
         onDispose {
             geckoViewRef?.releaseSession()
@@ -188,22 +188,22 @@ fun GeckoTestScreen(
         }
     }
 
-    // ---------- الواجهة ----------
+    // ── الواجهة ───────────────────────────────────────────────────────────
     Column(modifier = Modifier.fillMaxSize()) {
 
         TopAppBar(
             title = {
                 Column {
                     Text(
-                        text = platformInfo.title,
-                        style = MaterialTheme.typography.titleMedium,
+                        text       = title,
+                        style      = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines   = 1,
+                        overflow   = TextOverflow.Ellipsis
                     )
-                    if (currentTitle != platformInfo.title && currentTitle.isNotBlank()) {
+                    if (currentTitle != title && currentTitle.isNotBlank()) {
                         Text(
-                            text = currentTitle,
+                            text  = currentTitle,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -214,16 +214,15 @@ fun GeckoTestScreen(
             },
             navigationIcon = {
                 IconButton(onClick = handleBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "رجوع")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
                 }
             },
             actions = {
                 IconButton(onClick = { session.reload() }) {
-                    Icon(Icons.Filled.Refresh, "تحديث")
+                    Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
                 }
-                // ✅ يفتح الصفحة الحالية وليس صفحة البداية
                 IconButton(onClick = { openExternal(context, currentUrl) }) {
-                    Icon(Icons.Filled.OpenInBrowser, "فتح في المتصفح")
+                    Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح في المتصفح")
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -235,7 +234,7 @@ fun GeckoTestScreen(
 
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
+                factory  = { ctx ->
                     GeckoView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -243,14 +242,14 @@ fun GeckoTestScreen(
                         )
                         if (!session.isOpen) {
                             session.open(runtime)
-                            session.loadUri(platformInfo.url)
+                            session.loadUri(url)
                         }
                         setSession(session)
                     }.also { geckoViewRef = it }
                 }
             )
 
-            // ✅ شريط تقدم حقيقي
+            // شريط تقدم
             if (isLoading) {
                 LinearProgressIndicator(
                     progress = { progress / 100f },
@@ -261,11 +260,11 @@ fun GeckoTestScreen(
                 )
             }
 
-            // ✅ شاشة خطأ مع إعادة المحاولة
+            // شاشة خطأ
             loadError?.let { message ->
                 LoadErrorView(
-                    message = message,
-                    onRetry = { session.reload() },
+                    message       = message,
+                    onRetry       = { session.reload() },
                     onOpenBrowser = { openExternal(context, currentUrl) }
                 )
             }
@@ -273,9 +272,7 @@ fun GeckoTestScreen(
     }
 }
 
-// ============================================================
-// مساعدات
-// ============================================================
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 private fun openExternal(context: Context, url: String) {
     try {
@@ -288,6 +285,8 @@ private fun openExternal(context: Context, url: String) {
     }
 }
 
+// ── Composables مساعدة ────────────────────────────────────────────────────────
+
 @Composable
 private fun LoadErrorView(
     message: String,
@@ -295,15 +294,15 @@ private fun LoadErrorView(
     onOpenBrowser: () -> Unit
 ) {
     Column(
-        modifier = Modifier
+        modifier              = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        verticalArrangement   = Arrangement.Center,
+        horizontalAlignment   = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "⚠️ $message",
-            style = MaterialTheme.typography.titleMedium,
+            text      = "⚠️ $message",
+            style     = MaterialTheme.typography.titleMedium,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(16.dp))
@@ -315,17 +314,19 @@ private fun LoadErrorView(
 
 @Composable
 private fun GeckoUnavailableDialog(
-    platformInfo: WebPlatformInfo,
+    platformTitle: String,
+    platformUrl:   String,
     onOpenBrowser: () -> Unit,
-    onBack: () -> Unit
+    onBack:        () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onBack,
         title = { Text("⚠️ GeckoView غير متاح") },
-        text = {
+        text  = {
             Text(
                 "تعذر تهيئة محرك GeckoView على هذا الجهاز.\n\n" +
-                    "يمكنك فتح ${platformInfo.title} في المتصفح الخارجي."
+                "يمكنك فتح $platformTitle في المتصفح الخارجي.\n" +
+                platformUrl
             )
         },
         confirmButton = {
