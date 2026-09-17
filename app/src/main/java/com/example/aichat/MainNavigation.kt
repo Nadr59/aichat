@@ -12,6 +12,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.WebEngine
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.ui.screens.ChatScreen
@@ -21,6 +22,7 @@ import com.example.aichat.ui.screens.MemoryScreen
 import com.example.aichat.ui.screens.SettingsScreen
 import com.example.aichat.ui.screens.WebPlatformsScreen
 import com.example.aichat.ui.screens.WebScreen
+import com.example.aichat.ui.viewmodel.ChatViewModel
 import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 
 @Composable
@@ -28,6 +30,13 @@ fun MainNavigation(app: AichatApp) {
 
     val navController = rememberNavController()
 
+    // AiSettings — مصدر واحد للحقيقة
+    val settings = remember { AiSettings(app) }
+
+    // ChatViewModel مشترك — AndroidViewModel يحتاج Application
+    val chatViewModel: ChatViewModel = viewModel()
+
+    // WebPlatformsViewModel
     val webPlatformsViewModel: WebPlatformsViewModel = viewModel(
         factory = WebPlatformsViewModel.Factory(app.webPlatformRepository)
     )
@@ -40,15 +49,29 @@ fun MainNavigation(app: AichatApp) {
         // ── المحادثات ─────────────────────────────────────────────────────
         composable("conversations") {
             ConversationsScreen(
-                onOpenChat            = { id -> navController.navigate("chat/$id") },
-                onNewChat             = { navController.navigate("chat/new") },
-                onOpenSettings        = { navController.navigate("settings") },
-                onOpenMemory          = { navController.navigate("memory") },
+                viewModel             = chatViewModel,
+                settings              = settings,
+                onBack                = { /* startDestination — لا رجوع */ },
+                onOpenChat            = { id ->
+                    navController.navigate("chat/$id")
+                },
+                onNewChat             = {
+                    chatViewModel.newConversation()
+                    navController.navigate("chat/new")
+                },
+                onOpenSettings        = {
+                    navController.navigate("settings")
+                },
+                onOpenMemory          = {
+                    navController.navigate("memory")
+                },
                 webPlatformsViewModel = webPlatformsViewModel,
                 onOpenPlatform        = { platform ->
                     navController.navigate("web/${platform.id}")
                 },
-                onManagePlatforms     = { navController.navigate("web_platforms") }
+                onManagePlatforms     = {
+                    navController.navigate("web_platforms")
+                }
             )
         }
 
@@ -59,21 +82,41 @@ fun MainNavigation(app: AichatApp) {
                 navArgument("conversationId") { type = NavType.StringType }
             )
         ) { back ->
-            val conversationId = back.arguments?.getString("conversationId") ?: "new"
+            val conversationId = back.arguments
+                ?.getString("conversationId") ?: "new"
+
+            LaunchedEffect(conversationId) {
+                if (conversationId == "new") {
+                    chatViewModel.newConversation()
+                } else {
+                    conversationId.toLongOrNull()?.let { id ->
+                        chatViewModel.openConversation(id)
+                    }
+                }
+            }
+
             ChatScreen(
-                conversationId = conversationId,
-                onNavigateUp   = { navController.popBackStack() }
+                viewModel = chatViewModel,
+                settings  = settings,
+                onBack    = { navController.popBackStack() }
             )
         }
 
         // ── الإعدادات ─────────────────────────────────────────────────────
         composable("settings") {
-            SettingsScreen(onNavigateUp = { navController.popBackStack() })
+            SettingsScreen(
+                settings     = settings,
+                onBack       = { navController.popBackStack() },
+                onOpenMemory = { navController.navigate("memory") }
+            )
         }
 
         // ── الذاكرة ───────────────────────────────────────────────────────
         composable("memory") {
-            MemoryScreen(onNavigateUp = { navController.popBackStack() })
+            MemoryScreen(
+                viewModel = chatViewModel,
+                onBack    = { navController.popBackStack() }
+            )
         }
 
         // ── إدارة المنصات ─────────────────────────────────────────────────
@@ -104,7 +147,6 @@ fun MainNavigation(app: AichatApp) {
             }
 
             platform?.let { p ->
-                // اختيار المحرك حسب تفضيل المنصة
                 when (WebEngine.valueOf(p.preferredEngine)) {
                     WebEngine.GECKO -> {
                         GeckoTestScreen(
@@ -113,7 +155,8 @@ fun MainNavigation(app: AichatApp) {
                             onBack = { navController.popBackStack() }
                         )
                     }
-                    WebEngine.WEBVIEW, WebEngine.EXTERNAL -> {
+                    WebEngine.WEBVIEW,
+                    WebEngine.EXTERNAL -> {
                         WebScreen(
                             url           = p.url,
                             title         = p.name,
