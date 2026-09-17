@@ -12,9 +12,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.data.model.WebEngine
-import com.example.aichat.ui.screens.*
+import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.ui.screens.ChatScreen
+import com.example.aichat.ui.screens.ConversationsScreen
+import com.example.aichat.ui.screens.GeckoTestScreen
+import com.example.aichat.ui.screens.MemoryScreen
+import com.example.aichat.ui.screens.SettingsScreen
+import com.example.aichat.ui.screens.WebPlatformsScreen
+import com.example.aichat.ui.screens.WebScreen
 import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 
 @Composable
@@ -22,7 +28,6 @@ fun MainNavigation(app: AichatApp) {
 
     val navController = rememberNavController()
 
-    // ViewModel مشترك واحد للمنصات
     val webPlatformsViewModel: WebPlatformsViewModel = viewModel(
         factory = WebPlatformsViewModel.Factory(app.webPlatformRepository)
     )
@@ -32,45 +37,46 @@ fun MainNavigation(app: AichatApp) {
         startDestination = "conversations"
     ) {
 
-        // ── المحادثات ─────────────────────────────────────────────────────────
+        // ── المحادثات ─────────────────────────────────────────────────────
         composable("conversations") {
             ConversationsScreen(
-                onOpenChat       = { id -> navController.navigate("chat/$id") },
-                onNewChat        = { navController.navigate("chat/new") },
-                onOpenSettings   = { navController.navigate("settings") },
-                onOpenMemory     = { navController.navigate("memory") },
-                // تمرير منصات الويب المفعّلة فقط
+                onOpenChat            = { id -> navController.navigate("chat/$id") },
+                onNewChat             = { navController.navigate("chat/new") },
+                onOpenSettings        = { navController.navigate("settings") },
+                onOpenMemory          = { navController.navigate("memory") },
                 webPlatformsViewModel = webPlatformsViewModel,
-                onOpenPlatform   = { platform ->
+                onOpenPlatform        = { platform ->
                     navController.navigate("web/${platform.id}")
                 },
-                onManagePlatforms = { navController.navigate("web_platforms") }
+                onManagePlatforms     = { navController.navigate("web_platforms") }
             )
         }
 
-        // ── المحادثة ──────────────────────────────────────────────────────────
+        // ── المحادثة ──────────────────────────────────────────────────────
         composable(
             route     = "chat/{conversationId}",
-            arguments = listOf(navArgument("conversationId") { type = NavType.StringType })
+            arguments = listOf(
+                navArgument("conversationId") { type = NavType.StringType }
+            )
         ) { back ->
             val conversationId = back.arguments?.getString("conversationId") ?: "new"
             ChatScreen(
-                conversationId  = conversationId,
-                onNavigateUp    = { navController.popBackStack() }
+                conversationId = conversationId,
+                onNavigateUp   = { navController.popBackStack() }
             )
         }
 
-        // ── الإعدادات ─────────────────────────────────────────────────────────
+        // ── الإعدادات ─────────────────────────────────────────────────────
         composable("settings") {
             SettingsScreen(onNavigateUp = { navController.popBackStack() })
         }
 
-        // ── الذاكرة ───────────────────────────────────────────────────────────
+        // ── الذاكرة ───────────────────────────────────────────────────────
         composable("memory") {
             MemoryScreen(onNavigateUp = { navController.popBackStack() })
         }
 
-        // ── إدارة المنصات ─────────────────────────────────────────────────────
+        // ── إدارة المنصات ─────────────────────────────────────────────────
         composable("web_platforms") {
             WebPlatformsScreen(
                 viewModel      = webPlatformsViewModel,
@@ -81,27 +87,45 @@ fun MainNavigation(app: AichatApp) {
             )
         }
 
-        // ── المتصفح المدمج (بالمعرّف) ─────────────────────────────────────────
+        // ── المتصفح (بالمعرّف) ────────────────────────────────────────────
         composable(
             route     = "web/{platformId}",
-            arguments = listOf(navArgument("platformId") { type = NavType.StringType })
+            arguments = listOf(
+                navArgument("platformId") { type = NavType.StringType }
+            )
         ) { back ->
-            val platformId = back.arguments?.getString("platformId") ?: return@composable
+            val platformId = back.arguments?.getString("platformId")
+                ?: return@composable
 
-            // تحميل بيانات المنصة من الـ Repository
             var platform by remember { mutableStateOf<WebPlatform?>(null) }
+
             LaunchedEffect(platformId) {
                 platform = app.webPlatformRepository.getById(platformId)
             }
 
             platform?.let { p ->
-                WebScreen(
-                    url           = p.url,
-                    title         = p.name,
-                    initialEngine = WebEngine.valueOf(p.preferredEngine),
-                    onNavigateUp  = { navController.popBackStack() }
-                )
-            } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                // اختيار المحرك حسب تفضيل المنصة
+                when (WebEngine.valueOf(p.preferredEngine)) {
+                    WebEngine.GECKO -> {
+                        GeckoTestScreen(
+                            url    = p.url,
+                            title  = p.name,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    WebEngine.WEBVIEW, WebEngine.EXTERNAL -> {
+                        WebScreen(
+                            url           = p.url,
+                            title         = p.name,
+                            initialEngine = WebEngine.valueOf(p.preferredEngine),
+                            onNavigateUp  = { navController.popBackStack() }
+                        )
+                    }
+                }
+            } ?: Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator()
             }
         }
