@@ -9,9 +9,6 @@ on:
 
 jobs:
 
-  # ════════════════════════════════════════════════════════════
-  # Job 1: بناء APK
-  # ════════════════════════════════════════════════════════════
   build:
     name: Build APK
     runs-on: ubuntu-latest
@@ -33,7 +30,6 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      # رفع APK للـ job التالي
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -41,9 +37,6 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 1
 
-  # ════════════════════════════════════════════════════════════
-  # Job 2: تشغيل على المحاكي وجمع logcat
-  # ════════════════════════════════════════════════════════════
   emulator-test:
     name: Emulator Crash Test
     runs-on: ubuntu-latest
@@ -60,29 +53,73 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # ── تفعيل KVM للمحاكاة السريعة ──────────────────────────────────
       - name: Enable KVM
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          ls -la /dev/kvm
 
-      # ── تحميل APK من Job السابق ──────────────────────────────────────
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
           name: debug-apk
           path: apk/
 
-      - name: Verify APK exists
+      - name: Create test script
         run: |
-          ls -lh apk/
-          file apk/app-debug.apk
+          cat > test_script.sh << 'SCRIPT'
+          #!/bin/bash
+          set -e
 
-      # ── تشغيل المحاكي ────────────────────────────────────────────────
-      - name: Run Emulator and Collect Logcat
+          echo "📱 Device ready"
+          adb shell getprop ro.build.version.release
+
+          echo "📦 Installing APK..."
+          adb install -r apk/app-debug.apk
+          echo "✅ Installed"
+
+          echo "🧹 Clearing logcat..."
+          adb logcat -c
+          sleep 2
+
+          echo "🚀 Launching AiChat..."
+          adb shell am start -n "com.example.aichat/.MainActivity"
+          echo "✅ App launched"
+
+          echo "⏳ Monitoring for 30 seconds..."
+          sleep 30
+
+          echo "📋 Collecting logcat..."
+          adb logcat -d > logcat_full.txt 2>&1 || true
+          echo "Total lines: $(wc -l < logcat_full.txt)"
+
+          echo "🔍 Extracting errors..."
+          grep -E "FATAL EXCEPTION|AndroidRuntime|aichat|GeckoRuntime|ChatDatabase|NullPointer|IllegalState|OutOfMemory" \
+            logcat_full.txt > logcat_errors.txt 2>/dev/null || echo "No errors found" > logcat_errors.txt
+
+          echo ""
+          echo "======= CRASH REPORT ======="
+          if grep -q "FATAL EXCEPTION" logcat_full.txt; then
+            echo "❌ FATAL CRASH DETECTED!"
+            echo ""
+            grep -A 25 "FATAL EXCEPTION" logcat_full.txt | head -80
+          else
+            echo "✅ No crash detected"
+            echo ""
+            echo "--- App logs ---"
+            grep -E "aichat|AichatApp|GeckoRuntime|ChatDatabase|WebPlatform" logcat_full.txt | tail -30 || echo "No app logs"
+          fi
+          echo "==========================="
+
+          echo ""
+          echo "📊 Stats:"
+          echo "  Fatal:    $(grep -c 'FATAL' logcat_full.txt 2>/dev/null || echo 0)"
+          echo "  Errors:   $(grep -c ' E com.example' logcat_full.txt 2>/dev/null || echo 0)"
+          echo "  Warnings: $(grep -c ' W com.example' logcat_full.txt 2>/dev/null || echo 0)"
+          SCRIPT
+          chmod +x test_script.sh
+
+      - name: Run on Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
@@ -93,91 +130,11 @@ jobs:
           heap-size: 512M
           disk-size: 10G
           cores: 2
-          emulator-options: >-
-            -no-snapshot-save
-            -no-window
-            -gpu swiftshader_indirect
-            -noaudio
-            -no-boot-anim
-            -camera-back none
-            -camera-front none
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           disable-animations: true
-          script: |
-            # ── التحقق من جاهزية الجهاز ────────────────────────────
-            echo "📱 Waiting for device..."
-            adb wait-for-device
-            adb shell getprop ro.build.version.release
+          script: bash test_script.sh
 
-            # ── تثبيت APK ──────────────────────────────────────────
-            echo "📦 Installing APK..."
-            adb install -r apk/app-debug.apk
-            echo "✅ APK installed"
-
-            # ── مسح logcat القديم ──────────────────────────────────
-            adb logcat -c
-            echo "🧹 Logcat cleared"
-
-            # ── تشغيل التطبيق ──────────────────────────────────────
-            echo "🚀 Launching AiChat..."
-            adb shell am start \
-              -n com.example.aichat/.MainActivity \
-              -a android.intent.action.MAIN \
-              -c android.intent.category.LAUNCHER
-
-            # ── انتظار 30 ثانية لالتقاط الانهيار العشوائي ──────────
-            echo "⏳ Monitoring for 30 seconds..."
-            sleep 30
-
-            # ── جمع logcat كامل ─────────────────────────────────────
-            echo "📋 Collecting logcat..."
-            adb logcat -d \
-              --pid=$(adb shell pidof com.example.aichat 2>/dev/null || echo "") \
-              > logcat_full.txt 2>&1 || \
-            adb logcat -d > logcat_full.txt 2>&1
-
-            echo "📄 Total lines: $(wc -l < logcat_full.txt)"
-
-            # ── استخراج الأخطاء الحرجة ─────────────────────────────
-            echo "🔍 Extracting crashes..."
-            grep -E \
-              "FATAL EXCEPTION|AndroidRuntime|CRASH|aichat|GeckoRuntime|RoomDatabase|\
-              NullPointerException|IllegalStateException|OutOfMemoryError|\
-              ANR|Unhandled exception" \
-              logcat_full.txt > logcat_errors.txt 2>/dev/null || \
-              echo "No matching errors" > logcat_errors.txt
-
-            # ── طباعة ملخص في الـ CI log ────────────────────────────
-            echo ""
-            echo "╔══════════════════════════════════════╗"
-            echo "║         CRASH REPORT SUMMARY          ║"
-            echo "╚══════════════════════════════════════╝"
-            echo ""
-
-            if grep -q "FATAL EXCEPTION" logcat_full.txt; then
-              echo "❌ FATAL CRASH DETECTED!"
-              echo ""
-              echo "--- Crash Details ---"
-              grep -A 20 "FATAL EXCEPTION" logcat_full.txt | head -60
-              echo "-------------------"
-              echo ""
-              echo "📥 Download 'logcat-report' artifact for full details"
-              # لا نوقف الـ workflow — نكمل لرفع الملفات
-            else
-              echo "✅ No FATAL EXCEPTION found"
-              echo ""
-              echo "--- Last 20 lines of aichat log ---"
-              grep "aichat\|AichatApp\|GeckoRuntime\|ChatDatabase" \
-                logcat_full.txt | tail -20 || echo "No app-specific logs found"
-            fi
-
-            echo ""
-            echo "📊 Error summary:"
-            echo "  Errors:    $(grep -c ' E ' logcat_full.txt || echo 0)"
-            echo "  Warnings:  $(grep -c ' W ' logcat_full.txt || echo 0)"
-            echo "  Fatals:    $(grep -c 'FATAL' logcat_full.txt || echo 0)"
-
-      # ── رفع logcat دائماً (حتى عند الفشل) ──────────────────────────
-      - name: Upload Logcat Report
+      - name: Upload Logcat
         if: always()
         uses: actions/upload-artifact@v4
         with:
