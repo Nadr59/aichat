@@ -8,24 +8,28 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
 
 class AichatApp : Application() {
 
-    /** GeckoRuntime — يُنشأ مرة واحدة طوال عمر التطبيق */
+    /**
+     * GeckoRuntime — يُنشأ مرة واحدة.
+     * lateinit (ليس nullable) لأن GeckoTestScreen يعتمد عليه.
+     */
     lateinit var geckoRuntime: GeckoRuntime
         private set
 
-    /** مصدر واحد للحقيقة لمنصات الويب */
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
     override fun onCreate() {
         super.onCreate()
 
-        // ── GeckoRuntime ──────────────────────────────────────────────────────
-        val settings = GeckoRuntimeSettings.Builder()
-            .javaScriptEnabled(true)
-            .build()
-        geckoRuntime = GeckoRuntime.create(this, settings)
+        // ── GeckoRuntime ──────────────────────────────────────────────────
+        geckoRuntime = GeckoRuntime.create(
+            this,
+            GeckoRuntimeSettings.Builder()
+                .javaScriptEnabled(true)
+                .build()
+        )
 
-        // ── Database + Repository ─────────────────────────────────────────────
+        // ── Database + Repository ─────────────────────────────────────────
         val db = ChatDatabase.getDatabase(this)
         webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
     }
