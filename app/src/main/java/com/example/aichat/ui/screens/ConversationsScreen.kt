@@ -29,14 +29,17 @@ fun ConversationsScreen(
     viewModel:             ChatViewModel,
     settings:              AiSettings,
     onBack:                () -> Unit,
+    onOpenChat:            (Long) -> Unit,      // ← جديد
+    onNewChat:             () -> Unit,           // ← جديد
+    onOpenSettings:        () -> Unit,           // ← جديد
     onOpenMemory:          () -> Unit,
     webPlatformsViewModel: WebPlatformsViewModel,
     onOpenPlatform:        (WebPlatform) -> Unit,
     onManagePlatforms:     () -> Unit
 ) {
-    val conversations   by viewModel.conversations.collectAsState()
-    val allPlatforms    by webPlatformsViewModel.platforms.collectAsState()
-    val enabledPlatforms = allPlatforms.filter { it.isEnabled }
+    val conversations    by viewModel.conversations.collectAsState()
+    val allPlatforms     by webPlatformsViewModel.platforms.collectAsState()
+    val enabledPlatforms  = allPlatforms.filter { it.isEnabled }
 
     var showDeleteDialog by remember { mutableStateOf<Conversation?>(null) }
 
@@ -57,9 +60,8 @@ fun ConversationsScreen(
                     IconButton(onClick = onOpenMemory) {
                         Icon(Icons.Default.Memory, contentDescription = "الذاكرة")
                     }
-                    IconButton(onClick = {
-                        // navigate to settings — يُمرَّر من MainNavigation
-                    }) {
+                    // ✅ مُصلَح: يستدعي onOpenSettings بدل lambda فارغة
+                    IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "الإعدادات")
                     }
                 },
@@ -70,12 +72,10 @@ fun ConversationsScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = {
-                    viewModel.newConversation()
-                    onBack() // لا يوجد navigate هنا — انظر الملاحظة أدناه
-                },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("محادثة جديدة") }
+                // ✅ مُصلَح: يستدعي onNewChat بدل onBack
+                onClick = onNewChat,
+                icon    = { Icon(Icons.Default.Add, contentDescription = null) },
+                text    = { Text("محادثة جديدة") }
             )
         }
     ) { padding ->
@@ -137,10 +137,11 @@ fun ConversationsScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            imageVector = Icons.Default.Chat,
+                            imageVector        = Icons.Default.Chat,
                             contentDescription = null,
-                            modifier = Modifier.size(56.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            modifier           = Modifier.size(56.dp),
+                            tint               = MaterialTheme.colorScheme
+                                .onSurfaceVariant.copy(alpha = 0.4f)
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
@@ -151,7 +152,8 @@ fun ConversationsScreen(
                         Text(
                             text  = "اضغط + لبدء محادثة جديدة",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                .copy(alpha = 0.6f)
                         )
                     }
                 }
@@ -163,10 +165,8 @@ fun ConversationsScreen(
                     items(conversations, key = { it.id }) { conversation ->
                         ConversationItem(
                             conversation = conversation,
-                            onOpen = {
-                                viewModel.openConversation(conversation.id)
-                                // navigate يُنفَّذ من MainNavigation
-                            },
+                            // ✅ مُصلَح: يستدعي onOpenChat بدل viewModel مباشرة
+                            onOpen  = { onOpenChat(conversation.id) },
                             onDelete = { showDeleteDialog = conversation }
                         )
                         HorizontalDivider()
@@ -186,14 +186,20 @@ fun ConversationsScreen(
                 TextButton(onClick = {
                     viewModel.deleteConversation(conv)
                     showDeleteDialog = null
-                }) { Text("حذف", color = MaterialTheme.colorScheme.error) }
+                }) {
+                    Text("حذف", color = MaterialTheme.colorScheme.error)
+                }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = null }) { Text("إلغاء") }
+                TextButton(onClick = { showDeleteDialog = null }) {
+                    Text("إلغاء")
+                }
             }
         )
     }
 }
+
+// ── ConversationItem ──────────────────────────────────────────────────────────
 
 @Composable
 private fun ConversationItem(
@@ -205,9 +211,9 @@ private fun ConversationItem(
         modifier        = Modifier.clickable(onClick = onOpen),
         headlineContent = {
             Text(
-                text     = conversation.title.ifBlank { "محادثة بدون عنوان" },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                text       = conversation.title.ifBlank { "محادثة بدون عنوان" },
+                maxLines   = 1,
+                overflow   = TextOverflow.Ellipsis,
                 fontWeight = FontWeight.Medium
             )
         },
