@@ -1,127 +1,109 @@
 package com.example.aichat
 
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.aichat.data.local.AiSettings
-import com.example.aichat.ui.screens.ChatScreen
-import com.example.aichat.ui.screens.ConversationsScreen
-import com.example.aichat.ui.screens.MemoryScreen
-import com.example.aichat.ui.screens.SettingsScreen
-import com.example.aichat.ui.screens.WebScreen
-import com.example.aichat.ui.viewmodel.ChatViewModel
+import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.data.model.WebEngine
+import com.example.aichat.ui.screens.*
+import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 
 @Composable
-fun MainNavigation(settings: AiSettings) {
+fun MainNavigation(app: AichatApp) {
 
     val navController = rememberNavController()
-    val viewModel: ChatViewModel = viewModel()
+
+    // ViewModel مشترك واحد للمنصات
+    val webPlatformsViewModel: WebPlatformsViewModel = viewModel(
+        factory = WebPlatformsViewModel.Factory(app.webPlatformRepository)
+    )
 
     NavHost(
-        navController = navController,
+        navController    = navController,
         startDestination = "conversations"
     ) {
 
-        // ============================================================
-        // المحادثات
-        // ============================================================
-
+        // ── المحادثات ─────────────────────────────────────────────────────────
         composable("conversations") {
             ConversationsScreen(
-                viewModel = viewModel,
-
-                onOpenChat = { conversationId ->
-                    viewModel.openConversation(conversationId)
-                    navController.navigate("chat")
+                onOpenChat       = { id -> navController.navigate("chat/$id") },
+                onNewChat        = { navController.navigate("chat/new") },
+                onOpenSettings   = { navController.navigate("settings") },
+                onOpenMemory     = { navController.navigate("memory") },
+                // تمرير منصات الويب المفعّلة فقط
+                webPlatformsViewModel = webPlatformsViewModel,
+                onOpenPlatform   = { platform ->
+                    navController.navigate("web/${platform.id}")
                 },
-
-                onNewChat = {
-                    viewModel.newConversation()
-                    navController.navigate("chat")
-                },
-
-                onSettings = {
-                    navController.navigate("settings")
-                },
-
-                onOpenWeb = { platform ->
-                    navController.navigate("web/$platform")
-                }
+                onManagePlatforms = { navController.navigate("web_platforms") }
             )
         }
 
-        // ============================================================
-        // المحادثة
-        // ============================================================
-
-        composable("chat") {
-            ChatScreen(
-                viewModel = viewModel,
-                settings = settings,
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
-
-        // ============================================================
-        // الإعدادات
-        // ============================================================
-
-        composable("settings") {
-            SettingsScreen(
-                settings = settings,
-                onBack = {
-                    navController.popBackStack()
-                },
-                onOpenMemory = {
-                    navController.navigate("memory")
-                }
-            )
-        }
-
-        // ============================================================
-        // الذاكرة المشتركة
-        // ============================================================
-
-        composable("memory") {
-            MemoryScreen(
-                viewModel = viewModel,
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
-
-        // ============================================================
-        // الويب - مع argument للمنصة
-        // ============================================================
-
+        // ── المحادثة ──────────────────────────────────────────────────────────
         composable(
-            route = "web/{platform}",
-            arguments = listOf(
-                navArgument("platform") {
-                    type = NavType.StringType
-                    defaultValue = "huggingchat"
-                }
+            route     = "chat/{conversationId}",
+            arguments = listOf(navArgument("conversationId") { type = NavType.StringType })
+        ) { back ->
+            val conversationId = back.arguments?.getString("conversationId") ?: "new"
+            ChatScreen(
+                conversationId  = conversationId,
+                onNavigateUp    = { navController.popBackStack() }
             )
-        ) { backStackEntry ->
+        }
 
-            val platform = backStackEntry
-                .arguments
-                ?.getString("platform")
-                ?: "huggingchat"
+        // ── الإعدادات ─────────────────────────────────────────────────────────
+        composable("settings") {
+            SettingsScreen(onNavigateUp = { navController.popBackStack() })
+        }
 
-            WebScreen(
-                platform = platform,
-                onBack = {
-                    navController.popBackStack()
-                }
+        // ── الذاكرة ───────────────────────────────────────────────────────────
+        composable("memory") {
+            MemoryScreen(onNavigateUp = { navController.popBackStack() })
+        }
+
+        // ── إدارة المنصات ─────────────────────────────────────────────────────
+        composable("web_platforms") {
+            WebPlatformsScreen(
+                viewModel      = webPlatformsViewModel,
+                onOpenPlatform = { platform ->
+                    navController.navigate("web/${platform.id}")
+                },
+                onNavigateUp   = { navController.popBackStack() }
             )
+        }
+
+        // ── المتصفح المدمج (بالمعرّف) ─────────────────────────────────────────
+        composable(
+            route     = "web/{platformId}",
+            arguments = listOf(navArgument("platformId") { type = NavType.StringType })
+        ) { back ->
+            val platformId = back.arguments?.getString("platformId") ?: return@composable
+
+            // تحميل بيانات المنصة من الـ Repository
+            var platform by remember { mutableStateOf<WebPlatform?>(null) }
+            LaunchedEffect(platformId) {
+                platform = app.webPlatformRepository.getById(platformId)
+            }
+
+            platform?.let { p ->
+                WebScreen(
+                    url           = p.url,
+                    title         = p.name,
+                    initialEngine = WebEngine.valueOf(p.preferredEngine),
+                    onNavigateUp  = { navController.popBackStack() }
+                )
+            } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
         }
     }
 }
