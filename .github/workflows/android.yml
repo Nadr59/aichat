@@ -9,6 +9,9 @@ on:
 
 jobs:
 
+  # ══════════════════════════════════════════════════════════════
+  # Job 1: بناء APK للجهاز الحقيقي (ARM)
+  # ══════════════════════════════════════════════════════════════
   build:
     name: Build APK
     runs-on: ubuntu-latest
@@ -30,13 +33,25 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload Debug APK
+      # رفع APK الجهاز الحقيقي (arm64 + armeabi-v7a فقط)
+      - name: Upload ARM APK
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
+          name: debug-apk-arm
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+      # رفع APK المحاكي (arm64 + armeabi-v7a + x86_64)
+      - name: Upload x86_64 APK for emulator
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk-x86
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 1
 
+  # ══════════════════════════════════════════════════════════════
+  # Job 2: اختبار على المحاكي وجمع logcat
+  # ══════════════════════════════════════════════════════════════
   emulator-test:
     name: Emulator Crash Test
     runs-on: ubuntu-latest
@@ -55,68 +70,149 @@ jobs:
 
       - name: Enable KVM
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
-          name: debug-apk
+          name: debug-apk-x86
           path: apk/
+
+      - name: Verify APK
+        run: |
+          ls -lh apk/
+          echo "APK size: $(du -sh apk/app-debug.apk | cut -f1)"
 
       - name: Create test script
         run: |
-          cat > test_script.sh << 'SCRIPT'
+          cat > test_script.sh << 'EOF'
           #!/bin/bash
-          set -e
 
-          echo "📱 Device ready"
-          adb shell getprop ro.build.version.release
+          echo "========================================"
+          echo "  AiChat Crash Test"
+          echo "========================================"
 
+          # ── معلومات الجهاز ──────────────────────────
+          echo "📱 Android version: $(adb shell getprop ro.build.version.release)"
+          echo "📱 Device model:    $(adb shell getprop ro.product.model)"
+          echo "📱 Architecture:    $(adb shell getprop ro.product.cpu.abi)"
+
+          # ── تثبيت APK ──────────────────────────────
+          echo ""
           echo "📦 Installing APK..."
           adb install -r apk/app-debug.apk
-          echo "✅ Installed"
+          echo "✅ APK installed successfully"
 
-          echo "🧹 Clearing logcat..."
+          # ── مسح logcat ─────────────────────────────
           adb logcat -c
           sleep 2
+          echo "🧹 Logcat cleared"
 
-          echo "🚀 Launching AiChat..."
+          # ── تشغيل التطبيق ──────────────────────────
+          echo ""
+          echo "🚀 Launching com.example.aichat/.MainActivity"
           adb shell am start -n "com.example.aichat/.MainActivity"
-          echo "✅ App launched"
+          echo "✅ Launch command sent"
 
-          echo "⏳ Monitoring for 30 seconds..."
-          sleep 30
+          # ── انتظار للتحقق من بدء التشغيل ───────────
+          sleep 5
+          PID=$(adb shell pidof com.example.aichat 2>/dev/null | tr -d '\r' || echo "")
+          if [ -n "$PID" ]; then
+            echo "✅ App is running (PID: $PID)"
+          else
+            echo "⚠️  App PID not found — may have crashed immediately"
+          fi
 
+          # ── مراقبة 35 ثانية ────────────────────────
+          echo ""
+          echo "⏳ Monitoring for 35 seconds..."
+          for i in $(seq 1 7); do
+            sleep 5
+            PID=$(adb shell pidof com.example.aichat 2>/dev/null | tr -d '\r' || echo "")
+            if [ -n "$PID" ]; then
+              echo "  ✅ t=${i}0s — running (PID: $PID)"
+            else
+              echo "  ❌ t=${i}0s — process not found (crashed?)"
+            fi
+          done
+
+          # ── جمع logcat ─────────────────────────────
+          echo ""
           echo "📋 Collecting logcat..."
           adb logcat -d > logcat_full.txt 2>&1 || true
-          echo "Total lines: $(wc -l < logcat_full.txt)"
+          LINES=$(wc -l < logcat_full.txt)
+          echo "📄 Total lines: $LINES"
 
-          echo "🔍 Extracting errors..."
-          grep -E "FATAL EXCEPTION|AndroidRuntime|aichat|GeckoRuntime|ChatDatabase|NullPointer|IllegalState|OutOfMemory" \
-            logcat_full.txt > logcat_errors.txt 2>/dev/null || echo "No errors found" > logcat_errors.txt
+          # ── استخراج الأخطاء ─────────────────────────
+          echo "🔍 Extracting relevant logs..."
+          {
+            echo "=== AiChat App Logs ==="
+            grep -E "com.example.aichat|AichatApp|GeckoRuntime|ChatDatabase|WebPlatform|MainNavigation" \
+              logcat_full.txt || echo "No app-specific logs"
 
-          echo ""
-          echo "======= CRASH REPORT ======="
-          if grep -q "FATAL EXCEPTION" logcat_full.txt; then
-            echo "❌ FATAL CRASH DETECTED!"
             echo ""
-            grep -A 25 "FATAL EXCEPTION" logcat_full.txt | head -80
+            echo "=== Fatal Exceptions ==="
+            grep -A 30 "FATAL EXCEPTION" logcat_full.txt || echo "No fatal exceptions"
+
+            echo ""
+            echo "=== Process Death ==="
+            grep -E "has died|Force removing|Process.*aichat" \
+              logcat_full.txt || echo "No process death logs"
+
+            echo ""
+            echo "=== SELinux Denials ==="
+            grep -E "avc: denied.*aichat|aichat.*avc: denied" \
+              logcat_full.txt || echo "No SELinux denials"
+
+            echo ""
+            echo "=== Gecko Logs ==="
+            grep -E "GeckoRuntime|GeckoLoader|GeckoSession|geckoview" \
+              logcat_full.txt | head -30 || echo "No Gecko logs"
+
+          } > logcat_errors.txt 2>/dev/null
+
+          # ── تقرير نهائي ────────────────────────────
+          echo ""
+          echo "========================================"
+          echo "           FINAL REPORT"
+          echo "========================================"
+
+          FATAL_COUNT=$(grep -c "FATAL EXCEPTION" logcat_full.txt 2>/dev/null || echo 0)
+          DIED_COUNT=$(grep -c "has died" logcat_full.txt 2>/dev/null || echo 0)
+          SELINUX_COUNT=$(grep -c "avc: denied" logcat_full.txt 2>/dev/null || echo 0)
+          APP_ERRORS=$(grep -c " E com.example.aichat" logcat_full.txt 2>/dev/null || echo 0)
+          GECKO_OK=$(grep -c "GeckoRuntime ready\|GeckoRuntime.*init" logcat_full.txt 2>/dev/null || echo 0)
+
+          echo "  💥 Fatal Exceptions : $FATAL_COUNT"
+          echo "  💀 Process Deaths   : $DIED_COUNT"
+          echo "  🔒 SELinux Denials  : $SELINUX_COUNT"
+          echo "  ❌ App Errors       : $APP_ERRORS"
+          echo "  🦊 Gecko OK logs    : $GECKO_OK"
+          echo ""
+
+          if [ "$FATAL_COUNT" -gt 0 ]; then
+            echo "❌ RESULT: CRASH DETECTED"
+            echo ""
+            echo "--- Crash Stack Trace ---"
+            grep -A 30 "FATAL EXCEPTION" logcat_full.txt | head -60
+            echo "------------------------"
+          elif [ "$DIED_COUNT" -gt 0 ]; then
+            echo "⚠️  RESULT: PROCESS DIED (possible crash)"
+            echo ""
+            grep "has died" logcat_full.txt
           else
-            echo "✅ No crash detected"
+            echo "✅ RESULT: NO CRASH DETECTED"
             echo ""
-            echo "--- App logs ---"
-            grep -E "aichat|AichatApp|GeckoRuntime|ChatDatabase|WebPlatform" logcat_full.txt | tail -30 || echo "No app logs"
+            echo "--- Last app logs ---"
+            grep "com.example.aichat" logcat_full.txt | tail -20 || echo "No logs"
           fi
-          echo "==========================="
 
-          echo ""
-          echo "📊 Stats:"
-          echo "  Fatal:    $(grep -c 'FATAL' logcat_full.txt 2>/dev/null || echo 0)"
-          echo "  Errors:   $(grep -c ' E com.example' logcat_full.txt 2>/dev/null || echo 0)"
-          echo "  Warnings: $(grep -c ' W com.example' logcat_full.txt 2>/dev/null || echo 0)"
-          SCRIPT
+          echo "========================================"
+          echo "📥 Download 'logcat-report' artifact for full details"
+          EOF
           chmod +x test_script.sh
 
       - name: Run on Emulator
@@ -134,7 +230,7 @@ jobs:
           disable-animations: true
           script: bash test_script.sh
 
-      - name: Upload Logcat
+      - name: Upload Logcat Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
