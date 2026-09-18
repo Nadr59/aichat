@@ -19,27 +19,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.aichat.AichatApp
 import com.example.aichat.data.model.WebEngine
+import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 
-/**
- * شاشة المتصفح المدمج.
- *
- * @param url           الرابط المطلوب فتحه
- * @param title         عنوان الشاشة (اسم المنصة)
- * @param initialEngine المحرك المفضل للمنصة
- * @param onNavigateUp  زر الرجوع
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebScreen(
     url:           String,
-    title:         String         = "متصفح",
-    initialEngine: WebEngine      = WebEngine.GECKO,
-    onNavigateUp:  () -> Unit     = {}
+    title:         String     = "متصفح",
+    initialEngine: WebEngine  = WebEngine.GECKO,
+    onNavigateUp:  () -> Unit = {}
 ) {
-    val context = LocalContext.current
+    val context       = LocalContext.current
     var currentEngine by remember { mutableStateOf(initialEngine) }
     var isLoading     by remember { mutableStateOf(true) }
 
@@ -53,7 +46,6 @@ fun WebScreen(
                     }
                 },
                 actions = {
-                    // تبديل المحرك
                     TextButton(onClick = {
                         currentEngine = when (currentEngine) {
                             WebEngine.GECKO    -> WebEngine.WEBVIEW
@@ -69,7 +61,6 @@ fun WebScreen(
                             }
                         )
                     }
-                    // فتح خارجي
                     IconButton(onClick = {
                         context.startActivity(
                             Intent(Intent.ACTION_VIEW, Uri.parse(url))
@@ -104,7 +95,6 @@ fun WebScreen(
                 }
 
                 WebEngine.EXTERNAL -> {
-                    // فتح فوري ثم الرجوع
                     LaunchedEffect(Unit) {
                         context.startActivity(
                             Intent(Intent.ACTION_VIEW, Uri.parse(url))
@@ -121,23 +111,68 @@ fun WebScreen(
     }
 }
 
-// ── GeckoView ─────────────────────────────────────────────────────────────────
+// ── GeckoWebView ──────────────────────────────────────────────────────────────
 
 @Composable
 private fun GeckoWebView(
-    url: String,
+    url:       String,
     onLoading: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    val runtime = remember {
-        (context.applicationContext as AichatApp).geckoRuntime
+    val app     = context.applicationContext as AichatApp
+
+    // ── انتظر حتى يصبح GeckoRuntime جاهزاً ──────────────────────────────
+    var runtime   by remember { mutableStateOf<GeckoRuntime?>(app.geckoRuntime) }
+    var isWaiting by remember { mutableStateOf(app.geckoRuntime == null) }
+
+    LaunchedEffect(Unit) {
+        if (app.geckoRuntime == null) {
+            var attempts = 0
+            while (app.geckoRuntime == null && attempts < 20) {
+                kotlinx.coroutines.delay(500)
+                attempts++
+            }
+        }
+        runtime   = app.geckoRuntime
+        isWaiting = false
     }
+
+    // ── انتظار تهيئة Runtime ──────────────────────────────────────────────
+    if (isWaiting) {
+        Box(
+            modifier         = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
+            ) {
+                CircularProgressIndicator()
+                Text(
+                    text  = "جاري تهيئة المتصفح...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        return
+    }
+
+    // ── Runtime غير متاح → fallback إلى WebView ──────────────────────────
+    if (runtime == null) {
+        AndroidWebView(url = url, onLoading = onLoading)
+        return
+    }
+
+    // ── GeckoView (runtime مضمون غير null هنا) ───────────────────────────
+    val safeRuntime = runtime!!
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory  = { ctx ->
             GeckoView(ctx).apply {
                 val session = GeckoSession()
+
                 session.progressDelegate = object : GeckoSession.ProgressDelegate {
                     override fun onPageStart(session: GeckoSession, url: String) {
                         onLoading(true)
@@ -146,7 +181,8 @@ private fun GeckoWebView(
                         onLoading(false)
                     }
                 }
-                session.open(runtime)
+
+                session.open(safeRuntime)
                 setSession(session)
                 session.loadUri(url)
             }
@@ -154,12 +190,12 @@ private fun GeckoWebView(
     )
 }
 
-// ── AndroidView WebView ───────────────────────────────────────────────────────
+// ── AndroidWebView ────────────────────────────────────────────────────────────
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun AndroidWebView(
-    url: String,
+    url:       String,
     onLoading: (Boolean) -> Unit
 ) {
     AndroidView(
@@ -167,32 +203,36 @@ private fun AndroidWebView(
         factory  = { ctx ->
             WebView(ctx).apply {
                 settings.apply {
-                    javaScriptEnabled        = true
-                    domStorageEnabled        = true
-                    userAgentString          =
+                    javaScriptEnabled   = true
+                    domStorageEnabled   = true
+                    userAgentString     =
                         "Mozilla/5.0 (Linux; Android 10; Redmi 8) " +
                         "AppleWebKit/537.36 (KHTML, like Gecko) " +
                         "Chrome/152.0.0.0 Mobile Safari/537.36"
-                    mixedContentMode         = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    mixedContentMode    = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     setSupportZoom(true)
-                    builtInZoomControls      = true
-                    displayZoomControls      = false
+                    builtInZoomControls = true
+                    displayZoomControls = false
                 }
+
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(
-                        view: WebView?, url: String?, favicon: android.graphics.Bitmap?
-                    ) { onLoading(true) }
+                        view:    WebView?,
+                        url:     String?,
+                        favicon: android.graphics.Bitmap?
+                    ) {
+                        onLoading(true)
+                    }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
-                        // إخفاء علامات WebView
                         evaluateJavascript(
-                            """
-                            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                            """.trimIndent(), null
+                            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});",
+                            null
                         )
                         onLoading(false)
                     }
                 }
+
                 webChromeClient = WebChromeClient()
                 loadUrl(url)
             }
