@@ -4,16 +4,12 @@ import android.app.Application
 import android.util.Log
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.repository.WebPlatformRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 
 class AichatApp : Application() {
 
-    // Gecko nullable — يُنشأ بشكل غير متزامن
+    // ✅ Lazy — لا يُنشأ في onCreate
     @Volatile
     var geckoRuntime: GeckoRuntime? = null
         private set
@@ -21,13 +17,10 @@ class AichatApp : Application() {
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
-    // Scope للعمليات الخلفية
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-
     override fun onCreate() {
         super.onCreate()
 
-        // ── Database أولاً (سريع) ─────────────────────────────────────────
+        // Database فقط — سريع وآمن
         try {
             val db = ChatDatabase.getDatabase(this)
             webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
@@ -37,24 +30,26 @@ class AichatApp : Application() {
             throw e
         }
 
-        // ── GeckoRuntime على Main بعد تهيئة الـ UI ────────────────────────
-        // GeckoRuntime يجب أن يُنشأ على Main Thread لكن بعد أن يصبح جاهزاً
-        appScope.launch {
-            try {
-                if (geckoRuntime == null) {
-                    geckoRuntime = GeckoRuntime.create(
-                        this@AichatApp,
-                        GeckoRuntimeSettings.Builder()
-                            .javaScriptEnabled(true)
-                            .consoleOutput(false)
-                            .build()
-                    )
-                    Log.d("AichatApp", "✅ GeckoRuntime ready")
-                }
-            } catch (e: Exception) {
-                Log.e("AichatApp", "❌ GeckoRuntime failed: ${e.message}", e)
-                geckoRuntime = null
+        Log.d("AichatApp", "✅ App started — Gecko will init on demand")
+    }
+
+    // ✅ ينشئ GeckoRuntime عند الحاجة فقط (Lazy)
+    @Synchronized
+    fun getOrCreateGeckoRuntime(): GeckoRuntime? {
+        if (geckoRuntime != null) return geckoRuntime
+
+        return try {
+            val settings = GeckoRuntimeSettings.Builder()
+                .aboutConfigEnabled(false)
+                .build()
+
+            GeckoRuntime.create(applicationContext, settings).also {
+                geckoRuntime = it
+                Log.d("AichatApp", "✅ GeckoRuntime created on demand")
             }
+        } catch (e: Exception) {
+            Log.e("AichatApp", "❌ GeckoRuntime failed: ${e.message}", e)
+            null
         }
     }
 }
