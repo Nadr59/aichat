@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,6 +33,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,17 +53,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.AichatApp
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
 
-/**
- * شاشة GeckoView المدمجة.
- *
- * @param url   الرابط المطلوب فتحه
- * @param title عنوان المنصة (للـ TopAppBar)
- * @param onBack دالة الرجوع
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GeckoTestScreen(
@@ -70,14 +66,46 @@ fun GeckoTestScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val app = context.applicationContext as AichatApp
 
-    // ── الحصول على GeckoRuntime من AichatApp ──────────────────────────────
-    val runtime = remember {
-        (context.applicationContext as AichatApp).geckoRuntime
+    // ── انتظر حتى يصبح GeckoRuntime جاهزاً ──────────────────────────────
+    var runtime by remember { mutableStateOf<GeckoRuntime?>(app.geckoRuntime) }
+    var isWaiting by remember { mutableStateOf(app.geckoRuntime == null) }
+
+    LaunchedEffect(Unit) {
+        if (app.geckoRuntime == null) {
+            var attempts = 0
+            while (app.geckoRuntime == null && attempts < 20) {
+                kotlinx.coroutines.delay(500)
+                attempts++
+            }
+        }
+        runtime = app.geckoRuntime
+        isWaiting = false
     }
 
-    // إذا لم يكن Runtime متاحاً (نادر جداً)
+    // ── شاشة انتظار ───────────────────────────────────────────────────────
+    if (isWaiting) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                CircularProgressIndicator()
+                Text(
+                    text = "جاري تهيئة المتصفح...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        return
+    }
+
+    // ── Runtime غير متاح نهائياً ──────────────────────────────────────────
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
@@ -92,13 +120,15 @@ fun GeckoTestScreen(
     }
 
     // ── الحالة ────────────────────────────────────────────────────────────
-    var isLoading     by remember { mutableStateOf(true) }
-    var progress      by remember { mutableIntStateOf(0) }
-    var canGoBack     by remember { mutableStateOf(false) }
-    var currentUrl    by remember { mutableStateOf(url) }
-    var currentTitle  by remember { mutableStateOf(title) }
-    var loadError     by remember { mutableStateOf<String?>(null) }
-    var geckoViewRef  by remember { mutableStateOf<GeckoView?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var isLoading    by remember { mutableStateOf(true) }
+    var progress     by remember { mutableIntStateOf(0) }
+    var canGoBack    by remember { mutableStateOf(false) }
+    var currentUrl   by remember { mutableStateOf(url) }
+    var currentTitle by remember { mutableStateOf(title) }
+    var loadError    by remember { mutableStateOf<String?>(null) }
+    var geckoViewRef by remember { mutableStateOf<GeckoView?>(null) }
 
     // ── الجلسة ────────────────────────────────────────────────────────────
     val session = remember {
@@ -150,10 +180,14 @@ fun GeckoTestScreen(
                 ): GeckoResult<String>? {
                     isLoading = false
                     loadError = when (error.category) {
-                        WebRequestError.ERROR_CATEGORY_NETWORK  -> "تعذر الاتصال بالإنترنت"
-                        WebRequestError.ERROR_CATEGORY_URI      -> "الرابط غير صالح"
-                        WebRequestError.ERROR_CATEGORY_SECURITY -> "مشكلة في شهادة الأمان"
-                        else                                    -> "حدث خطأ أثناء تحميل الصفحة"
+                        WebRequestError.ERROR_CATEGORY_NETWORK  ->
+                            "تعذر الاتصال بالإنترنت"
+                        WebRequestError.ERROR_CATEGORY_URI      ->
+                            "الرابط غير صالح"
+                        WebRequestError.ERROR_CATEGORY_SECURITY ->
+                            "مشكلة في شهادة الأمان"
+                        else ->
+                            "حدث خطأ أثناء تحميل الصفحة"
                     }
                     return null
                 }
@@ -183,8 +217,12 @@ fun GeckoTestScreen(
     // ── تنظيف الموارد ─────────────────────────────────────────────────────
     DisposableEffect(session) {
         onDispose {
-            geckoViewRef?.releaseSession()
-            session.close()
+            try {
+                geckoViewRef?.releaseSession()
+                session.close()
+            } catch (e: Exception) {
+                android.util.Log.w("GeckoTestScreen", "Cleanup error: ${e.message}")
+            }
         }
     }
 
@@ -203,9 +241,9 @@ fun GeckoTestScreen(
                     )
                     if (currentTitle != title && currentTitle.isNotBlank()) {
                         Text(
-                            text  = currentTitle,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text     = currentTitle,
+                            style    = MaterialTheme.typography.labelSmall,
+                            color    = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -214,15 +252,24 @@ fun GeckoTestScreen(
             },
             navigationIcon = {
                 IconButton(onClick = handleBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
+                    Icon(
+                        imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "رجوع"
+                    )
                 }
             },
             actions = {
                 IconButton(onClick = { session.reload() }) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
+                    Icon(
+                        imageVector        = Icons.Filled.Refresh,
+                        contentDescription = "تحديث"
+                    )
                 }
                 IconButton(onClick = { openExternal(context, currentUrl) }) {
-                    Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح في المتصفح")
+                    Icon(
+                        imageVector        = Icons.Filled.OpenInBrowser,
+                        contentDescription = "فتح في المتصفح"
+                    )
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -232,6 +279,7 @@ fun GeckoTestScreen(
 
         Box(modifier = Modifier.fillMaxSize()) {
 
+            // ── GeckoView ─────────────────────────────────────────────────
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory  = { ctx ->
@@ -240,8 +288,9 @@ fun GeckoTestScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
+                        // runtime مضمون غير null هنا (تحقق سابق)
                         if (!session.isOpen) {
-                            session.open(runtime)
+                            session.open(runtime!!)
                             session.loadUri(url)
                         }
                         setSession(session)
@@ -249,7 +298,7 @@ fun GeckoTestScreen(
                 }
             )
 
-            // شريط تقدم
+            // ── شريط التقدم ───────────────────────────────────────────────
             if (isLoading) {
                 LinearProgressIndicator(
                     progress = { progress / 100f },
@@ -260,11 +309,14 @@ fun GeckoTestScreen(
                 )
             }
 
-            // شاشة خطأ
+            // ── شاشة الخطأ ────────────────────────────────────────────────
             loadError?.let { message ->
                 LoadErrorView(
                     message       = message,
-                    onRetry       = { session.reload() },
+                    onRetry       = {
+                        loadError = null
+                        session.reload()
+                    },
                     onOpenBrowser = { openExternal(context, currentUrl) }
                 )
             }
@@ -281,7 +333,11 @@ private fun openExternal(context: Context, url: String) {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, "لا يوجد تطبيق لفتح هذا الرابط", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            context,
+            "لا يوجد تطبيق لفتح هذا الرابط",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 }
 
@@ -289,26 +345,38 @@ private fun openExternal(context: Context, url: String) {
 
 @Composable
 private fun LoadErrorView(
-    message: String,
-    onRetry: () -> Unit,
+    message:       String,
+    onRetry:       () -> Unit,
     onOpenBrowser: () -> Unit
 ) {
-    Column(
-        modifier              = Modifier
+    Box(
+        modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement   = Arrangement.Center,
-        horizontalAlignment   = Alignment.CenterHorizontally
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text      = "⚠️ $message",
-            style     = MaterialTheme.typography.titleMedium,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onRetry) { Text("إعادة المحاولة") }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text      = "⚠️",
+                style     = MaterialTheme.typography.displaySmall
+            )
+            Text(
+                text      = message,
+                style     = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                color     = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Button(onClick = onRetry) {
+                Text("إعادة المحاولة")
+            }
+            OutlinedButton(onClick = onOpenBrowser) {
+                Text("فتح في المتصفح الخارجي")
+            }
+        }
     }
 }
 
@@ -321,19 +389,25 @@ private fun GeckoUnavailableDialog(
 ) {
     AlertDialog(
         onDismissRequest = onBack,
-        title = { Text("⚠️ GeckoView غير متاح") },
-        text  = {
+        title = {
+            Text("⚠️ GeckoView غير متاح")
+        },
+        text = {
             Text(
                 "تعذر تهيئة محرك GeckoView على هذا الجهاز.\n\n" +
-                "يمكنك فتح $platformTitle في المتصفح الخارجي.\n" +
+                "يمكنك فتح $platformTitle في المتصفح الخارجي.\n\n" +
                 platformUrl
             )
         },
         confirmButton = {
-            Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") }
+            Button(onClick = onOpenBrowser) {
+                Text("📱 فتح في المتصفح")
+            }
         },
         dismissButton = {
-            OutlinedButton(onClick = onBack) { Text("رجوع") }
+            OutlinedButton(onClick = onBack) {
+                Text("رجوع")
+            }
         }
     )
 }
