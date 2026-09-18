@@ -2,6 +2,7 @@ package com.example.aichat.repository
 
 import android.content.Context
 import com.example.aichat.data.local.AiSettings
+import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.Message
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,98 +24,70 @@ class ChatRepository(context: Context) {
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    // ── مزودو الذكاء الاصطناعي ───────────────────────────────────────────────
+
+    private val geminiProvider = GeminiProvider(
+        settings = settings,
+        client   = client
+    )
+
+    private val mistralProvider = MistralProvider(
+        settings = settings,
+        client   = client
+    )
+
+    private val openAICompatibleProvider = OpenAICompatibleProvider(client)
+
+    private val ollamaProvider = OllamaProvider(
+        settings = settings,
+        client   = client
+    )
+
+    private val huggingFaceProvider = HuggingFaceProvider(
+        settings = settings,
+        client   = client
+    )
+
+    private val modelCatalogRepository = ModelCatalogRepository(settings)
+
+    // ── عداد طلبات Custom ────────────────────────────────────────────────────
+
+    private val _customRequestCount = MutableStateFlow(0)
+    val customRequestCount: StateFlow<Int> = _customRequestCount.asStateFlow()
+
     // ============================================================
-    // مزودو الذكاء الاصطناعي
+    // بناء System Prompt
     // ============================================================
 
-    private val geminiProvider =
-        GeminiProvider(
-            settings = settings,
-            client = client
+    /**
+     * يبني System Prompt من:
+     * 1. وثيقة الدقة (إذا كانت مفعّلة)
+     * 2. التعليمات المخصصة من الإعدادات
+     * 3. سياق الذاكرة من الـ RAG
+     */
+    private fun buildSystemPrompt(memoryContext: String): String =
+        SystemPrompt.build(
+            memoryContext     = memoryContext,
+            customInstruction = settings.customSystemInstruction,
+            includeAccuracy   = settings.accuracyPromptEnabled
         )
 
-    private val mistralProvider =
-        MistralProvider(
-            settings = settings,
-            client = client
-        )
-
-    private val openAICompatibleProvider =
-        OpenAICompatibleProvider(client)
-
-    private val ollamaProvider =
-        OllamaProvider(
-            settings = settings,
-            client = client
-        )
-
-    private val huggingFaceProvider =
-        HuggingFaceProvider(
-            settings = settings,
-            client = client
-        )
-
     // ============================================================
-    // عداد طلبات Custom
+    // إعدادات المحادثة
     // ============================================================
 
-    private val _customRequestCount =
-        MutableStateFlow(0)
-
-    val customRequestCount: StateFlow<Int> =
-        _customRequestCount.asStateFlow()
-
-    // ============================================================
-    // مستودع قوائم النماذج
-    // ============================================================
-
-    private val modelCatalogRepository =
-        ModelCatalogRepository(settings)
-
-    // ============================================================
-    // إعدادات تاريخ المحادثة
-    // ============================================================
-
-    private fun getMaxHistory(
-        provider: String,
-        model: String
-    ): Int = when {
-
-        provider == "groq" ->
-            6
-
-        provider == "mistral" ->
-            6
-
-        provider == "openrouter" &&
-            model.contains(":free") ->
-            6
-
-        else ->
-            10
+    private fun getMaxHistory(provider: String, model: String): Int = when {
+        provider == "groq"                                          -> 6
+        provider == "mistral"                                       -> 6
+        provider == "openrouter" && model.contains(":free")        -> 6
+        else                                                        -> 10
     }
 
-    // ============================================================
-    // الحد الأقصى للتوكنات
-    // ============================================================
-
-    private fun getMaxTokens(
-        provider: String,
-        model: String
-    ): Int = when {
-
-        provider == "groq" ->
-            2048
-
-        provider == "mistral" ->
-            2048
-
-        provider == "openrouter" &&
-            model.contains(":free") ->
-            2048
-
-        else ->
-            4096
+    private fun getMaxTokens(provider: String, model: String): Int = when {
+        provider == "groq"                                          -> 2048
+        provider == "mistral"                                       -> 2048
+        provider == "openrouter" && model.contains(":free")        -> 2048
+        else                                                        -> 4096
     }
 
     // ============================================================
@@ -122,364 +95,162 @@ class ChatRepository(context: Context) {
     // ============================================================
 
     suspend fun getAvailableModels(
-        provider: String,
+        provider:  String,
         forImages: Boolean = false
     ) = withContext(Dispatchers.IO) {
 
-        val apiKey =
-            when (provider.lowercase().trim()) {
+        val apiKey = when (provider.lowercase().trim()) {
+            "gemini"                       -> settings.geminiKey
+            "openrouter"                   -> settings.openrouterKey
+            "openai"                       -> settings.openaiKey
+            "mistral"                      -> settings.mistralKey
+            "groq"                         -> settings.groqKey
+            "nvidia"                       -> settings.nvidiaKey
+            "huggingface", "hugging face",
+            "hf"                           -> settings.huggingfaceKey
+            else                           -> ""
+        }
 
-                "gemini" ->
-                    settings.geminiKey
-
-                "openrouter" ->
-                    settings.openrouterKey
-
-                "openai" ->
-                    settings.openaiKey
-
-                "mistral" ->
-                    settings.mistralKey
-
-                "groq" ->
-                    settings.groqKey
-
-                "nvidia" ->
-                    settings.nvidiaKey
-
-                "huggingface",
-                "hugging face",
-                "hf" ->
-                    settings.huggingfaceKey
-
-                else ->
-                    ""
-            }
-
-        modelCatalogRepository.getModels(
-            provider = provider,
-            apiKey = apiKey
-        )
+        modelCatalogRepository.getModels(provider = provider, apiKey = apiKey)
     }
 
     // ============================================================
-    // إرسال الرسالة الرئيسية
+    // إرسال الرسالة — System Prompt يُمرَّر لكل مزود
     // ============================================================
 
     suspend fun sendMessage(
-        history: List<Message>,
-        userMessage: String,
-        imageBase64: String? = null,
-        memoryContext: String = ""
+        history:       List<Message>,
+        userMessage:   String,
+        imageBase64:   String? = null,
+        memoryContext: String  = ""
     ): String = withContext(Dispatchers.IO) {
+
+        // ✅ بناء System Prompt مرة واحدة لكل الطلبات
+        val systemPrompt = buildSystemPrompt(memoryContext)
 
         when (settings.provider.lowercase().trim()) {
 
-            // ----------------------------------------------------
-            // Gemini
-            // ----------------------------------------------------
+            // ── Gemini ────────────────────────────────────────────────────
+            "gemini" -> geminiProvider.send(
+                history       = history,
+                userMessage   = userMessage,
+                imageBase64   = imageBase64,
+                memoryContext = memoryContext,
+                systemPrompt  = systemPrompt
+            )
 
-            "gemini" ->
-
-                geminiProvider.send(
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    memoryContext = memoryContext
+            // ── OpenRouter ────────────────────────────────────────────────
+            "openrouter" -> openAICompatibleProvider.send(
+                baseUrl      = "https://openrouter.ai/api/v1/chat/completions",
+                apiKey       = settings.openrouterKey,
+                model        = settings.openrouterModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "OpenRouter",
+                maxHistory   = getMaxHistory("openrouter", settings.openrouterModel),
+                maxTokens    = getMaxTokens("openrouter", settings.openrouterModel),
+                memoryContext = memoryContext,
+                systemPrompt  = systemPrompt,
+                extraHeaders  = mapOf(
+                    "HTTP-Referer" to "https://github.com/",
+                    "X-Title"      to "AiChat"
                 )
+            )
 
-            // ----------------------------------------------------
-            // OpenRouter
-            // ----------------------------------------------------
+            // ── OpenAI ────────────────────────────────────────────────────
+            "openai" -> openAICompatibleProvider.send(
+                baseUrl      = "https://api.openai.com/v1/chat/completions",
+                apiKey       = settings.openaiKey,
+                model        = settings.openaiModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "OpenAI",
+                maxHistory   = getMaxHistory("openai", settings.openaiModel),
+                maxTokens    = getMaxTokens("openai", settings.openaiModel),
+                memoryContext = memoryContext,
+                systemPrompt  = systemPrompt
+            )
 
-            "openrouter" ->
+            // ── Mistral ───────────────────────────────────────────────────
+            "mistral" -> mistralProvider.send(
+                history       = history,
+                userMessage   = userMessage,
+                imageBase64   = imageBase64,
+                memoryContext = memoryContext,
+                systemPrompt  = systemPrompt
+            )
 
-                openAICompatibleProvider.send(
-                    baseUrl =
-                        "https://openrouter.ai/api/v1/chat/completions",
+            // ── Hugging Face ──────────────────────────────────────────────
+            "huggingface" -> huggingFaceProvider.send(
+                history       = history,
+                userMessage   = userMessage,
+                memoryContext = memoryContext,
+                systemPrompt  = systemPrompt
+            )
 
-                    apiKey =
-                        settings.openrouterKey,
+            // ── Groq ──────────────────────────────────────────────────────
+            "groq" -> openAICompatibleProvider.send(
+                baseUrl      = "https://api.groq.com/openai/v1/chat/completions",
+                apiKey       = settings.groqKey,
+                model        = settings.groqModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "Groq",
+                maxHistory   = getMaxHistory("groq", settings.groqModel),
+                maxTokens    = getMaxTokens("groq", settings.groqModel),
+                memoryContext = memoryContext,
+                systemPrompt  = systemPrompt
+            )
 
-                    model =
-                        settings.openrouterModel,
+            // ── NVIDIA ────────────────────────────────────────────────────
+            "nvidia" -> openAICompatibleProvider.send(
+                baseUrl      = "https://integrate.api.nvidia.com/v1/chat/completions",
+                apiKey       = settings.nvidiaKey,
+                model        = settings.nvidiaModel,
+                history      = history,
+                userMessage  = userMessage,
+                imageBase64  = imageBase64,
+                providerName = "NVIDIA",
+                maxHistory   = getMaxHistory("nvidia", settings.nvidiaModel),
+                maxTokens    = getMaxTokens("nvidia", settings.nvidiaModel),
+                memoryContext = memoryContext,
+                systemPrompt  = systemPrompt
+            )
 
-                    history =
-                        history,
+            // ── Ollama ────────────────────────────────────────────────────
+            "ollama" -> ollamaProvider.send(
+                userMessage   = userMessage,
+                memoryContext = memoryContext,
+                systemPrompt  = systemPrompt
+            )
 
-                    userMessage =
-                        userMessage,
-
-                    imageBase64 =
-                        imageBase64,
-
-                    providerName =
-                        "OpenRouter",
-
-                    maxHistory =
-                        getMaxHistory(
-                            provider = "openrouter",
-                            model = settings.openrouterModel
-                        ),
-
-                    maxTokens =
-                        getMaxTokens(
-                            provider = "openrouter",
-                            model = settings.openrouterModel
-                        ),
-
-                    memoryContext =
-                        memoryContext,
-
-                    extraHeaders = mapOf(
-                        "HTTP-Referer" to
-                            "https://github.com/",
-
-                        "X-Title" to
-                            "AiChat"
-                    )
-                )
-
-            // ----------------------------------------------------
-            // OpenAI
-            // ----------------------------------------------------
-
-            "openai" ->
-
-                openAICompatibleProvider.send(
-                    baseUrl =
-                        "https://api.openai.com/v1/chat/completions",
-
-                    apiKey =
-                        settings.openaiKey,
-
-                    model =
-                        settings.openaiModel,
-
-                    history =
-                        history,
-
-                    userMessage =
-                        userMessage,
-
-                    imageBase64 =
-                        imageBase64,
-
-                    providerName =
-                        "OpenAI",
-
-                    maxHistory =
-                        getMaxHistory(
-                            provider = "openai",
-                            model = settings.openaiModel
-                        ),
-
-                    maxTokens =
-                        getMaxTokens(
-                            provider = "openai",
-                            model = settings.openaiModel
-                        ),
-
-                    memoryContext =
-                        memoryContext
-                )
-
-            // ----------------------------------------------------
-            // Mistral
-            // ----------------------------------------------------
-
-            "mistral" ->
-
-                mistralProvider.send(
-                    history = history,
-                    userMessage = userMessage,
-                    imageBase64 = imageBase64,
-                    memoryContext = memoryContext
-                )
-
-            // ----------------------------------------------------
-            // Hugging Face
-            // ----------------------------------------------------
-
-            "huggingface" ->
-    huggingFaceProvider.send(
-        history = history,
-        userMessage = userMessage,
-        memoryContext = memoryContext
-    )
-
-            // ----------------------------------------------------
-            // Groq
-            // ----------------------------------------------------
-
-            "groq" ->
-
-                openAICompatibleProvider.send(
-                    baseUrl =
-                        "https://api.groq.com/openai/v1/chat/completions",
-
-                    apiKey =
-                        settings.groqKey,
-
-                    model =
-                        settings.groqModel,
-
-                    history =
-                        history,
-
-                    userMessage =
-                        userMessage,
-
-                    imageBase64 =
-                        imageBase64,
-
-                    providerName =
-                        "Groq",
-
-                    maxHistory =
-                        getMaxHistory(
-                            provider = "groq",
-                            model = settings.groqModel
-                        ),
-
-                    maxTokens =
-                        getMaxTokens(
-                            provider = "groq",
-                            model = settings.groqModel
-                        ),
-
-                    memoryContext =
-                        memoryContext
-                )
-
-            // ----------------------------------------------------
-            // NVIDIA
-            // ----------------------------------------------------
-
-            "nvidia" ->
-
-                openAICompatibleProvider.send(
-                    baseUrl =
-                        "https://integrate.api.nvidia.com/v1/chat/completions",
-
-                    apiKey =
-                        settings.nvidiaKey,
-
-                    model =
-                        settings.nvidiaModel,
-
-                    history =
-                        history,
-
-                    userMessage =
-                        userMessage,
-
-                    imageBase64 =
-                        imageBase64,
-
-                    providerName =
-                        "NVIDIA",
-
-                    maxHistory =
-                        getMaxHistory(
-                            provider = "nvidia",
-                            model = settings.nvidiaModel
-                        ),
-
-                    maxTokens =
-                        getMaxTokens(
-                            provider = "nvidia",
-                            model = settings.nvidiaModel
-                        ),
-
-                    memoryContext =
-                        memoryContext
-                )
-
-            // ----------------------------------------------------
-            // Ollama
-            // ----------------------------------------------------
-
-            "ollama" ->
-    ollamaProvider.send(
-        userMessage = userMessage,
-        memoryContext = memoryContext
-    )
-
-            // ----------------------------------------------------
-            // Custom
-            // ----------------------------------------------------
-
+            // ── Custom ────────────────────────────────────────────────────
             "custom" -> {
-
-                val url =
-                    settings.customUrl.trim()
-
-                if (url.isBlank()) {
-
-                    throw IOException(
-                        "Custom: رابط الخادم فارغ"
-                    )
-                }
+                val url = settings.customUrl.trim()
+                if (url.isBlank()) throw IOException("Custom: رابط الخادم فارغ")
 
                 openAICompatibleProvider.send(
-                    baseUrl =
-                        url,
-
-                    apiKey =
-                        settings.customKey,
-
-                    model =
-                        settings.customModel,
-
-                    history =
-                        history,
-
-                    userMessage =
-                        userMessage,
-
-                    imageBase64 =
-                        imageBase64,
-
-                    providerName =
-                        "Custom",
-
-                    maxHistory =
-                        getMaxHistory(
-                            provider = "custom",
-                            model = settings.customModel
-                        ),
-
-                    maxTokens =
-                        getMaxTokens(
-                            provider = "custom",
-                            model = settings.customModel
-                        ),
-
-                    memoryContext =
-                        memoryContext,
-
-                    forceVision =
-                        true,
-
-                    onCustomRequest = {
-
-                        _customRequestCount.update {
-                            it + 1
-                        }
-                    }
+                    baseUrl      = url,
+                    apiKey       = settings.customKey,
+                    model        = settings.customModel,
+                    history      = history,
+                    userMessage  = userMessage,
+                    imageBase64  = imageBase64,
+                    providerName = "Custom",
+                    maxHistory   = getMaxHistory("custom", settings.customModel),
+                    maxTokens    = getMaxTokens("custom", settings.customModel),
+                    memoryContext = memoryContext,
+                    systemPrompt  = systemPrompt,
+                    forceVision   = true,
+                    onCustomRequest = { _customRequestCount.update { it + 1 } }
                 )
             }
 
-            // ----------------------------------------------------
-            // مزود غير معروف
-            // ----------------------------------------------------
-
-            else ->
-
-                throw IOException(
-                    "مزود غير معروف: ${settings.provider}"
-                )
+            // ── مزود غير معروف ────────────────────────────────────────────
+            else -> throw IOException("مزود غير معروف: ${settings.provider}")
         }
     }
 }
