@@ -190,6 +190,17 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit()
             .putString("custom_model", value.trim())
             .apply()
+            // ── أضف في AiSettings.kt ─────────────────────────────────────────────────────
+
+// تفعيل وثيقة الدقة
+var accuracyPromptEnabled: Boolean
+    get() = prefs.getBoolean("accuracy_prompt_enabled", true)
+    set(value) = prefs.edit().putBoolean("accuracy_prompt_enabled", value).apply()
+
+// تعليمات مخصصة إضافية
+var customSystemInstruction: String
+    get() = prefs.getString("custom_system_instruction", "") ?: ""
+    set(value) = prefs.edit().putString("custom_system_instruction", value).apply()
 
     // Web
 
