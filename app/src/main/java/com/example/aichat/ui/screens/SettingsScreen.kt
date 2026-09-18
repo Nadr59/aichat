@@ -624,6 +624,75 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(8.dp))
 
+            // ── System Prompt Section ─────────────────────────────────────────────────────
+
+HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+Text(
+    text       = "🎯 وثيقة الدقة والموثوقية",
+    fontWeight = FontWeight.Bold,
+    style      = MaterialTheme.typography.titleSmall
+)
+
+// تفعيل/تعطيل الوثيقة
+var accuracyEnabled by remember {
+    mutableStateOf(settings.accuracyPromptEnabled)
+}
+
+Card(
+    colors = CardDefaults.cardColors(
+        containerColor = if (accuracyEnabled)
+            MaterialTheme.colorScheme.primaryContainer
+        else
+            MaterialTheme.colorScheme.surfaceVariant
+    ),
+    shape  = RoundedCornerShape(12.dp),
+    modifier = Modifier.fillMaxWidth()
+) {
+    Row(
+        modifier          = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text       = "تفعيل وثيقة الدقة",
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text  = "تُمرَّر مع كل طلب لتقليل الهلوسة",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked         = accuracyEnabled,
+            onCheckedChange = {
+                accuracyEnabled              = it
+                settings.accuracyPromptEnabled = it
+                saved = false
+            }
+        )
+    }
+}
+
+// تعليمات مخصصة إضافية
+var customInstruction by remember {
+    mutableStateOf(settings.customSystemInstruction)
+}
+
+OutlinedTextField(
+    value         = customInstruction,
+    onValueChange = { customInstruction = it; saved = false },
+    modifier      = Modifier.fillMaxWidth(),
+    label         = { Text("تعليمات إضافية (اختياري)") },
+    placeholder   = { Text("مثال: أجب دائماً باللغة العربية الفصحى") },
+    minLines      = 2,
+    maxLines      = 5,
+    shape         = RoundedCornerShape(12.dp)
+)
+
             // ====================================================
             // زر الحفظ
             // ====================================================
@@ -649,6 +718,8 @@ fun SettingsScreen(
                     settings.customUrl = customUrl
                     settings.customKey = customKey
                     settings.customModel = customModel
+                    settings.accuracyPromptEnabled    = accuracyEnabled
+                     settings.customSystemInstruction  = customInstruction
                     saved = true
                 },
                 modifier = Modifier
