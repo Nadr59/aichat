@@ -39,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch          // ✅ الاستيراد المفقود
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -96,6 +97,10 @@ fun SettingsScreen(
     var customKey by remember { mutableStateOf(settings.customKey) }
     var customModel by remember { mutableStateOf(settings.customModel) }
 
+    // ✅ نقل هذين المتغيرين إلى مستوى الـ Composable الرئيسي
+    var accuracyEnabled by remember { mutableStateOf(settings.accuracyPromptEnabled) }
+    var customInstruction by remember { mutableStateOf(settings.customSystemInstruction) }
+
     var showKeys by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
 
@@ -111,16 +116,16 @@ fun SettingsScreen(
     var onlyVision by remember { mutableStateOf(false) }
 
     val currentModel = when (provider) {
-        "gemini" -> geminiModel
-        "openrouter" -> openrouterModel
-        "openai" -> openaiModel
-        "mistral" -> mistralModel
-        "groq" -> groqModel
-        "nvidia" -> nvidiaModel
+        "gemini"      -> geminiModel
+        "openrouter"  -> openrouterModel
+        "openai"      -> openaiModel
+        "mistral"     -> mistralModel
+        "groq"        -> groqModel
+        "nvidia"      -> nvidiaModel
         "huggingface" -> huggingfaceModel
-        "ollama" -> ollamaModel
-        "custom" -> customModel
-        else -> ""
+        "ollama"      -> ollamaModel
+        "custom"      -> customModel
+        else          -> ""
     }
 
     // ============================================================
@@ -140,14 +145,14 @@ fun SettingsScreen(
         models = emptyList()
 
         val keyToUse = when (provider) {
-            "gemini" -> geminiKey
-            "openrouter" -> openrouterKey
-            "openai" -> openaiKey
-            "mistral" -> mistralKey
-            "groq" -> groqKey
-            "nvidia" -> nvidiaKey
+            "gemini"      -> geminiKey
+            "openrouter"  -> openrouterKey
+            "openai"      -> openaiKey
+            "mistral"     -> mistralKey
+            "groq"        -> groqKey
+            "nvidia"      -> nvidiaKey
             "huggingface" -> huggingfaceKey
-            else -> ""
+            else          -> ""
         }
 
         val needsKey = provider != "huggingface"
@@ -161,7 +166,7 @@ fun SettingsScreen(
         try {
             models = catalog.getModels(
                 provider = provider,
-                apiKey = keyToUse
+                apiKey   = keyToUse
             )
         } catch (e: Exception) {
             modelsError = e.message ?: "تعذر تحميل النماذج"
@@ -180,10 +185,10 @@ fun SettingsScreen(
         } else {
             listOf(
                 ModelInfo(
-                    id = currentModel,
-                    name = "$currentModel 💾",
-                    provider = provider,
-                    isFree = currentModel.contains(":free"),
+                    id         = currentModel,
+                    name       = "$currentModel 💾",
+                    provider   = provider,
+                    isFree     = currentModel.contains(":free"),
                     recommended = false
                 )
             ) + models
@@ -191,20 +196,20 @@ fun SettingsScreen(
     }
 
     val filteredModels = modelsWithSaved
-        .filter { !onlyFree || it.isFree }
+        .filter { !onlyFree        || it.isFree }
         .filter { !onlyRecommended || it.recommended }
-        .filter { !onlyVision || it.supportsVision }
+        .filter { !onlyVision      || it.supportsVision }
 
     val providers = listOf(
-        "gemini" to "Google Gemini ⭐",
-        "openrouter" to "OpenRouter",
-        "openai" to "OpenAI",
-        "mistral" to "Mistral AI",
-        "groq" to "Groq",
-        "nvidia" to "NVIDIA NIM",
+        "gemini"      to "Google Gemini ⭐",
+        "openrouter"  to "OpenRouter",
+        "openai"      to "OpenAI",
+        "mistral"     to "Mistral AI",
+        "groq"        to "Groq",
+        "nvidia"      to "NVIDIA NIM",
         "huggingface" to "Hugging Face 🤗",
-        "ollama" to "Ollama 🦙 (محلي)",
-        "custom" to "Custom API"
+        "ollama"      to "Ollama 🦙 (محلي)",
+        "custom"      to "Custom API"
     )
 
     // ============================================================
@@ -259,11 +264,11 @@ fun SettingsScreen(
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "الذكريات",
+                            text       = "الذكريات",
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "عرض وتعديل وحذف الذكريات المحفوظة",
+                            text  = "عرض وتعديل وحذف الذكريات المحفوظة",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -280,13 +285,13 @@ fun SettingsScreen(
                 Card(
                     onClick = {
                         if (provider != key) {
-                            provider = key
-                            saved = false
-                            onlyFree = false
+                            provider       = key
+                            saved          = false
+                            onlyFree       = false
                             onlyRecommended = false
-                            onlyVision = false
-                            models = emptyList()
-                            modelsError = null
+                            onlyVision     = false
+                            models         = emptyList()
+                            modelsError    = null
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -304,11 +309,11 @@ fun SettingsScreen(
                     ) {
                         RadioButton(
                             selected = provider == key,
-                            onClick = null
+                            onClick  = null
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = name,
+                            text       = name,
                             fontWeight = if (provider == key)
                                 FontWeight.Bold
                             else
@@ -349,25 +354,25 @@ fun SettingsScreen(
                         "احصل على مفتاح مجاني من:\naistudio.google.com/apikey"
                     )
                     KeyField(
-                        label = "Gemini API Key",
-                        value = geminiKey,
+                        label         = "Gemini API Key",
+                        value         = geminiKey,
                         onValueChange = { geminiKey = it; saved = false },
-                        showKey = showKeys,
-                        placeholder = "AIza..."
+                        showKey       = showKeys,
+                        placeholder   = "AIza..."
                     )
                     DynamicModelSelector(
-                        models = filteredModels,
-                        selected = geminiModel,
-                        loading = loadingModels,
-                        error = modelsError,
-                        onlyFree = onlyFree,
-                        onlyRecommended = onlyRecommended,
-                        onlyVision = onlyVision,
-                        onFreeChange = { onlyFree = it },
+                        models           = filteredModels,
+                        selected         = geminiModel,
+                        loading          = loadingModels,
+                        error            = modelsError,
+                        onlyFree         = onlyFree,
+                        onlyRecommended  = onlyRecommended,
+                        onlyVision       = onlyVision,
+                        onFreeChange     = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange = { onlyVision = it },
-                        onSelect = { geminiModel = it; saved = false },
-                        onRefresh = { refreshTrigger++ }
+                        onVisionChange   = { onlyVision = it },
+                        onSelect         = { geminiModel = it; saved = false },
+                        onRefresh        = { refreshTrigger++ }
                     )
                 }
 
@@ -377,58 +382,58 @@ fun SettingsScreen(
                         "بعض النماذج مجانية تماماً."
                     )
                     KeyField(
-                        label = "OpenRouter API Key",
-                        value = openrouterKey,
+                        label         = "OpenRouter API Key",
+                        value         = openrouterKey,
                         onValueChange = { openrouterKey = it; saved = false },
-                        showKey = showKeys,
-                        placeholder = "sk-or-..."
+                        showKey       = showKeys,
+                        placeholder   = "sk-or-..."
                     )
                     DynamicModelSelector(
-                        models = filteredModels,
-                        selected = openrouterModel,
-                        loading = loadingModels,
-                        error = modelsError,
-                        onlyFree = onlyFree,
-                        onlyRecommended = onlyRecommended,
-                        onlyVision = onlyVision,
-                        onFreeChange = { onlyFree = it },
+                        models           = filteredModels,
+                        selected         = openrouterModel,
+                        loading          = loadingModels,
+                        error            = modelsError,
+                        onlyFree         = onlyFree,
+                        onlyRecommended  = onlyRecommended,
+                        onlyVision       = onlyVision,
+                        onFreeChange     = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange = { onlyVision = it },
-                        onSelect = { openrouterModel = it; saved = false },
-                        onRefresh = { refreshTrigger++ }
+                        onVisionChange   = { onlyVision = it },
+                        onSelect         = { openrouterModel = it; saved = false },
+                        onRefresh        = { refreshTrigger++ }
                     )
                     OutlinedTextField(
-                        value = openrouterModel,
+                        value         = openrouterModel,
                         onValueChange = { openrouterModel = it; saved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("أو اكتب اسم النموذج يدوياً") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
                     )
                 }
 
                 "openai" -> {
                     InfoCard("احصل على مفتاح من:\nplatform.openai.com")
                     KeyField(
-                        label = "OpenAI API Key",
-                        value = openaiKey,
+                        label         = "OpenAI API Key",
+                        value         = openaiKey,
                         onValueChange = { openaiKey = it; saved = false },
-                        showKey = showKeys,
-                        placeholder = "sk-..."
+                        showKey       = showKeys,
+                        placeholder   = "sk-..."
                     )
                     DynamicModelSelector(
-                        models = filteredModels,
-                        selected = openaiModel,
-                        loading = loadingModels,
-                        error = modelsError,
-                        onlyFree = onlyFree,
-                        onlyRecommended = onlyRecommended,
-                        onlyVision = onlyVision,
-                        onFreeChange = { onlyFree = it },
+                        models           = filteredModels,
+                        selected         = openaiModel,
+                        loading          = loadingModels,
+                        error            = modelsError,
+                        onlyFree         = onlyFree,
+                        onlyRecommended  = onlyRecommended,
+                        onlyVision       = onlyVision,
+                        onFreeChange     = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange = { onlyVision = it },
-                        onSelect = { openaiModel = it; saved = false },
-                        onRefresh = { refreshTrigger++ }
+                        onVisionChange   = { onlyVision = it },
+                        onSelect         = { openaiModel = it; saved = false },
+                        onRefresh        = { refreshTrigger++ }
                     )
                 }
 
@@ -438,58 +443,58 @@ fun SettingsScreen(
                         "pixtral-12b-2409 موصى به للصور."
                     )
                     KeyField(
-                        label = "Mistral API Key",
-                        value = mistralKey,
+                        label         = "Mistral API Key",
+                        value         = mistralKey,
                         onValueChange = { mistralKey = it; saved = false },
-                        showKey = showKeys,
-                        placeholder = "key..."
+                        showKey       = showKeys,
+                        placeholder   = "key..."
                     )
                     DynamicModelSelector(
-                        models = filteredModels,
-                        selected = mistralModel,
-                        loading = loadingModels,
-                        error = modelsError,
-                        onlyFree = onlyFree,
-                        onlyRecommended = onlyRecommended,
-                        onlyVision = onlyVision,
-                        onFreeChange = { onlyFree = it },
+                        models           = filteredModels,
+                        selected         = mistralModel,
+                        loading          = loadingModels,
+                        error            = modelsError,
+                        onlyFree         = onlyFree,
+                        onlyRecommended  = onlyRecommended,
+                        onlyVision       = onlyVision,
+                        onFreeChange     = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange = { onlyVision = it },
-                        onSelect = { mistralModel = it; saved = false },
-                        onRefresh = { refreshTrigger++ }
+                        onVisionChange   = { onlyVision = it },
+                        onSelect         = { mistralModel = it; saved = false },
+                        onRefresh        = { refreshTrigger++ }
                     )
                 }
 
                 "groq" -> {
                     InfoCard("احصل على مفتاح من:\nconsole.groq.com")
                     KeyField(
-                        label = "Groq API Key",
-                        value = groqKey,
+                        label         = "Groq API Key",
+                        value         = groqKey,
                         onValueChange = { groqKey = it; saved = false },
-                        showKey = showKeys,
-                        placeholder = "gsk_..."
+                        showKey       = showKeys,
+                        placeholder   = "gsk_..."
                     )
                     DynamicModelSelector(
-                        models = filteredModels,
-                        selected = groqModel,
-                        loading = loadingModels,
-                        error = modelsError,
-                        onlyFree = onlyFree,
-                        onlyRecommended = onlyRecommended,
-                        onlyVision = onlyVision,
-                        onFreeChange = { onlyFree = it },
+                        models           = filteredModels,
+                        selected         = groqModel,
+                        loading          = loadingModels,
+                        error            = modelsError,
+                        onlyFree         = onlyFree,
+                        onlyRecommended  = onlyRecommended,
+                        onlyVision       = onlyVision,
+                        onFreeChange     = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange = { onlyVision = it },
-                        onSelect = { groqModel = it; saved = false },
-                        onRefresh = { refreshTrigger++ }
+                        onVisionChange   = { onlyVision = it },
+                        onSelect         = { groqModel = it; saved = false },
+                        onRefresh        = { refreshTrigger++ }
                     )
                     OutlinedTextField(
-                        value = groqModel,
+                        value         = groqModel,
                         onValueChange = { groqModel = it; saved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("أو اكتب اسم النموذج يدوياً") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
                     )
                 }
 
@@ -500,34 +505,34 @@ fun SettingsScreen(
                         "يتم تحميل قائمة النماذج تلقائياً."
                     )
                     KeyField(
-                        label = "NVIDIA API Key",
-                        value = nvidiaKey,
+                        label         = "NVIDIA API Key",
+                        value         = nvidiaKey,
                         onValueChange = { nvidiaKey = it; saved = false },
-                        showKey = showKeys,
-                        placeholder = "nvapi-..."
+                        showKey       = showKeys,
+                        placeholder   = "nvapi-..."
                     )
                     DynamicModelSelector(
-                        models = filteredModels,
-                        selected = nvidiaModel,
-                        loading = loadingModels,
-                        error = modelsError,
-                        onlyFree = onlyFree,
-                        onlyRecommended = onlyRecommended,
-                        onlyVision = onlyVision,
-                        onFreeChange = { onlyFree = it },
+                        models           = filteredModels,
+                        selected         = nvidiaModel,
+                        loading          = loadingModels,
+                        error            = modelsError,
+                        onlyFree         = onlyFree,
+                        onlyRecommended  = onlyRecommended,
+                        onlyVision       = onlyVision,
+                        onFreeChange     = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange = { onlyVision = it },
-                        onSelect = { nvidiaModel = it; saved = false },
-                        onRefresh = { refreshTrigger++ }
+                        onVisionChange   = { onlyVision = it },
+                        onSelect         = { nvidiaModel = it; saved = false },
+                        onRefresh        = { refreshTrigger++ }
                     )
                     OutlinedTextField(
-                        value = nvidiaModel,
+                        value         = nvidiaModel,
                         onValueChange = { nvidiaModel = it; saved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("أو اكتب اسم نموذج NVIDIA يدوياً") },
-                        placeholder = { Text("nvidia/nemotron-...") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("أو اكتب اسم نموذج NVIDIA يدوياً") },
+                        placeholder   = { Text("nvidia/nemotron-...") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
                     )
                 }
 
@@ -539,34 +544,34 @@ fun SettingsScreen(
                         "قد يحتاج النموذج دقيقة للتحميل أول مرة."
                     )
                     KeyField(
-                        label = "HF Token",
-                        value = huggingfaceKey,
+                        label         = "HF Token",
+                        value         = huggingfaceKey,
                         onValueChange = { huggingfaceKey = it; saved = false },
-                        showKey = showKeys,
-                        placeholder = "hf_..."
+                        showKey       = showKeys,
+                        placeholder   = "hf_..."
                     )
                     DynamicModelSelector(
-                        models = filteredModels,
-                        selected = huggingfaceModel,
-                        loading = loadingModels,
-                        error = modelsError,
-                        onlyFree = onlyFree,
-                        onlyRecommended = onlyRecommended,
-                        onlyVision = onlyVision,
-                        onFreeChange = { onlyFree = it },
+                        models           = filteredModels,
+                        selected         = huggingfaceModel,
+                        loading          = loadingModels,
+                        error            = modelsError,
+                        onlyFree         = onlyFree,
+                        onlyRecommended  = onlyRecommended,
+                        onlyVision       = onlyVision,
+                        onFreeChange     = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange = { onlyVision = it },
-                        onSelect = { huggingfaceModel = it; saved = false },
-                        onRefresh = { refreshTrigger++ }
+                        onVisionChange   = { onlyVision = it },
+                        onSelect         = { huggingfaceModel = it; saved = false },
+                        onRefresh        = { refreshTrigger++ }
                     )
                     OutlinedTextField(
-                        value = huggingfaceModel,
+                        value         = huggingfaceModel,
                         onValueChange = { huggingfaceModel = it; saved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("أو اكتب اسم النموذج يدوياً") },
-                        placeholder = { Text("username/model-name") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("أو اكتب اسم النموذج يدوياً") },
+                        placeholder   = { Text("username/model-name") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
                     )
                 }
 
@@ -577,13 +582,13 @@ fun SettingsScreen(
                         "عنوان الخادم: 127.0.0.1:11434"
                     )
                     OutlinedTextField(
-                        value = ollamaModel,
+                        value         = ollamaModel,
                         onValueChange = { ollamaModel = it; saved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("اسم نموذج Ollama") },
-                        placeholder = { Text("qwen2.5:1.5b") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("اسم نموذج Ollama") },
+                        placeholder   = { Text("qwen2.5:1.5b") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
                     )
                 }
 
@@ -593,105 +598,98 @@ fun SettingsScreen(
                         "يمكن استخدام NVIDIA أو أي خادم متوافق."
                     )
                     OutlinedTextField(
-                        value = customUrl,
+                        value         = customUrl,
                         onValueChange = { customUrl = it; saved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Server URL") },
-                        placeholder = {
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("Server URL") },
+                        placeholder   = {
                             Text("https://api.example.com/v1/chat/completions")
                         },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
                     )
                     KeyField(
-                        label = "API Key",
-                        value = customKey,
+                        label         = "API Key",
+                        value         = customKey,
                         onValueChange = { customKey = it; saved = false },
-                        showKey = showKeys,
-                        placeholder = "key... (اختياري)"
+                        showKey       = showKeys,
+                        placeholder   = "key... (اختياري)"
                     )
                     OutlinedTextField(
-                        value = customModel,
+                        value         = customModel,
                         onValueChange = { customModel = it; saved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("اسم النموذج") },
-                        placeholder = { Text("nvidia/nemotron-...") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("اسم النموذج") },
+                        placeholder   = { Text("nvidia/nemotron-...") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
                     )
                 }
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // ── System Prompt Section ─────────────────────────────────────────────────────
+            // ====================================================
+            // System Prompt Section
+            // ====================================================
 
-HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-Text(
-    text       = "🎯 وثيقة الدقة والموثوقية",
-    fontWeight = FontWeight.Bold,
-    style      = MaterialTheme.typography.titleSmall
-)
-
-// تفعيل/تعطيل الوثيقة
-var accuracyEnabled by remember {
-    mutableStateOf(settings.accuracyPromptEnabled)
-}
-
-Card(
-    colors = CardDefaults.cardColors(
-        containerColor = if (accuracyEnabled)
-            MaterialTheme.colorScheme.primaryContainer
-        else
-            MaterialTheme.colorScheme.surfaceVariant
-    ),
-    shape  = RoundedCornerShape(12.dp),
-    modifier = Modifier.fillMaxWidth()
-) {
-    Row(
-        modifier          = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text       = "تفعيل وثيقة الدقة",
-                fontWeight = FontWeight.Medium
+                text       = "🎯 وثيقة الدقة والموثوقية",
+                fontWeight = FontWeight.Bold,
+                style      = MaterialTheme.typography.titleSmall
             )
-            Text(
-                text  = "تُمرَّر مع كل طلب لتقليل الهلوسة",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Switch(
-            checked         = accuracyEnabled,
-            onCheckedChange = {
-                accuracyEnabled              = it
-                settings.accuracyPromptEnabled = it
-                saved = false
+
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (accuracyEnabled)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
+                ),
+                shape    = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text       = "تفعيل وثيقة الدقة",
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text  = "تُمرَّر مع كل طلب لتقليل الهلوسة",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    // ✅ الإصلاح: استخدام newValue بدلاً من it المبهم
+                    Switch(
+                        checked         = accuracyEnabled,
+                        onCheckedChange = { newValue ->
+                            accuracyEnabled                = newValue
+                            settings.accuracyPromptEnabled = newValue
+                            saved = false
+                        }
+                    )
+                }
             }
-        )
-    }
-}
 
-// تعليمات مخصصة إضافية
-var customInstruction by remember {
-    mutableStateOf(settings.customSystemInstruction)
-}
-
-OutlinedTextField(
-    value         = customInstruction,
-    onValueChange = { customInstruction = it; saved = false },
-    modifier      = Modifier.fillMaxWidth(),
-    label         = { Text("تعليمات إضافية (اختياري)") },
-    placeholder   = { Text("مثال: أجب دائماً باللغة العربية الفصحى") },
-    minLines      = 2,
-    maxLines      = 5,
-    shape         = RoundedCornerShape(12.dp)
-)
+            OutlinedTextField(
+                value         = customInstruction,
+                onValueChange = { customInstruction = it; saved = false },
+                modifier      = Modifier.fillMaxWidth(),
+                label         = { Text("تعليمات إضافية (اختياري)") },
+                placeholder   = { Text("مثال: أجب دائماً باللغة العربية الفصحى") },
+                minLines      = 2,
+                maxLines      = 5,
+                shape         = RoundedCornerShape(12.dp)
+            )
 
             // ====================================================
             // زر الحفظ
@@ -699,27 +697,27 @@ OutlinedTextField(
 
             Button(
                 onClick = {
-                    settings.provider = provider
-                    settings.geminiKey = geminiKey
-                    settings.geminiModel = geminiModel
-                    settings.openrouterKey = openrouterKey
-                    settings.openrouterModel = openrouterModel
-                    settings.openaiKey = openaiKey
-                    settings.openaiModel = openaiModel
-                    settings.mistralKey = mistralKey
-                    settings.mistralModel = mistralModel
-                    settings.groqKey = groqKey
-                    settings.groqModel = groqModel
-                    settings.nvidiaKey = nvidiaKey
-                    settings.nvidiaModel = nvidiaModel
-                    settings.huggingfaceKey = huggingfaceKey
-                    settings.huggingfaceModel = huggingfaceModel
-                    settings.ollamaModel = ollamaModel
-                    settings.customUrl = customUrl
-                    settings.customKey = customKey
-                    settings.customModel = customModel
-                    settings.accuracyPromptEnabled    = accuracyEnabled
-                     settings.customSystemInstruction  = customInstruction
+                    settings.provider              = provider
+                    settings.geminiKey             = geminiKey
+                    settings.geminiModel           = geminiModel
+                    settings.openrouterKey         = openrouterKey
+                    settings.openrouterModel       = openrouterModel
+                    settings.openaiKey             = openaiKey
+                    settings.openaiModel           = openaiModel
+                    settings.mistralKey            = mistralKey
+                    settings.mistralModel          = mistralModel
+                    settings.groqKey               = groqKey
+                    settings.groqModel             = groqModel
+                    settings.nvidiaKey             = nvidiaKey
+                    settings.nvidiaModel           = nvidiaModel
+                    settings.huggingfaceKey        = huggingfaceKey
+                    settings.huggingfaceModel      = huggingfaceModel
+                    settings.ollamaModel           = ollamaModel
+                    settings.customUrl             = customUrl
+                    settings.customKey             = customKey
+                    settings.customModel           = customModel
+                    settings.accuracyPromptEnabled   = accuracyEnabled
+                    settings.customSystemInstruction = customInstruction
                     saved = true
                 },
                 modifier = Modifier
@@ -741,7 +739,7 @@ OutlinedTextField(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer
                     ),
-                    shape = RoundedCornerShape(12.dp),
+                    shape    = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -756,7 +754,7 @@ OutlinedTextField(
                         Spacer(Modifier.width(8.dp))
                         Text(
                             "تم الحفظ بنجاح!",
-                            color = MaterialTheme.colorScheme.primary,
+                            color      = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -794,7 +792,6 @@ private fun DynamicModelSelector(
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
-        // رأس القسم
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -802,12 +799,12 @@ private fun DynamicModelSelector(
             Text(
                 "النموذج",
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
+                modifier   = Modifier.weight(1f)
             )
 
             if (loading) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
+                    modifier    = Modifier.size(20.dp),
                     strokeWidth = 2.dp
                 )
                 Spacer(Modifier.width(8.dp))
@@ -828,57 +825,54 @@ private fun DynamicModelSelector(
             }
         }
 
-        // فلاتر
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             FilterChip(
                 selected = onlyFree,
-                onClick = { onFreeChange(!onlyFree) },
-                label = { Text("🟢 مجاني") }
+                onClick  = { onFreeChange(!onlyFree) },
+                label    = { Text("🟢 مجاني") }
             )
             FilterChip(
                 selected = onlyRecommended,
-                onClick = { onRecommendedChange(!onlyRecommended) },
-                label = { Text("⭐ موصى به") }
+                onClick  = { onRecommendedChange(!onlyRecommended) },
+                label    = { Text("⭐ موصى به") }
             )
             FilterChip(
                 selected = onlyVision,
-                onClick = { onVisionChange(!onlyVision) },
-                label = { Text("🖼️ يدعم الصور") }
+                onClick  = { onVisionChange(!onlyVision) },
+                label    = { Text("🖼️ يدعم الصور") }
             )
         }
 
-        // رسالة الخطأ
         if (!error.isNullOrBlank()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
+                colors   = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer
                 ),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text(
-                    text = "⚠️ $error\nسيتم الاحتفاظ بالنموذج المحفوظ.",
+                    text     = "⚠️ $error\nسيتم الاحتفاظ بالنموذج المحفوظ.",
                     modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = MaterialTheme.colorScheme.onErrorContainer
                 )
             }
         }
 
-        // Dropdown النماذج
         ExposedDropdownMenuBox(
-            expanded = expanded,
+            expanded        = expanded,
             onExpandedChange = { expanded = !expanded }
         ) {
             OutlinedTextField(
-                value = selectedInfo?.let { modelLabel(it) }
+                value         = selectedInfo?.let { modelLabel(it) }
                     ?: selected.ifBlank { "اختر نموذجاً" },
                 onValueChange = {},
-                readOnly = true,
-                modifier = Modifier
+                readOnly      = true,
+                modifier      = Modifier
                     .fillMaxWidth()
                     .menuAnchor(),
-                trailingIcon = {
+                trailingIcon  = {
                     ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
                 },
                 shape = RoundedCornerShape(12.dp),
@@ -886,12 +880,12 @@ private fun DynamicModelSelector(
             )
 
             ExposedDropdownMenu(
-                expanded = expanded,
+                expanded        = expanded,
                 onDismissRequest = { expanded = false }
             ) {
                 if (models.isEmpty()) {
                     DropdownMenuItem(
-                        text = {
+                        text    = {
                             Text(
                                 if (loading) "جاري التحميل..."
                                 else "اضغط 🔄 لتحميل النماذج"
@@ -902,10 +896,10 @@ private fun DynamicModelSelector(
                 } else {
                     models.forEach { model ->
                         DropdownMenuItem(
-                            text = {
+                            text    = {
                                 Column {
                                     Text(
-                                        text = modelLabel(model),
+                                        text       = modelLabel(model),
                                         fontWeight = if (model.recommended)
                                             FontWeight.Bold
                                         else
@@ -913,7 +907,7 @@ private fun DynamicModelSelector(
                                     )
                                     if (model.contextLength > 0) {
                                         Text(
-                                            text = formatContextLength(model.contextLength),
+                                            text  = formatContextLength(model.contextLength),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -941,7 +935,7 @@ private fun modelLabel(model: ModelInfo): String = buildString {
         append(model.name)
         return@buildString
     }
-    if (model.isFree) append("🟢 ")
+    if (model.isFree)     append("🟢 ")
     if (model.recommended) append("⭐ ")
     append(model.name)
     if (model.supportsVision) append(" 🖼️")
@@ -950,8 +944,8 @@ private fun modelLabel(model: ModelInfo): String = buildString {
 private fun formatContextLength(contextLength: Long): String {
     return when {
         contextLength >= 1_000_000 -> "${contextLength / 1_000_000}M context"
-        contextLength >= 1_000 -> "${contextLength / 1_000}K context"
-        else -> "$contextLength context"
+        contextLength >= 1_000     -> "${contextLength / 1_000}K context"
+        else                       -> "$contextLength context"
     }
 }
 
@@ -961,14 +955,14 @@ private fun InfoCard(text: String) {
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
         ),
-        shape = RoundedCornerShape(12.dp),
+        shape    = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
-            text = text,
+            text     = text,
             modifier = Modifier.padding(12.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer
+            style    = MaterialTheme.typography.bodySmall,
+            color    = MaterialTheme.colorScheme.onSecondaryContainer
         )
     }
 }
@@ -982,12 +976,12 @@ private fun KeyField(
     placeholder: String
 ) {
     OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text(label) },
-        placeholder = { Text(placeholder) },
-        singleLine = true,
+        value               = value,
+        onValueChange       = onValueChange,
+        modifier            = Modifier.fillMaxWidth(),
+        label               = { Text(label) },
+        placeholder         = { Text(placeholder) },
+        singleLine          = true,
         visualTransformation = if (showKey)
             VisualTransformation.None
         else
