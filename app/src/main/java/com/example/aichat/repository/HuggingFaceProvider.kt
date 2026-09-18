@@ -2,9 +2,9 @@ package com.example.aichat.repository
 
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
@@ -16,223 +16,96 @@ class HuggingFaceProvider(
 ) {
 
     fun send(
-        history: List<Message>,
-        userMessage: String,
-        memoryContext: String = ""
+        history:       List<Message>,
+        userMessage:   String,
+        memoryContext: String = "",
+        systemPrompt:  String = ""   // ✅ جديد
     ): String {
 
-        val apiKey =
-            settings.huggingfaceKey.trim()
+        val apiKey = settings.huggingfaceKey.trim()
+        val model  = settings.huggingfaceModel.trim()
 
-        val model =
-            settings.huggingfaceModel.trim()
+        if (apiKey.isBlank()) throw IOException(
+            "Hugging Face: أدخل API Token\nمن: huggingface.co/settings/tokens"
+        )
+        if (model.isBlank()) throw IOException("Hugging Face: اختر نموذجاً")
 
-        if (apiKey.isBlank()) {
-            throw IOException(
-                "Hugging Face: أدخل API Token\n" +
-                    "من: huggingface.co/settings/tokens"
-            )
-        }
-
-        if (model.isBlank()) {
-            throw IOException(
-                "Hugging Face: اختر نموذجاً"
-            )
-        }
-
+        // ── بناء messages ─────────────────────────────────────────────────
         val messages = JSONArray()
 
-        val systemContent =
-            buildString {
+        // ✅ System Prompt — الأولوية للوثيقة الكاملة
+        val sysContent = when {
+            systemPrompt.isNotBlank()  -> systemPrompt
+            memoryContext.isNotBlank() -> "You are a helpful AI assistant.\n\n$memoryContext"
+            else                       -> "You are a helpful AI assistant."
+        }
 
-                append(
-                    "You are a helpful AI assistant."
-                )
+        messages.put(JSONObject().apply {
+            put("role", "system")
+            put("content", sysContent)
+        })
 
-                if (memoryContext.isNotBlank()) {
-                    append("\n\n")
-                    append(memoryContext)
-                }
-            }
+        history.takeLast(6).forEach { msg ->
+            messages.put(JSONObject().apply {
+                put("role", msg.role)
+                put("content", msg.content)
+            })
+        }
 
-        messages.put(
-            JSONObject().apply {
-                put(
-                    "role",
-                    "system"
-                )
-                put(
-                    "content",
-                    systemContent
-                )
-            }
-        )
+        messages.put(JSONObject().apply {
+            put("role", "user")
+            put("content", userMessage)
+        })
 
-        history
-            .takeLast(6)
-            .forEach { msg ->
+        // ── بناء الطلب ───────────────────────────────────────────────────
+        val requestJson = JSONObject().apply {
+            put("model",       model)
+            put("messages",    messages)
+            put("max_tokens",  1024)
+            put("temperature", 0.7)
+            put("stream",      false)
+        }
 
-                messages.put(
-                    JSONObject().apply {
-                        put(
-                            "role",
-                            msg.role
-                        )
-                        put(
-                            "content",
-                            msg.content
-                        )
-                    }
-                )
-            }
+        val request = Request.Builder()
+            .url("https://router.huggingface.co/v1/chat/completions")
+            .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .build()
 
-        messages.put(
-            JSONObject().apply {
-                put(
-                    "role",
-                    "user"
-                )
-                put(
-                    "content",
-                    userMessage
-                )
-            }
-        )
+        client.newCall(request).execute().use { response ->
 
-        val requestJson =
-            JSONObject().apply {
+            val body = response.body?.string().orEmpty()
 
-                put(
-                    "model",
-                    model
-                )
-
-                put(
-                    "messages",
-                    messages
-                )
-
-                put(
-                    "max_tokens",
-                    1024
-                )
-
-                put(
-                    "temperature",
-                    0.7
-                )
-
-                put(
-                    "stream",
-                    false
-                )
-            }
-
-        val request =
-            Request.Builder()
-                .url(
-                    "https://router.huggingface.co/v1/chat/completions"
-                )
-                .post(
-                    requestJson
-                        .toString()
-                        .toRequestBody(
-                            "application/json"
-                                .toMediaType()
-                        )
-                )
-                .addHeader(
-                    "Authorization",
-                    "Bearer $apiKey"
-                )
-                .addHeader(
-                    "Content-Type",
-                    "application/json"
-                )
-                .build()
-
-        client
-            .newCall(request)
-            .execute()
-            .use { response ->
-
-                val body =
-                    response.body
-                        ?.string()
-                        .orEmpty()
-
-                if (!response.isSuccessful) {
-
-                    val msg =
-                        runCatching {
-
-                            val json =
-                                JSONObject(body)
-
-                            json
-                                .optJSONObject("error")
-                                ?.optString(
-                                    "message"
-                                )
-                                ?: json.optString(
-                                    "error",
-                                    body
-                                ).ifBlank {
-                                    json.optString(
-                                        "message",
-                                        body
-                                    )
-                                }
-
-                        }.getOrDefault(body)
-
-                    throw IOException(
-                        when (response.code) {
-
-                            401 ->
-                                "❌ HuggingFace: التوكن غير صحيح"
-
-                            403 ->
-                                "❌ HuggingFace: لا توجد صلاحية\n" +
-                                    "تأكد من قبول شروط النموذج على " +
-                                    "huggingface.co/$model"
-
-                            404 ->
-                                "❌ HuggingFace: النموذج غير موجود\n$model"
-
-                            422 ->
-                                "❌ HuggingFace: النموذج لا يدعم المحادثة\n" +
-                                    "جرب نموذجاً آخر"
-
-                            429 ->
-                                "⚠️ HuggingFace: تجاوزت الحد المجاني"
-
-                            503 ->
-                                "⏳ HuggingFace: الخادم مشغول - حاول لاحقاً"
-
-                            else ->
-                                "HuggingFace ${response.code}: $msg"
+            if (!response.isSuccessful) {
+                val msg = runCatching {
+                    val json = JSONObject(body)
+                    json.optJSONObject("error")?.optString("message")
+                        ?: json.optString("error", body).ifBlank {
+                            json.optString("message", body)
                         }
-                    )
-                }
+                }.getOrDefault(body)
 
-                val text =
-                    JSONObject(body)
-                        .optJSONArray("choices")
-                        ?.optJSONObject(0)
-                        ?.optJSONObject("message")
-                        ?.optString(
-                            "content",
-                            ""
-                        )
-                        ?.trim()
-
-                return text?.takeIf {
-                    it.isNotBlank()
-                } ?: throw IOException(
-                    "HuggingFace: الرد فارغ\n" +
-                        body.take(200)
-                )
+                throw IOException(when (response.code) {
+                    401  -> "❌ HuggingFace: التوكن غير صحيح"
+                    403  -> "❌ HuggingFace: لا توجد صلاحية\nتأكد من قبول شروط النموذج على huggingface.co/$model"
+                    404  -> "❌ HuggingFace: النموذج غير موجود\n$model"
+                    422  -> "❌ HuggingFace: النموذج لا يدعم المحادثة\nجرب نموذجاً آخر"
+                    429  -> "⚠️ HuggingFace: تجاوزت الحد المجاني"
+                    503  -> "⏳ HuggingFace: الخادم مشغول - حاول لاحقاً"
+                    else -> "HuggingFace ${response.code}: $msg"
+                })
             }
+
+            val text = JSONObject(body)
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content", "")
+                ?.trim()
+
+            return text?.takeIf { it.isNotBlank() }
+                ?: throw IOException("HuggingFace: الرد فارغ\n${body.take(200)}")
+        }
     }
 }
