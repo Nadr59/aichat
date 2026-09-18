@@ -15,7 +15,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // ✅ ARM فقط في release — x86_64 يُضاف في debug تلقائياً
+        // ARM فقط للجهاز الحقيقي
         ndk {
             abiFilters.clear()
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
@@ -25,14 +25,10 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            // ✅ في debug: دعم x86_64 للمحاكي
+            // x86_64 للمحاكي فقط — لا يؤثر على APK الجهاز الحقيقي
             ndk {
                 abiFilters.clear()
-                abiFilters += listOf(
-                    "armeabi-v7a",
-                    "arm64-v8a",
-                    "x86_64"        // ← المحاكي
-                )
+                abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
             }
         }
         release {
@@ -42,7 +38,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // release: ARM فقط (حجم أصغر للجهاز الحقيقي)
             ndk {
                 abiFilters.clear()
                 abiFilters += listOf("armeabi-v7a", "arm64-v8a")
