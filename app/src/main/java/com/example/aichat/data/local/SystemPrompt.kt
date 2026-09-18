@@ -2,7 +2,8 @@ package com.example.aichat.data.local
 
 object SystemPrompt {
 
-    const val ACCURACY_PROMPT = """
+    // ✅ بدون const — النص طويل جداً لـ const
+    val ACCURACY_PROMPT = """
 # وثيقة الدقة والموثوقية في الإجابة
 
 ## الهدف
@@ -76,11 +77,10 @@ object SystemPrompt {
 اعرض النتيجة، والأدلة اللازمة، وحدود اليقين فقط.
 """.trimIndent()
 
-    /** بناء System Prompt كامل = الوثيقة + سياق الذاكرة */
     fun build(
-        memoryContext:      String  = "",
-        customInstruction:  String  = "",
-        includeAccuracy:    Boolean = true
+        memoryContext:     String  = "",
+        customInstruction: String  = "",
+        includeAccuracy:   Boolean = true
     ): String = buildString {
 
         if (includeAccuracy) {
