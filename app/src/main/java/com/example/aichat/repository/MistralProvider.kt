@@ -16,196 +16,114 @@ class MistralProvider(
 ) {
 
     fun send(
-        history: List<Message>,
-        userMessage: String,
-        imageBase64: String?,
-        memoryContext: String = ""
+        history:       List<Message>,
+        userMessage:   String,
+        imageBase64:   String?,
+        memoryContext: String = "",
+        systemPrompt:  String = ""   // ✅ جديد
     ): String {
 
         val apiKey = settings.mistralKey.trim()
-        val model = settings.mistralModel.trim()
+        val model  = settings.mistralModel.trim()
 
-        if (apiKey.isBlank()) {
-            throw IOException(
-                "Mistral: المفتاح فارغ"
-            )
-        }
-
-        if (model.isBlank()) {
-            throw IOException(
-                "Mistral: النموذج فارغ"
-            )
-        }
-
-        val messages = JSONArray()
+        if (apiKey.isBlank()) throw IOException("Mistral: المفتاح فارغ")
+        if (model.isBlank())  throw IOException("Mistral: النموذج فارغ")
 
         val maxHistory = 6
-        val maxTokens = 2048
+        val maxTokens  = 2048
+        val messages   = JSONArray()
 
-        if (memoryContext.isNotBlank()) {
-
-            messages.put(
-                JSONObject().apply {
-                    put(
-                        "role",
-                        "system"
-                    )
-                    put(
-                        "content",
-                        memoryContext
-                    )
-                }
-            )
+        // ✅ System Prompt — الأولوية للوثيقة الكاملة
+        val sysContent = when {
+            systemPrompt.isNotBlank()  -> systemPrompt
+            memoryContext.isNotBlank() -> memoryContext
+            else                       -> null
         }
 
+        sysContent?.let {
+            messages.put(JSONObject().apply {
+                put("role", "system")
+                put("content", it)
+            })
+        }
+
+        // ── تاريخ المحادثة ────────────────────────────────────────────────
         history.takeLast(maxHistory).forEach { msg ->
-
-            messages.put(
-                JSONObject().apply {
-                    put("role", msg.role)
-                    put("content", msg.content)
-                }
-            )
+            messages.put(JSONObject().apply {
+                put("role", msg.role)
+                put("content", msg.content)
+            })
         }
 
-        val isVision =
-            model.contains("pixtral") ||
-                model.contains("vision")
+        // ── رسالة المستخدم (مع دعم Vision) ──────────────────────────────
+        val isVision = model.contains("pixtral") || model.contains("vision")
 
-        if (
-            imageBase64 != null &&
-            isVision
-        ) {
-
-            messages.put(
-                JSONObject().apply {
-
-                    put("role", "user")
-
-                    put(
-                        "content",
-                        JSONArray().apply {
-
-                            put(
-                                JSONObject().apply {
-                                    put("type", "text")
-                                    put("text", userMessage)
-                                }
-                            )
-
-                            put(
-                                JSONObject().apply {
-
-                                    put(
-                                        "type",
-                                        "image_url"
-                                    )
-
-                                    put(
-                                        "image_url",
-                                        JSONObject().apply {
-                                            put(
-                                                "url",
-                                                "data:image/jpeg;base64,$imageBase64"
-                                            )
-                                        }
-                                    )
-                                }
-                            )
-                        }
-                    )
-                }
-            )
-
+        if (imageBase64 != null && isVision) {
+            messages.put(JSONObject().apply {
+                put("role", "user")
+                put("content", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("type", "text")
+                        put("text", userMessage)
+                    })
+                    put(JSONObject().apply {
+                        put("type", "image_url")
+                        put("image_url", JSONObject().apply {
+                            put("url", "data:image/jpeg;base64,$imageBase64")
+                        })
+                    })
+                })
+            })
         } else {
-
-            messages.put(
-                JSONObject().apply {
-                    put("role", "user")
-                    put("content", userMessage)
-                }
-            )
+            messages.put(JSONObject().apply {
+                put("role", "user")
+                put("content", userMessage)
+            })
         }
 
+        // ── بناء الطلب ───────────────────────────────────────────────────
         val requestJson = JSONObject().apply {
-            put("model", model)
-            put("messages", messages)
+            put("model",       model)
+            put("messages",    messages)
             put("temperature", 0.7)
-            put("max_tokens", maxTokens)
+            put("max_tokens",  maxTokens)
         }
 
         val request = Request.Builder()
-            .url(
-                "https://api.mistral.ai/v1/chat/completions"
-            )
-            .post(
-                requestJson.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
+            .url("https://api.mistral.ai/v1/chat/completions")
+            .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
             .build()
 
         client.newCall(request).execute().use { response ->
 
-            val body =
-                response.body?.string().orEmpty()
+            val body = response.body?.string().orEmpty()
 
             if (!response.isSuccessful) {
-
                 val msg = runCatching {
-
                     val j = JSONObject(body)
-
-                    j.optJSONObject("error")
-                        ?.optString("message")
-                        ?: j.optString(
-                            "message",
-                            body
-                        )
-
+                    j.optJSONObject("error")?.optString("message")
+                        ?: j.optString("message", body)
                 }.getOrDefault(body)
 
-                throw IOException(
-                    when (response.code) {
-
-                        429 ->
-                            "⚠️ Mistral: تجاوزت حد الطلبات\n" +
-                                "النموذج: $model"
-
-                        401 ->
-                            "❌ Mistral: المفتاح غير صحيح"
-
-                        422 ->
-                            "❌ Mistral: صيغة خاطئة: $msg"
-
-                        else ->
-                            "Mistral ${response.code}: $msg"
-                    }
-                )
+                throw IOException(when (response.code) {
+                    429  -> "⚠️ Mistral: تجاوزت حد الطلبات\nالنموذج: $model"
+                    401  -> "❌ Mistral: المفتاح غير صحيح"
+                    422  -> "❌ Mistral: صيغة خاطئة: $msg"
+                    else -> "Mistral ${response.code}: $msg"
+                })
             }
 
-            val text =
-                JSONObject(body)
-                    .optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("message")
-                    ?.optString("content", "")
-                    ?.trim()
+            val text = JSONObject(body)
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content", "")
+                ?.trim()
 
-            return text?.takeIf {
-                it.isNotBlank()
-            } ?: throw IOException(
-                "Mistral: الرد فارغ"
-            )
+            return text?.takeIf { it.isNotBlank() }
+                ?: throw IOException("Mistral: الرد فارغ")
         }
     }
 }
