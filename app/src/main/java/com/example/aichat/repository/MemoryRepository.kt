@@ -200,6 +200,72 @@ class MemoryRepository(
         Log.d(TAG, "✅ Backfill complete: $updated/${missing.size} updated")
         return updated
     }
+    // ── أضف هاتين الدالتين في MemoryRepository ───────────────────────────────────
+
+/**
+ * التحقق من وجود محتوى بنفس الـ hash (بدون إنشاء embedding)
+ * تُستخدم للفلترة المسبقة قبل طلب API
+ */
+suspend fun existsByHash(hash: String): Boolean {
+    if (hash.isBlank()) return false
+    return memoryDao.getByHash(hash) != null
+}
+
+/**
+ * حفظ ذاكرة مع embedding جاهز (من Batch)
+ * بدل استدعاء getEmbedding مرة أخرى
+ */
+suspend fun addMemoryWithEmbedding(
+    content:   String,
+    embedding: List<Double>,
+    category:  String  = "OTHER",
+    isShared:  Boolean = true,
+    sourceConversationId: Long? = null,
+    sourceMessageId:      Long? = null
+): Long {
+    val cleanContent = content.trim()
+    if (cleanContent.isBlank()) return 0
+
+    val hash = calculateHash(cleanContent)
+
+    // تحقق من التكرار
+    if (hash.isNotBlank()) {
+        val existing = memoryDao.getByHash(hash)
+        if (existing != null) {
+            Log.d(TAG, "⚠️ Duplicate (id=${existing.id}), skipping")
+            return existing.id
+        }
+    }
+
+    // تحويل embedding إلى String
+    val embeddingStr = if (embedding.isNotEmpty()) {
+        try {
+            val service = EmbeddingService(aiSettings.geminiKey)
+            service.vectorToString(embedding, compress = true)
+        } catch (e: Exception) {
+            ""
+        }
+    } else ""
+
+    val embeddingModel = if (embeddingStr.isNotBlank()) EmbeddingService.CURRENT_MODEL else ""
+    val embeddingDims  = if (embeddingStr.isNotBlank()) EmbeddingService.CURRENT_DIMENSIONS else 0
+
+    val memory = MemoryItem(
+        content              = cleanContent,
+        embedding            = embeddingStr,
+        embeddingModel       = embeddingModel,
+        embeddingDimensions  = embeddingDims,
+        contentHash          = hash,
+        sourceConversationId = sourceConversationId,
+        sourceMessageId      = sourceMessageId,
+        category             = category,
+        isShared             = isShared
+    )
+
+    val id = memoryDao.insertMemory(memory)
+    Log.d(TAG, "✅ Memory saved with embedding (id=$id)")
+    return id
+}
 
     // ============================================================
     // حذف ذاكرة
