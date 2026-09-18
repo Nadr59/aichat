@@ -177,12 +177,7 @@ fun ChatScreen(
     // ✅ مُضاف: تنظيف successMessage تلقائياً بعد 3 ثوان
     // ============================================================
 
-    LaunchedEffect(successMessage) {
-        if (successMessage != null) {
-            delay(3500)
-            viewModel.clearSuccessMessage()
-        }
-    }
+    
 
     // ============================================================
     // Scaffold
@@ -260,30 +255,7 @@ fun ChatScreen(
         ) {
 
             // ✅ مُضاف: Snackbar للنجاح (أخضر)
-            successMessage?.let { msg ->
-                Snackbar(
-                    modifier = Modifier.padding(
-                        horizontal = 10.dp,
-                        vertical = 4.dp
-                    ),
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    dismissAction = {
-                        IconButton(onClick = { viewModel.clearSuccessMessage() }) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "إغلاق",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-                ) {
-                    Text(
-                        text = msg,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
+            
 
             if (messages.isEmpty()) {
                 EmptyChatView()
