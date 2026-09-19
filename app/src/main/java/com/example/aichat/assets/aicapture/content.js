@@ -4,7 +4,7 @@
     if (window.__aiCaptureActive) return;
     window.__aiCaptureActive = true;
 
-    var lastSentText  = '';
+    var lastSentText = '';
     var debounceTimer = null;
     var DEBOUNCE_MS   = 1800;
     var MIN_LEN       = 30;
@@ -87,7 +87,6 @@
             '[role="navigation"]', '[role="banner"]',
             '[contenteditable="true"]'
         ].join(', ');
-
         var blocks = document.querySelectorAll(
             'article, section, main div, p, li, pre, blockquote'
         );
@@ -106,24 +105,11 @@
     function extractLatestResponse() {
         var host = location.hostname;
         var text = null;
-
         if (/chatgpt\.com|openai\.com/.test(host))  text = extractChatGPT();
         else if (/claude\.ai/.test(host))           text = extractClaude();
         else if (/gemini\.google\.com/.test(host))  text = extractGemini();
-
         if (!text) text = extractByLongestBlock();
         return text ? text.substring(0, MAX_LEN) : null;
-    }
-
-    function debugInfo() {
-        return {
-            assistant:  document.querySelectorAll(
-                '[data-message-author-role="assistant"]'
-            ).length,
-            articles:   document.querySelectorAll('article').length,
-            bodyLen:    document.body ? document.body.innerText.length : 0,
-            readyState: document.readyState
-        };
     }
 
     // ── إرسال تلقائي ──────────────────────────────────────────────────
@@ -133,7 +119,8 @@
         if (text === lastSentText)     return;
         lastSentText = text;
         try {
-            browser.runtime.sendMessage({
+            // ✅ sendNativeMessage وليس sendMessage
+            browser.runtime.sendNativeMessage('browser', {
                 type:   'AI_RESPONSE',
                 text:   text,
                 domain: location.hostname
@@ -151,9 +138,8 @@
     function startObserver() {
         if (document.body) {
             observer.observe(document.body, {
-                childList:     true,
-                subtree:       true,
-                characterData: true
+                childList: true,
+                subtree:   true
             });
         } else {
             setTimeout(startObserver, 500);
@@ -161,41 +147,59 @@
     }
     startObserver();
 
-    // ── ✅ Port — connectNative الصحيح ────────────────────────────────
+    // ── ✅ Long-Polling — ينتظر Kotlin يوقظه ─────────────────────────
 
-    var port = null;
+    function waitForCapture() {
 
-    function connectPort() {
-        try {
-            // ✅ "browser" يطابق setMessageDelegate(..., "browser") في Kotlin
-            port = browser.runtime.connectNative('browser');
+        // لا تسأل إذا الصفحة مخفية
+        if (document.visibilityState !== 'visible') {
+            setTimeout(waitForCapture, 1000);
+            return;
+        }
 
-            port.onMessage.addListener(function (msg) {
-                if (!msg || msg.type !== 'CAPTURE_NOW') return;
+        // ✅ sendNativeMessage — يصل لـ Kotlin مباشرة
+        browser.runtime.sendNativeMessage('browser', {
+            type:   'WAIT_CAPTURE',
+            domain: location.hostname
+        })
+        .then(function (response) {
 
+            if (response && response.capture) {
+                // Kotlin أيقظنا — استخرج النص
                 var text = extractLatestResponse();
                 var ok   = !!(text && text.length >= MIN_LEN);
 
-                port.postMessage({
+                // أرسل النتيجة
+                return browser.runtime.sendNativeMessage('browser', {
                     type:    'CAPTURE_RESULT',
                     success: ok,
                     text:    ok ? text : '',
                     domain:  location.hostname,
-                    debug:   debugInfo()
+                    debug: {
+                        assistant: document.querySelectorAll(
+                            '[data-message-author-role="assistant"]'
+                        ).length,
+                        articles:  document.querySelectorAll(
+                            'article'
+                        ).length,
+                        bodyLen:   document.body
+                                   ? document.body.innerText.length : 0
+                    }
                 });
-            });
-
-            port.onDisconnect.addListener(function () {
-                port = null;
-                setTimeout(connectPort, 3000);
-            });
-
-        } catch (e) {
-            port = null;
-            setTimeout(connectPort, 5000);
-        }
+            }
+        })
+        .catch(function () {})
+        .then(function () {
+            // ✅ أعد الانتظار دائماً
+            setTimeout(waitForCapture, 300);
+        });
     }
 
-    connectPort();
+    // نظّف عند إغلاق الصفحة
+    window.addEventListener('pagehide', function () {
+        observer.disconnect();
+    });
+
+    waitForCapture();
 
 })();
