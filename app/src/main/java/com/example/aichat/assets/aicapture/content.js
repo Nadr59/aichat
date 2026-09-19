@@ -5,75 +5,124 @@
 
     var lastSentText  = '';
     var debounceTimer = null;
-    var MIN_LENGTH    = 80;
+    var MIN_LENGTH    = 20;   // ✅ خفضنا من 80 إلى 20 للتشخيص
     var DEBOUNCE_MS   = 1800;
 
-    // ── Selectors ─────────────────────────────────────────────────────
+    // ── Selectors محدثة 2024 ──────────────────────────────────────────
     var PLATFORM_SELECTORS = {
-        'claude.ai':             "[data-is-streaming='false'] .prose p",
-        'chatgpt.com':           "[data-message-author-role='assistant'] .markdown p",
-        'chat.openai.com':       "[data-message-author-role='assistant'] .markdown p",
-        'perplexity.ai':         ".prose p",
-        'you.com':               "[data-testid='youchat-response'] p",
-        'huggingface.co':        "[data-role='assistant'] p",
-        'venice.ai':             ".message-content p",
-        'gemini.google.com':     "message-content p",
-        'grok.com':              ".message-bubble p",
-        'copilot.microsoft.com': "[data-content='ai-response'] p",
-        'chat.mistral.ai':       ".assistant-message p"
+
+        // ChatGPT — محدث 2024
+        'chatgpt.com': [
+            '[data-message-author-role="assistant"] .markdown',
+            '[data-message-author-role="assistant"]',
+            '.agent-turn .whitespace-pre-wrap',
+            'div[class*="markdown"]',
+            '.text-message'
+        ],
+
+        'chat.openai.com': [
+            '[data-message-author-role="assistant"] .markdown',
+            '[data-message-author-role="assistant"]',
+            '.agent-turn .whitespace-pre-wrap'
+        ],
+
+        // Claude — محدث 2024
+        'claude.ai': [
+            '[data-is-streaming="false"] .prose',
+            '.font-claude-message',
+            '[data-testid="assistant-message"]',
+            '.prose'
+        ],
+
+        'gemini.google.com': [
+            'model-response .markdown',
+            'model-response',
+            '.response-content'
+        ],
+
+        'perplexity.ai': [
+            '.prose',
+            '[class*="answer"]'
+        ],
+
+        'copilot.microsoft.com': [
+            '[data-content="ai-response"]',
+            '.ac-textBlock'
+        ],
+
+        'grok.com': [
+            '.message-bubble',
+            '[class*="response"]'
+        ],
+
+        'chat.mistral.ai': [
+            '.assistant-message',
+            '[class*="assistant"]'
+        ]
     };
 
-    function getSelector() {
-        var host = window.location.hostname;
-        for (var domain in PLATFORM_SELECTORS) {
-            if (host.includes(domain)) return PLATFORM_SELECTORS[domain];
-        }
-        return [
-            "[data-is-streaming='false']",
-            "[data-message-author-role='assistant']",
-            ".prose p",
-            ".markdown p",
-            ".message-content p"
-        ].join(', ');
-    }
-
+    // ── استخراج النص ─────────────────────────────────────────────────
     function extractLatestResponse() {
-        var selector = getSelector();
-        try {
-            var elements = document.querySelectorAll(selector);
-            if (elements && elements.length > 0) {
-                var last   = elements[elements.length - 1];
-                var parent = last.closest(
-                    "[data-is-streaming='false']," +
-                    "[data-message-author-role='assistant']," +
-                    ".message-content,.prose,.markdown"
-                ) || last.parentElement;
+        var host      = window.location.hostname.replace('www.', '');
+        var selectors = null;
 
-                if (parent) {
-                    var t = (parent.innerText || '').trim();
-                    if (t.length >= MIN_LENGTH) return t;
-                }
-                var t2 = (last.innerText || '').trim();
-                if (t2.length >= MIN_LENGTH) return t2;
+        // ابحث عن selectors المنصة
+        for (var domain in PLATFORM_SELECTORS) {
+            if (host.includes(domain)) {
+                selectors = PLATFORM_SELECTORS[domain];
+                break;
             }
-        } catch (e) {}
+        }
+
+        // جرب كل selector بالترتيب
+        if (selectors) {
+            for (var i = 0; i < selectors.length; i++) {
+                var result = trySelector(selectors[i]);
+                if (result) return result;
+            }
+        }
+
+        // Fallback عام
         return extractGeneric();
     }
 
-    function extractGeneric() {
-        var els = document.querySelectorAll(
-            'p,[class*="message"],[class*="response"],' +
-            '[class*="answer"],[class*="assistant"]'
-        );
-        var longest = '';
-        els.forEach(function(el) {
-            var t = (el.innerText || '').trim();
-            if (t.length > longest.length && t.length >= MIN_LENGTH) longest = t;
-        });
-        return longest.length >= MIN_LENGTH ? longest : null;
+    function trySelector(selector) {
+        try {
+            var elements = document.querySelectorAll(selector);
+            if (!elements || elements.length === 0) return null;
+
+            // جرب من آخر عنصر للأول
+            for (var i = elements.length - 1; i >= 0; i--) {
+                var text = (elements[i].innerText || '').trim();
+                if (text.length >= MIN_LENGTH) return text;
+            }
+        } catch(e) {}
+        return null;
     }
 
-    // ── إرسال تلقائي عبر runtime.sendMessage ──────────────────────────
+    function extractGeneric() {
+        // ✅ استراتيجية جديدة — ابحث عن أطول نص في الصفحة
+        // من العناصر التي تبدو ردوداً
+        var candidates = document.querySelectorAll(
+            '[class*="assistant"], [class*="bot"], [class*="ai-"],' +
+            '[class*="response"], [class*="answer"], [class*="message"],' +
+            '[role="article"], article, .prose, .markdown'
+        );
+
+        var best = '';
+        candidates.forEach(function(el) {
+            // تجنب العناصر الأب التي تحتوي على كل شيء
+            if (el.children.length > 10) return;
+            var t = (el.innerText || '').trim();
+            if (t.length > best.length && t.length >= MIN_LENGTH) {
+                best = t;
+            }
+        });
+
+        return best.length >= MIN_LENGTH ? best : null;
+    }
+
+    // ── إرسال تلقائي ──────────────────────────────────────────────────
     function sendAutoToKotlin(text) {
         if (!text || text.length < MIN_LENGTH) return;
         if (text === lastSentText) return;
@@ -85,9 +134,7 @@
                 url:    window.location.href,
                 domain: window.location.hostname
             });
-        } catch (e) {
-            console.warn('AI Capture: sendMessage failed', e);
-        }
+        } catch (e) {}
     }
 
     // ── مراقبة تلقائية ────────────────────────────────────────────────
@@ -109,19 +156,23 @@
     }
     startObserver();
 
-    // ── ✅ Port — للتواصل اليدوي مع Kotlin ────────────────────────────
+    // ── Port — للحفظ اليدوي ───────────────────────────────────────────
     var activePort = null;
 
     function connectPort() {
         try {
             activePort = browser.runtime.connectNative('browser');
 
-            // استقبال أوامر من Kotlin
             activePort.onMessage.addListener(function(message) {
                 if (!message || message.type !== 'CAPTURE_NOW') return;
 
                 var text = extractLatestResponse();
-                var ok   = !!(text && text.length >= 20);
+                var ok   = !!(text && text.length >= MIN_LENGTH);
+
+                // ✅ سجّل في console للتشخيص
+                console.log('[AiChat] CAPTURE_NOW received');
+                console.log('[AiChat] extracted text:', text ? text.substring(0, 100) : 'NULL');
+                console.log('[AiChat] success:', ok);
 
                 activePort.postMessage({
                     type:    'CAPTURE_RESULT',
@@ -134,12 +185,13 @@
 
             activePort.onDisconnect.addListener(function() {
                 activePort = null;
-                // إعادة الاتصال بعد 3 ثواني
                 setTimeout(connectPort, 3000);
             });
 
+            console.log('[AiChat] Port connected ✅');
+
         } catch (e) {
-            console.warn('AI Capture: connectNative failed', e);
+            console.warn('[AiChat] connectNative failed:', e);
             setTimeout(connectPort, 5000);
         }
     }
