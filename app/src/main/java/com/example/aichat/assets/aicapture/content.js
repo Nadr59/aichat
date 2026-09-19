@@ -1,6 +1,5 @@
 (function () {
 
-    // ✅ الإصلاح الأساسي — فقط الـ frame الرئيسي
     if (window !== window.top) return;
     if (window.__aiCaptureActive) return;
     window.__aiCaptureActive = true;
@@ -42,8 +41,6 @@
     // ── ChatGPT ───────────────────────────────────────────────────────
 
     function extractChatGPT() {
-
-        // 1. رسائل المساعد — تجاهل ما زال يُكتب
         var turns = document.querySelectorAll(
             '[data-message-author-role="assistant"]'
         );
@@ -56,8 +53,6 @@
             var t = clean(inner.innerText);
             if (t.length >= MIN_LEN) return t;
         }
-
-        // 2. articles — تجاهل رسائل المستخدم
         var articles = document.querySelectorAll(
             'article[data-testid^="conversation-turn"]'
         );
@@ -68,7 +63,6 @@
             var t2 = clean(articles[j].innerText);
             if (t2.length >= MIN_LEN) return t2;
         }
-
         return null;
     }
 
@@ -103,7 +97,6 @@
         var blocks = document.querySelectorAll(
             'article, section, main div, p, li, pre, blockquote'
         );
-
         var best = '';
         for (var i = 0; i < blocks.length; i++) {
             var el = blocks[i];
@@ -113,7 +106,6 @@
             var t = clean(el.innerText);
             if (t.length > best.length) best = t;
         }
-
         return best.length >= MIN_LEN ? best : null;
     }
 
@@ -128,7 +120,6 @@
         else if (/gemini\.google\.com/.test(host))  text = extractGemini();
 
         if (!text) text = extractByLongestBlock();
-
         return text ? text.substring(0, MAX_LEN) : null;
     }
 
@@ -136,13 +127,12 @@
 
     function debugInfo() {
         return {
-            url:       location.href,
-            assistant: document.querySelectorAll(
+            url:        location.href,
+            assistant:  document.querySelectorAll(
                 '[data-message-author-role="assistant"]'
             ).length,
-            articles:  document.querySelectorAll('article').length,
-            bodyLen:   (document.body
-                        ? document.body.innerText.length : 0),
+            articles:   document.querySelectorAll('article').length,
+            bodyLen:    document.body ? document.body.innerText.length : 0,
             readyState: document.readyState
         };
     }
@@ -187,18 +177,23 @@
 
     // ── Port للحفظ اليدوي ─────────────────────────────────────────────
 
-    var activePort = null;
+    var activePort    = null;
+    var retryCount    = 0;
+    var MAX_RETRIES   = 5;
 
     function connectPort() {
         try {
             activePort = browser.runtime.connectNative('browser');
 
-            // ✅ أعلم Kotlin أن هذا هو الـ top frame
+            // ✅ أعلم Kotlin أن هذا top frame
             activePort.postMessage({
                 type:   'PORT_READY',
                 domain: location.hostname,
                 url:    location.href
             });
+
+            // reset عند النجاح
+            retryCount = 0;
 
             activePort.onMessage.addListener(function (message) {
                 if (!message || message.type !== 'CAPTURE_NOW') return;
@@ -218,11 +213,16 @@
 
             activePort.onDisconnect.addListener(function () {
                 activePort = null;
-                setTimeout(connectPort, 3000);
+                retryCount++;
+                if (retryCount <= MAX_RETRIES) {
+                    setTimeout(connectPort, 3000);
+                }
+                // بعد MAX_RETRIES نتوقف — connectNative لا يعمل
             });
 
         } catch (e) {
-            setTimeout(connectPort, 5000);
+            // connectNative غير متاح — نستخدم sendMessage فقط
+            activePort = null;
         }
     }
 
