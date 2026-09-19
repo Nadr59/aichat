@@ -300,6 +300,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onWebAiResponse(
+    platformId:   String,
+    platformName: String,
+    text:         String
+) {
+    if (text.isBlank()) return
+
+    viewModelScope.launch {
+        try {
+            android.util.Log.d(
+                "ChatViewModel",
+                "🌐 Web AI from $platformName: ${text.take(80)}..."
+            )
+
+            memoryRepository.addMemory(
+                content              = text,
+                sourceConversationId = null,
+                sourceMessageId      = null,
+                category             = "WEB",
+                isShared             = true
+            )
+
+            android.util.Log.d(
+                "ChatViewModel",
+                "✅ Saved to memory from: $platformName"
+            )
+
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "ChatViewModel",
+                "❌ onWebAiResponse: ${e.message}",
+                e
+            )
+        }
+    }
+    }
     // ============================================================
     // الصور
     // ============================================================
