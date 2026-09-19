@@ -27,11 +27,6 @@
     "all_frames": false
   }],
 
-  "background": {
-    "scripts": ["background.js"],
-    "persistent": false
-  },
-
   "permissions": [
     "nativeMessaging"
   ]
