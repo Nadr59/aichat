@@ -1,166 +1,174 @@
 (function () {
 
+    // ✅ الإصلاح الأساسي — فقط الـ frame الرئيسي
+    if (window !== window.top) return;
     if (window.__aiCaptureActive) return;
     window.__aiCaptureActive = true;
 
-    var lastSentText = '';
+    var lastSentText  = '';
     var debounceTimer = null;
-    var MIN_AUTO = 80;   // للتلقائي
-    var MIN_MANUAL = 20; // لليدوي — أقل تشدداً
-    var DEBOUNCE_MS = 1800;
+    var DEBOUNCE_MS   = 1800;
+    var MIN_LEN       = 30;
+    var MAX_LEN       = 3000;
 
-    // ── Selectors 2024 ────────────────────────────────────────────────
-    var PLATFORM_SELECTORS = {
-        'chatgpt.com': [
-            'article[data-testid^="conversation-turn-"] .agent-turn .whitespace-pre-wrap',
-            'article[data-testid^="conversation-turn-"] .agent-turn',
-            '[data-message-author-role="assistant"] .markdown',
-            '[data-message-author-role="assistant"]',
-            '.agent-turn'
-        ],
-        'chat.openai.com': [
-            'article[data-testid^="conversation-turn-"] .agent-turn',
-            '[data-message-author-role="assistant"] .markdown',
+    // ── Helpers ───────────────────────────────────────────────────────
+
+    function clean(t) {
+        return (t || '')
+            .replace(/\u200b/g, '')
+            .replace(/[ \t]+\n/g, '\n')
+            .trim();
+    }
+
+    function isVisible(el) {
+        if (!el) return false;
+        var r  = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return false;
+        var cs = window.getComputedStyle(el);
+        return cs.display !== 'none' && cs.visibility !== 'hidden';
+    }
+
+    function lastMatching(selector) {
+        var els;
+        try { els = document.querySelectorAll(selector); }
+        catch (e) { return null; }
+        for (var i = els.length - 1; i >= 0; i--) {
+            var t = clean(els[i].innerText);
+            if (t.length >= MIN_LEN) return t;
+        }
+        return null;
+    }
+
+    // ── ChatGPT ───────────────────────────────────────────────────────
+
+    function extractChatGPT() {
+
+        // 1. رسائل المساعد — تجاهل ما زال يُكتب
+        var turns = document.querySelectorAll(
             '[data-message-author-role="assistant"]'
-        ],
-        'claude.ai': [
-            '[data-is-streaming="false"] .font-claude-message',
-            '.font-claude-message',
-            '[data-is-streaming="false"] .prose',
-            '.prose'
-        ],
-        'gemini.google.com': [
-            'model-response .markdown',
-            'model-response',
-            '.response-content'
-        ],
-        'perplexity.ai': [
-            '.prose',
-            '[class*="answer"]',
-            '[class*="response"]'
-        ],
-        'copilot.microsoft.com': [
-            '[data-content="ai-response"]',
-            '.ac-textBlock',
-            '[class*="response"]'
-        ],
-        'grok.com': [
-            '.message-bubble',
-            '[class*="response"]',
-            '[class*="assistant"]'
-        ],
-        'chat.mistral.ai': [
-            '.assistant-message',
-            '[class*="assistant"]'
-        ],
-        'you.com': [
-            '[data-testid="youchat-response"]',
-            '[class*="answer"]'
-        ]
-    };
-
-    // ── الاستخراج الرئيسي ─────────────────────────────────────────────
-    function extractLatestResponse(minLength) {
-        minLength = minLength || MIN_AUTO;
-        var host  = window.location.hostname.replace('www.', '');
-
-        // 1. جرب selectors المنصة
-        for (var domain in PLATFORM_SELECTORS) {
-            if (host.includes(domain)) {
-                var result = trySelectors(PLATFORM_SELECTORS[domain], minLength);
-                if (result) return result;
-                break;
-            }
+        );
+        for (var i = turns.length - 1; i >= 0; i--) {
+            var turn = turns[i];
+            if (turn.closest('[data-is-streaming="true"]')) continue;
+            var inner = turn.querySelector(
+                '.markdown, .prose, .whitespace-pre-wrap'
+            ) || turn;
+            var t = clean(inner.innerText);
+            if (t.length >= MIN_LEN) return t;
         }
 
-        // 2. Fallback ذكي
-        return smartFallback(minLength);
-    }
-
-    function trySelectors(selectors, minLength) {
-        for (var i = 0; i < selectors.length; i++) {
-            var result = trySelector(selectors[i], minLength);
-            if (result) return result;
+        // 2. articles — تجاهل رسائل المستخدم
+        var articles = document.querySelectorAll(
+            'article[data-testid^="conversation-turn"]'
+        );
+        for (var j = articles.length - 1; j >= 0; j--) {
+            if (articles[j].querySelector(
+                '[data-message-author-role="user"]'
+            )) continue;
+            var t2 = clean(articles[j].innerText);
+            if (t2.length >= MIN_LEN) return t2;
         }
+
         return null;
     }
 
-    function trySelector(selector, minLength) {
-        try {
-            var elements = document.querySelectorAll(selector);
-            if (!elements || elements.length === 0) return null;
-            // من الآخر للأول
-            for (var i = elements.length - 1; i >= 0; i--) {
-                var text = (elements[i].innerText || '').trim();
-                if (text.length >= minLength) return text;
-            }
-        } catch(e) {}
-        return null;
+    // ── Claude ────────────────────────────────────────────────────────
+
+    function extractClaude() {
+        return lastMatching(
+                '[data-is-streaming="false"] .font-claude-message'
+            )
+            || lastMatching('.font-claude-message')
+            || lastMatching('[data-is-streaming="false"]');
     }
 
-    // ── Fallback ذكي — يأخذ أطول نص ─────────────────────────────────
-    function smartFallback(minLength) {
-        var allElements = document.querySelectorAll('*');
-        var candidates  = [];
+    // ── Gemini ────────────────────────────────────────────────────────
 
-        for (var i = 0; i < allElements.length; i++) {
-            var el = allElements[i];
+    function extractGemini() {
+        return lastMatching('model-response .markdown')
+            || lastMatching('message-content')
+            || lastMatching('model-response');
+    }
 
-            // تجاهل العناصر الأب الكبيرة
-            if (el.children.length > 15) continue;
+    // ── Fallback عام ──────────────────────────────────────────────────
 
-            // تجاهل عناصر الإدخال
-            var tag = el.tagName.toLowerCase();
-            if (['script','style','input','textarea','nav',
-                 'header','footer'].includes(tag)) continue;
+    function extractByLongestBlock() {
+        var EXCLUDE = [
+            'nav', 'aside', 'header', 'footer', 'form',
+            'textarea', 'button', 'input', 'script', 'style',
+            '[role="navigation"]', '[role="banner"]',
+            '[contenteditable="true"]'
+        ].join(', ');
 
-            var text = (el.innerText || '').trim();
-            if (text.length >= minLength) {
-                candidates.push({
-                    el:   el,
-                    text: text,
-                    len:  text.length
-                });
-            }
+        var blocks = document.querySelectorAll(
+            'article, section, main div, p, li, pre, blockquote'
+        );
+
+        var best = '';
+        for (var i = 0; i < blocks.length; i++) {
+            var el = blocks[i];
+            if (el.closest(EXCLUDE))    continue;
+            if (!isVisible(el))         continue;
+            if (el.querySelectorAll('p, li, pre').length > 60) continue;
+            var t = clean(el.innerText);
+            if (t.length > best.length) best = t;
         }
 
-        if (candidates.length === 0) return null;
+        return best.length >= MIN_LEN ? best : null;
+    }
 
-        // رتب — الأطول أولاً، لكن تجنب النص الضخم جداً (صفحة كاملة)
-        candidates.sort(function(a, b) { return b.len - a.len; });
+    // ── الموجّه الرئيسي ───────────────────────────────────────────────
 
-        // خذ أول نص بين 100 و 5000 حرف
-        for (var j = 0; j < candidates.length; j++) {
-            var len = candidates[j].len;
-            if (len >= minLength && len <= 5000) {
-                return candidates[j].text;
-            }
-        }
+    function extractLatestResponse() {
+        var host = location.hostname;
+        var text = null;
 
-        // إذا لم نجد، خذ الأطول
-        return candidates[0].text.substring(0, 3000);
+        if (/chatgpt\.com|openai\.com/.test(host))  text = extractChatGPT();
+        else if (/claude\.ai/.test(host))           text = extractClaude();
+        else if (/gemini\.google\.com/.test(host))  text = extractGemini();
+
+        if (!text) text = extractByLongestBlock();
+
+        return text ? text.substring(0, MAX_LEN) : null;
+    }
+
+    // ── معلومات تشخيص ────────────────────────────────────────────────
+
+    function debugInfo() {
+        return {
+            url:       location.href,
+            assistant: document.querySelectorAll(
+                '[data-message-author-role="assistant"]'
+            ).length,
+            articles:  document.querySelectorAll('article').length,
+            bodyLen:   (document.body
+                        ? document.body.innerText.length : 0),
+            readyState: document.readyState
+        };
     }
 
     // ── إرسال تلقائي ──────────────────────────────────────────────────
+
     function sendAutoToKotlin(text) {
-        if (!text || text.length < MIN_AUTO) return;
-        if (text === lastSentText) return;
+        if (!text || text.length < 80) return;
+        if (text === lastSentText)     return;
         lastSentText = text;
         try {
             browser.runtime.sendMessage({
                 type:   'AI_RESPONSE',
-                text:   text.substring(0, 3000),
-                url:    window.location.href,
-                domain: window.location.hostname
+                text:   text,
+                url:    location.href,
+                domain: location.hostname
             });
         } catch (e) {}
     }
 
     // ── مراقبة تلقائية ────────────────────────────────────────────────
-    var observer = new MutationObserver(function() {
+
+    var observer = new MutationObserver(function () {
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(function() {
-            sendAutoToKotlin(extractLatestResponse(MIN_AUTO));
+        debounceTimer = setTimeout(function () {
+            sendAutoToKotlin(extractLatestResponse());
         }, DEBOUNCE_MS);
     });
 
@@ -177,30 +185,38 @@
     }
     startObserver();
 
-    // ── Port — للحفظ اليدوي ───────────────────────────────────────────
+    // ── Port للحفظ اليدوي ─────────────────────────────────────────────
+
     var activePort = null;
 
     function connectPort() {
         try {
             activePort = browser.runtime.connectNative('browser');
 
-            activePort.onMessage.addListener(function(message) {
+            // ✅ أعلم Kotlin أن هذا هو الـ top frame
+            activePort.postMessage({
+                type:   'PORT_READY',
+                domain: location.hostname,
+                url:    location.href
+            });
+
+            activePort.onMessage.addListener(function (message) {
                 if (!message || message.type !== 'CAPTURE_NOW') return;
 
-                // ✅ للحفظ اليدوي نستخدم حد أدنى أقل
-                var text = extractLatestResponse(MIN_MANUAL);
-                var ok   = !!(text && text.length >= MIN_MANUAL);
+                var text = extractLatestResponse();
+                var ok   = !!(text && text.length >= MIN_LEN);
 
                 activePort.postMessage({
                     type:    'CAPTURE_RESULT',
                     success: ok,
-                    text:    ok ? text.substring(0, 3000) : '',
-                    domain:  window.location.hostname,
-                    source:  'manual'
+                    text:    ok ? text : '',
+                    domain:  location.hostname,
+                    source:  'manual',
+                    debug:   debugInfo()
                 });
             });
 
-            activePort.onDisconnect.addListener(function() {
+            activePort.onDisconnect.addListener(function () {
                 activePort = null;
                 setTimeout(connectPort, 3000);
             });
