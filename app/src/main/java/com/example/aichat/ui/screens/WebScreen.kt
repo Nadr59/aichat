@@ -35,7 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.example.aichat.AichatApp
 import com.example.aichat.data.model.WebEngine
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
@@ -105,7 +104,9 @@ fun WebScreen(
                 }
                 WebEngine.EXTERNAL -> {
                     LaunchedEffect(Unit) {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        )
                         onNavigateUp()
                     }
                 }
@@ -126,20 +127,24 @@ private fun GeckoWebView(
     onLoading: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    val app     = context.applicationContext as AichatApp
 
-    var runtime   by remember { mutableStateOf<GeckoRuntime?>(app.geckoRuntime) }
-    var isWaiting by remember { mutableStateOf(app.geckoRuntime == null) }
+    // ✅ الإصلاح — الوصول لـ geckoRuntime عبر AichatApp بشكل آمن
+    val app = remember {
+        context.applicationContext as? com.example.aichat.AichatApp
+    }
+
+    var runtime   by remember { mutableStateOf<GeckoRuntime?>(app?.geckoRuntime) }
+    var isWaiting by remember { mutableStateOf(app?.geckoRuntime == null) }
 
     LaunchedEffect(Unit) {
-        if (app.geckoRuntime == null) {
+        if (app?.geckoRuntime == null) {
             var attempts = 0
-            while (app.geckoRuntime == null && attempts < 20) {
+            while (app?.geckoRuntime == null && attempts < 20) {
                 kotlinx.coroutines.delay(500)
                 attempts++
             }
         }
-        runtime   = app.geckoRuntime
+        runtime   = app?.geckoRuntime
         isWaiting = false
     }
 
@@ -151,7 +156,7 @@ private fun GeckoWebView(
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)  // ✅ dp مستورد الآن
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 CircularProgressIndicator()
                 Text(
