@@ -386,6 +386,27 @@ private fun LoadErrorView(
         }
     }
 }
+app.onManualCaptureResult = { success, text ->
+    isSavingMemory = false
+    if (success && text.isNotBlank()) {
+        vm.onWebAiResponse(
+            platformId   = p.id,
+            platformName = p.name,
+            text         = text
+        )
+        Toast.makeText(
+            context,
+            "✅ تم الحفظ\n${text.take(50)}",  // ← أضفنا أول 50 حرف
+            Toast.LENGTH_LONG
+        ).show()
+    } else {
+        Toast.makeText(
+            context,
+            "⚠️ فشل\ndomain=${p.id}",  // ← نعرف أين وصلنا
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}
 
 @Composable
 private fun GeckoUnavailableDialog(
