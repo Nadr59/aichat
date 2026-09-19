@@ -175,30 +175,37 @@ fun GeckoTestScreen(
             }
 
             // ✅ callback اليدوي — مع Toast تشخيصي
-            app.onManualCaptureResult = { success, text ->
-                isSavingMemory = false
-                if (success && text.isNotBlank()) {
-                    vm.onWebAiResponse(
-                        platformId   = p.id,
-                        platformName = p.name,
-                        text         = text
-                    )
-                    Toast.makeText(
-                        context,
-                        "✅ تم الحفظ\n${text.take(50)}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    Log.d("GeckoTestScreen", "🧠 Manual saved: ${text.take(60)}")
-                } else {
-                    Toast.makeText(
-                        context,
-                        "⚠️ فشل\ndomain=${p.id}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
+            
+// غيّر signature الـ callback في DisposableEffect:
 
+app.onManualCaptureResult = { success, text, debug ->
+    isSavingMemory = false
+    if (success && text.isNotBlank()) {
+        vm.onWebAiResponse(
+            platformId   = p.id,
+            platformName = p.name,
+            text         = text
+        )
+        Toast.makeText(
+            context,
+            "✅ تم الحفظ\n${text.take(50)}",
+            Toast.LENGTH_LONG
+        ).show()
+    } else {
+        // ✅ Toast تشخيصي يعرض debug info
+        val info = debug?.let {
+            "assistant=${it.optInt("assistant")} " +
+            "articles=${it.optInt("articles")} " +
+            "body=${it.optInt("bodyLen")}"
+        } ?: "no port"
+
+        Toast.makeText(
+            context,
+            "⚠️ فشل\n$info",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}
         onDispose {
             app.onAiResponseCaptured  = null
             app.onManualCaptureResult = null
