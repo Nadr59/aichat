@@ -1,6 +1,8 @@
 package com.example.aichat
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.repository.WebPlatformRepository
@@ -11,21 +13,16 @@ import org.mozilla.geckoview.WebExtension
 
 class AichatApp : Application() {
 
-    @Volatile
-    var geckoRuntime: GeckoRuntime? = null
+    @Volatile var geckoRuntime:    GeckoRuntime?   = null
         private set
 
-    @Volatile
-    var aiChatExtension: WebExtension? = null
+    @Volatile var aiChatExtension: WebExtension?   = null
         private set
 
-    // ✅ Port المفتوح — نرسل عليه CAPTURE_NOW
-    @Volatile
-    private var activePort: WebExtension.Port? = null
+    @Volatile private var activePort: WebExtension.Port? = null
 
-    // ── Callbacks ─────────────────────────────────────────────────────
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
-    var onManualCaptureResult: ((success: Boolean, text: String) -> Unit)? = null
+    var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
@@ -39,7 +36,7 @@ class AichatApp : Application() {
             webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
             Log.d("AichatApp", "✅ Database ready")
         } catch (e: Exception) {
-            Log.e("AichatApp", "❌ Database failed: ${e.message}", e)
+            Log.e("AichatApp", "❌ Database: ${e.message}", e)
             throw e
         }
     }
@@ -53,32 +50,32 @@ class AichatApp : Application() {
             val settings = GeckoRuntimeSettings.Builder()
                 .aboutConfigEnabled(false)
                 .build()
-            GeckoRuntime.create(applicationContext, settings).also { runtime ->
-                geckoRuntime = runtime
+            GeckoRuntime.create(applicationContext, settings).also { rt ->
+                geckoRuntime = rt
+                loadAiCaptureExtension(rt)
                 Log.d("AichatApp", "✅ GeckoRuntime created")
-                loadAiCaptureExtension(runtime)
             }
         } catch (e: Exception) {
-            Log.e("AichatApp", "❌ GeckoRuntime failed: ${e.message}", e)
+            Log.e("AichatApp", "❌ GeckoRuntime: ${e.message}")
             null
         }
     }
 
     // ── ✅ الدالة التي يستدعيها زر 🧠 ────────────────────────────────
+
     fun requestManualCapture() {
         val port = activePort
         if (port == null) {
-            Log.w("AichatApp", "⚠️ No active port — cannot send CAPTURE_NOW")
-            // أبلغ الـ Screen بالفشل مباشرة
-            onManualCaptureResult?.invoke(false, "")
+            Log.w("AichatApp", "⚠️ No active port")
+            onManualCaptureResult?.invoke(false, "", null)
             return
         }
         try {
             port.postMessage(JSONObject().put("type", "CAPTURE_NOW"))
-            Log.d("AichatApp", "📤 Sent CAPTURE_NOW via port")
+            Log.d("AichatApp", "📤 CAPTURE_NOW sent")
         } catch (e: Exception) {
-            Log.e("AichatApp", "❌ postMessage failed: ${e.message}")
-            onManualCaptureResult?.invoke(false, "")
+            Log.e("AichatApp", "❌ postMessage: ${e.message}")
+            onManualCaptureResult?.invoke(false, "", null)
         }
     }
 
@@ -91,14 +88,14 @@ class AichatApp : Application() {
                 "aicapture@aichat.example.com"
             )
             .accept(
-                { extension ->
-                    if (extension != null) {
-                        aiChatExtension = extension
-                        setupMessageDelegate(extension)
-                        Log.d("AichatApp", "✅ Extension loaded: ${extension.id}")
+                { ext ->
+                    if (ext != null) {
+                        aiChatExtension = ext
+                        setupMessageDelegate(ext)
+                        Log.d("AichatApp", "✅ Extension: ${ext.id}")
                     }
                 },
-                { e -> Log.e("AichatApp", "❌ Extension failed: ${e?.message}") }
+                { e -> Log.e("AichatApp", "❌ Extension: ${e?.message}") }
             )
     }
 
@@ -106,29 +103,52 @@ class AichatApp : Application() {
         extension.setMessageDelegate(
             object : WebExtension.MessageDelegate {
 
-                // ✅ Port — يُفتح من content.js عبر connectNative
                 override fun onConnect(port: WebExtension.Port) {
-                    Log.d("AichatApp", "✅ Port connected")
-                    activePort = port
+                    Log.d("AichatApp", "🔌 Port connected (pending PORT_READY)")
 
                     port.setDelegate(object : WebExtension.PortDelegate {
-                        override fun onPortMessage(message: Any, port: WebExtension.Port) {
-                            handleMessage(message)
+
+                        override fun onPortMessage(
+                            message: Any,
+                            port:    WebExtension.Port
+                        ) {
+                            val json = parseMessage(message) ?: return
+                            val type = json.optString("type")
+
+                            when (type) {
+
+                                // ✅ الـ top frame يُعرّف نفسه
+                                "PORT_READY" -> {
+                                    val domain = json.optString("domain")
+                                    Log.d("AichatApp",
+                                        "✅ PORT_READY from $domain — port updated"
+                                    )
+                                    // استبدل الـ Port القديم بالجديد
+                                    activePort = port
+                                }
+
+                                "CAPTURE_RESULT" -> {
+                                    handleCaptureResult(json)
+                                }
+
+                                else -> handleMessage(json)
+                            }
                         }
+
                         override fun onDisconnect(port: WebExtension.Port) {
                             Log.d("AichatApp", "⚠️ Port disconnected")
-                            activePort = null
+                            if (activePort === port) activePort = null
                         }
                     })
                 }
 
-                // runtime.sendMessage — للرسائل التلقائية
                 override fun onMessage(
                     nativeApp: String,
                     message:   Any,
                     sender:    WebExtension.MessageSender
                 ): org.mozilla.geckoview.GeckoResult<Any>? {
-                    handleMessage(message)
+                    val json = parseMessage(message)
+                    if (json != null) handleMessage(json)
                     return null
                 }
             },
@@ -137,47 +157,47 @@ class AichatApp : Application() {
         Log.d("AichatApp", "✅ MessageDelegate set")
     }
 
-    // ── handleMessage ─────────────────────────────────────────────────
+    // ── معالجة الرسائل ────────────────────────────────────────────────
 
-    internal fun handleMessage(message: Any) {
-        try {
-            val json = when (message) {
+    private fun handleMessage(json: JSONObject) {
+        val type = json.optString("type").ifBlank { return }
+        when (type) {
+            "AI_RESPONSE" -> {
+                val text   = json.optString("text")
+                val domain = json.optString("domain", "unknown")
+                if (text.length < 80) return
+                Log.d("AichatApp", "📨 Auto from $domain: ${text.take(60)}…")
+                onAiResponseCaptured?.invoke(domain, text)
+            }
+            "CAPTURE_RESULT" -> handleCaptureResult(json)
+        }
+    }
+
+    private fun handleCaptureResult(json: JSONObject) {
+        val success = json.optBoolean("success", false)
+        val text    = json.optString("text")
+        val domain  = json.optString("domain", "unknown")
+        val debug   = json.optJSONObject("debug")
+
+        if (success) {
+            Log.d("AichatApp", "🧠 Manual from $domain: ${text.take(60)}…")
+        } else {
+            Log.w("AichatApp", "⚠️ Manual failed — debug: $debug")
+        }
+
+        // ✅ استدعِ على الـ Main thread لأن Toast يحتاجه
+        Handler(Looper.getMainLooper()).post {
+            onManualCaptureResult?.invoke(success, text, debug)
+        }
+    }
+
+    private fun parseMessage(message: Any): JSONObject? {
+        return try {
+            when (message) {
                 is JSONObject -> message
                 is Map<*, *>  -> JSONObject(message as Map<*, *>)
-                else          -> {
-                    Log.w("AichatApp", "Unknown type: ${message::class.simpleName}")
-                    return
-                }
+                else          -> null
             }
-
-            val type = json.optString("type").ifBlank { return }
-
-            when (type) {
-
-                "AI_RESPONSE" -> {
-                    val text   = json.optString("text")
-                    val domain = json.optString("domain", "unknown")
-                    if (text.length < 80) return
-                    Log.d("AichatApp", "📨 Auto from $domain: ${text.take(60)}…")
-                    onAiResponseCaptured?.invoke(domain, text)
-                }
-
-                "CAPTURE_RESULT" -> {
-                    val success = json.optBoolean("success", false)
-                    val text    = json.optString("text")
-                    val domain  = json.optString("domain", "unknown")
-                    Log.d("AichatApp",
-                        if (success) "🧠 Manual from $domain: ${text.take(60)}…"
-                        else         "⚠️ Manual failed from $domain"
-                    )
-                    onManualCaptureResult?.invoke(success, text)
-                }
-
-                else -> Log.d("AichatApp", "⏭ Unknown: $type")
-            }
-
-        } catch (e: Exception) {
-            Log.e("AichatApp", "❌ handleMessage: ${e.message}")
-        }
+        } catch (e: Exception) { null }
     }
 }
