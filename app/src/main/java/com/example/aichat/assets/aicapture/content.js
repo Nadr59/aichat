@@ -38,7 +38,7 @@
         return null;
     }
 
-    // ── ChatGPT ───────────────────────────────────────────────────────
+    // ── Extractors ────────────────────────────────────────────────────
 
     function extractChatGPT() {
         var turns = document.querySelectorAll(
@@ -66,8 +66,6 @@
         return null;
     }
 
-    // ── Claude ────────────────────────────────────────────────────────
-
     function extractClaude() {
         return lastMatching(
                 '[data-is-streaming="false"] .font-claude-message'
@@ -76,15 +74,11 @@
             || lastMatching('[data-is-streaming="false"]');
     }
 
-    // ── Gemini ────────────────────────────────────────────────────────
-
     function extractGemini() {
         return lastMatching('model-response .markdown')
             || lastMatching('message-content')
             || lastMatching('model-response');
     }
-
-    // ── Fallback عام ──────────────────────────────────────────────────
 
     function extractByLongestBlock() {
         var EXCLUDE = [
@@ -109,8 +103,6 @@
         return best.length >= MIN_LEN ? best : null;
     }
 
-    // ── الموجّه الرئيسي ───────────────────────────────────────────────
-
     function extractLatestResponse() {
         var host = location.hostname;
         var text = null;
@@ -123,21 +115,19 @@
         return text ? text.substring(0, MAX_LEN) : null;
     }
 
-    // ── معلومات تشخيص ────────────────────────────────────────────────
-
     function debugInfo() {
         return {
-            url:        location.href,
             assistant:  document.querySelectorAll(
                 '[data-message-author-role="assistant"]'
             ).length,
             articles:   document.querySelectorAll('article').length,
             bodyLen:    document.body ? document.body.innerText.length : 0,
-            readyState: document.readyState
+            readyState: document.readyState,
+            url:        location.href
         };
     }
 
-    // ── إرسال تلقائي ──────────────────────────────────────────────────
+    // ── إرسال تلقائي عبر sendMessage ─────────────────────────────────
 
     function sendAutoToKotlin(text) {
         if (!text || text.length < 80) return;
@@ -147,13 +137,10 @@
             browser.runtime.sendMessage({
                 type:   'AI_RESPONSE',
                 text:   text,
-                url:    location.href,
                 domain: location.hostname
             });
         } catch (e) {}
     }
-
-    // ── مراقبة تلقائية ────────────────────────────────────────────────
 
     var observer = new MutationObserver(function () {
         clearTimeout(debounceTimer);
@@ -175,54 +162,38 @@
     }
     startObserver();
 
-    // ── Port للحفظ اليدوي ─────────────────────────────────────────────
+    // ── ✅ Port — browser.runtime.connect() وليس connectNative ────────
 
-    var activePort    = null;
-    var retryCount    = 0;
-    var MAX_RETRIES   = 5;
+    var port = null;
 
     function connectPort() {
         try {
-            activePort = browser.runtime.connectNative('browser');
+            // ✅ الطريقة الصحيحة في GeckoView
+            port = browser.runtime.connect({ name: 'aichat-port' });
 
-            // ✅ أعلم Kotlin أن هذا top frame
-            activePort.postMessage({
-                type:   'PORT_READY',
-                domain: location.hostname,
-                url:    location.href
-            });
-
-            // reset عند النجاح
-            retryCount = 0;
-
-            activePort.onMessage.addListener(function (message) {
+            port.onMessage.addListener(function (message) {
                 if (!message || message.type !== 'CAPTURE_NOW') return;
 
                 var text = extractLatestResponse();
                 var ok   = !!(text && text.length >= MIN_LEN);
 
-                activePort.postMessage({
+                port.postMessage({
                     type:    'CAPTURE_RESULT',
                     success: ok,
                     text:    ok ? text : '',
                     domain:  location.hostname,
-                    source:  'manual',
                     debug:   debugInfo()
                 });
             });
 
-            activePort.onDisconnect.addListener(function () {
-                activePort = null;
-                retryCount++;
-                if (retryCount <= MAX_RETRIES) {
-                    setTimeout(connectPort, 3000);
-                }
-                // بعد MAX_RETRIES نتوقف — connectNative لا يعمل
+            port.onDisconnect.addListener(function () {
+                port = null;
+                setTimeout(connectPort, 3000);
             });
 
         } catch (e) {
-            // connectNative غير متاح — نستخدم sendMessage فقط
-            activePort = null;
+            port = null;
+            setTimeout(connectPort, 5000);
         }
     }
 
