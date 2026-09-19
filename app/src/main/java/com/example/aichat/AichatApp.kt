@@ -7,6 +7,7 @@ import android.util.Log
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.repository.WebPlatformRepository
 import org.json.JSONObject
+import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
@@ -20,13 +21,59 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension?  = null
         private set
 
-    @Volatile private var activePort: WebExtension.Port? = null
+    // ✅ GeckoResult معلّق — يُكمَل عند ضغط الزر
+    @Volatile private var pendingCapture: GeckoResult<Any>? = null
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
+
+    // ── Delegate مشترك ────────────────────────────────────────────────
+
+    private val messageDelegate = object : WebExtension.MessageDelegate {
+
+        override fun onMessage(
+            nativeApp: String,
+            message:   Any,
+            sender:    WebExtension.MessageSender
+        ): GeckoResult<Any>? {
+
+            val json = parseMessage(message) ?: return null
+            val type = json.optString("type")
+
+            return when (type) {
+
+                // ✅ content.js يرسل WAIT_CAPTURE ويستنى
+                "WAIT_CAPTURE" -> {
+                    // ألغِ الانتظار القديم إن وجد
+                    pendingCapture?.complete(
+                        JSONObject().put("capture", false)
+                    )
+                    // أنشئ result جديد ومعلّق
+                    val result = GeckoResult<Any>()
+                    pendingCapture = result
+                    Log.d("AichatApp", "⏳ WAIT_CAPTURE registered")
+                    result  // ← لا يُكمَل الآن — ينتظر requestManualCapture()
+                }
+
+                // ✅ content.js أرسل النتيجة
+                "CAPTURE_RESULT" -> {
+                    handleCaptureResult(json)
+                    null
+                }
+
+                // التلقائي
+                "AI_RESPONSE" -> {
+                    handleAutoResponse(json)
+                    null
+                }
+
+                else -> null
+            }
+        }
+    }
 
     // ── onCreate ──────────────────────────────────────────────────────
 
@@ -62,42 +109,34 @@ class AichatApp : Application() {
         }
     }
 
-    // ── ✅ يُستدعى من GeckoTestScreen لكل Session ─────────────────────
+    // ── ✅ زر 🧠 — يوقظ content.js فوراً ─────────────────────────────
+
+    fun requestManualCapture() {
+        val pending = pendingCapture
+        if (pending == null) {
+            Log.w("AichatApp", "⚠️ No page waiting")
+            Handler(Looper.getMainLooper()).post {
+                onManualCaptureResult?.invoke(false, "", null)
+            }
+            return
+        }
+        pendingCapture = null
+        // ✅ يوقظ content.js — يكمل الـ Promise هناك
+        pending.complete(JSONObject().put("capture", true))
+        Log.d("AichatApp", "✅ Capture triggered")
+    }
+
+    // ── ✅ registerSession — للـ content scripts ──────────────────────
 
     fun registerSession(session: GeckoSession) {
         val ext = aiChatExtension
         if (ext == null) {
-            Log.w("AichatApp", "⚠️ Extension not ready yet")
+            Log.w("AichatApp", "⚠️ Extension not ready")
             return
         }
-        session.webExtensionController.setMessageDelegate(
-            ext,
-            makeDelegate(),
-            "browser"
-        )
-        Log.d("AichatApp", "✅ Session delegate registered")
-    }
-
-    // ── زر 🧠 ────────────────────────────────────────────────────────
-
-    fun requestManualCapture() {
-        val port = activePort
-        if (port == null) {
-            Log.w("AichatApp", "⚠️ No active port")
-            Handler(Looper.getMainLooper()).post {
-                onManualCaptureResult?.invoke(false, "", null)
-            }
-            return
-        }
-        try {
-            port.postMessage(JSONObject().put("type", "CAPTURE_NOW"))
-            Log.d("AichatApp", "📤 CAPTURE_NOW sent")
-        } catch (e: Exception) {
-            Log.e("AichatApp", "❌ postMessage: ${e.message}")
-            Handler(Looper.getMainLooper()).post {
-                onManualCaptureResult?.invoke(false, "", null)
-            }
-        }
+        session.webExtensionController
+            .setMessageDelegate(ext, messageDelegate, "browser")
+        Log.d("AichatApp", "✅ Session registered")
     }
 
     // ── Extension ─────────────────────────────────────────────────────
@@ -112,66 +151,23 @@ class AichatApp : Application() {
                 { ext ->
                     if (ext != null) {
                         aiChatExtension = ext
-                        // ✅ delegate على الـ extension للـ background
-                        ext.setMessageDelegate(makeDelegate(), "browser")
-                        Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
+                        // للـ background (إن وجد)
+                        ext.setMessageDelegate(messageDelegate, "browser")
+                        Log.d("AichatApp", "✅ Extension: ${ext.id}")
                     }
                 },
                 { e -> Log.e("AichatApp", "❌ Extension: ${e?.message}") }
             )
     }
 
-    // ── Delegate مشترك ────────────────────────────────────────────────
-
-    private fun makeDelegate() = object : WebExtension.MessageDelegate {
-
-        // ✅ content script يتصل عبر connectNative("browser")
-        override fun onConnect(port: WebExtension.Port) {
-            Log.d("AichatApp", "✅ Port connected!")
-            activePort = port
-
-            port.setDelegate(object : WebExtension.PortDelegate {
-                override fun onPortMessage(message: Any, port: WebExtension.Port) {
-                    val json = parseMessage(message) ?: return
-                    when (json.optString("type")) {
-                        "CAPTURE_RESULT" -> handleCaptureResult(json)
-                        else             -> handleMessage(json)
-                    }
-                }
-                override fun onDisconnect(port: WebExtension.Port) {
-                    Log.d("AichatApp", "⚠️ Port disconnected")
-                    if (activePort === port) activePort = null
-                }
-            })
-        }
-
-        // رسائل sendMessage التلقائية
-        override fun onMessage(
-            nativeApp: String,
-            message:   Any,
-            sender:    WebExtension.MessageSender
-        ): org.mozilla.geckoview.GeckoResult<Any>? {
-            handleMessage(parseMessage(message) ?: return null)
-            return null
-        }
-    }
-
     // ── معالجة الرسائل ────────────────────────────────────────────────
 
-    private fun handleMessage(json: JSONObject) {
-        val type = json.optString("type").ifBlank { return }
-        when (type) {
-            "AI_RESPONSE" -> {
-                val text   = json.optString("text")
-                val domain = json.optString("domain", "unknown")
-                if (text.length < 80) return
-                Log.d("AichatApp", "📨 Auto from $domain: ${text.take(60)}…")
-                Handler(Looper.getMainLooper()).post {
-                    onAiResponseCaptured?.invoke(domain, text)
-                }
-            }
-            "CAPTURE_RESULT" -> handleCaptureResult(json)
-        }
+    private fun handleAutoResponse(json: JSONObject) {
+        val text   = json.optString("text")
+        val domain = json.optString("domain", "unknown")
+        if (text.length < 80) return
+        Log.d("AichatApp", "📨 Auto from $domain: ${text.take(60)}…")
+        onAiResponseCaptured?.invoke(domain, text)
     }
 
     private fun handleCaptureResult(json: JSONObject) {
@@ -182,12 +178,10 @@ class AichatApp : Application() {
 
         Log.d("AichatApp",
             if (success) "🧠 OK from $domain: ${text.take(60)}…"
-            else         "⚠️ Failed from $domain — $debug"
+            else         "⚠️ Failed — debug: $debug"
         )
 
-        Handler(Looper.getMainLooper()).post {
-            onManualCaptureResult?.invoke(success, text, debug)
-        }
+        onManualCaptureResult?.invoke(success, text, debug)
     }
 
     private fun parseMessage(message: Any): JSONObject? = try {
