@@ -26,16 +26,15 @@ import com.example.aichat.ui.screens.GeckoTestScreen
 import com.example.aichat.ui.screens.MemoryScreen
 import com.example.aichat.ui.screens.SettingsScreen
 import com.example.aichat.ui.screens.WebPlatformsScreen
-import com.example.aichat.ui.screens.WebScreen
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 
 @Composable
 fun MainNavigation(app: AichatApp) {
 
-    val navController                          = rememberNavController()
-    val settings                               = remember { AiSettings(app) }
-    val chatViewModel: ChatViewModel           = viewModel()
+    val navController                                = rememberNavController()
+    val settings                                     = remember { AiSettings(app) }
+    val chatViewModel: ChatViewModel                 = viewModel()
     val webPlatformsViewModel: WebPlatformsViewModel = viewModel(
         factory = WebPlatformsViewModel.Factory(app.webPlatformRepository)
     )
@@ -171,26 +170,36 @@ fun MainNavigation(app: AichatApp) {
                     }
 
                     platform?.let { p ->
-                        when (WebEngine.valueOf(p.preferredEngine)) {
+
+                        val engine = remember(p.preferredEngine) {
+                            runCatching { WebEngine.valueOf(p.preferredEngine) }
+                                .getOrDefault(WebEngine.GECKO) // ✅ آمن — لا crash إذا قيمة غريبة
+                        }
+
+                        when (engine) {
 
                             WebEngine.GECKO -> GeckoTestScreen(
                                 url           = p.url,
                                 title         = p.name,
                                 onBack        = { navController.popBackStack() },
-                                platform      = p,              // ✅ جديد
-                                chatViewModel = chatViewModel   // ✅ جديد
+                                platform      = p,            // ✅ CSS selector + memoryEnabled
+                                chatViewModel = chatViewModel // ✅ يحفظ الردود في الذاكرة
                             )
 
+                            // ✅ WEBVIEW و EXTERNAL → GeckoTestScreen كـ fallback
+                            // (احذف هذا إذا كان WebScreen موجوداً في مشروعك)
                             WebEngine.WEBVIEW,
-                            WebEngine.EXTERNAL -> WebScreen(
+                            WebEngine.EXTERNAL -> GeckoTestScreen(
                                 url           = p.url,
                                 title         = p.name,
-                                initialEngine = WebEngine.valueOf(p.preferredEngine),
-                                onNavigateUp  = { navController.popBackStack() }
+                                onBack        = { navController.popBackStack() },
+                                platform      = null, // لا نحفظ للذاكرة
+                                chatViewModel = null
                             )
                         }
+
                     } ?: Box(
-                        Modifier.fillMaxSize(),
+                        modifier         = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator()
