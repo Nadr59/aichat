@@ -207,57 +207,12 @@ fun GeckoTestScreen(
     }
 
     // ── ✅ ربط MessageDelegate بالـ Session عبر webExtensionController ────
-    DisposableEffect(session, platform?.id) {
-        val p   = platform
-        val ext = app.aiChatExtension
-
-        if (p != null && chatViewModel != null && p.memoryEnabled && ext != null) {
-
-            val delegate = object : WebExtension.MessageDelegate {
-                override fun onMessage(
-                    nativeApp: String,
-                    message:   Any,                        // ✅ non-null
-                    sender:    WebExtension.MessageSender
-                ): GeckoResult<Any>? {
-                    // ✅ GeckoView يُرسل JSONObject
-                    val json    = message as? JSONObject ?: return null
-                    val type    = json.optString("type").ifBlank { return null }
-                    val text    = json.optString("text")
-                    val success = json.optBoolean("success", false)
-                    val domain  = json.optString("domain", "unknown")
-
-                    when (type) {
-                        "AI_RESPONSE"    ->
-                            if (text.isNotBlank())
-                                app.onAiResponseCaptured?.invoke(domain, text)
-
-                        "CAPTURE_RESULT" ->
-                            app.onManualCaptureResult?.invoke(success, text)
-                    }
-                    return null
                 }
-            }
 
-            // ✅ API الصحيح في GeckoView 130
-            session.webExtensionController
-                .setMessageDelegate(ext, delegate, "browser")
+            
+            
 
-            Log.d("GeckoTestScreen", "✅ Session MessageDelegate set")
-        }
-
-        onDispose {
-            val ext2 = app.aiChatExtension
-            if (ext2 != null) {
-                try {
-                    session.webExtensionController
-                        .setMessageDelegate(ext2, null, "browser")
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
-    // ── دالة الحفظ اليدوي ────────────────────────────────────────────────
-    // ✅ احذف كل كود session.load() القديم
+    
 // واستبدل saveToMemory بهذا:
 
 val saveToMemory: () -> Unit = save@{
