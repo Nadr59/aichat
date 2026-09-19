@@ -257,21 +257,23 @@ fun GeckoTestScreen(
     }
 
     // ── دالة الحفظ اليدوي ────────────────────────────────────────────────
-    val saveToMemory: () -> Unit = save@{
-        if (isSavingMemory || isLoading)        return@save
-        if (platform == null)                   return@save
-        if (!platform.memoryEnabled)            return@save
-        if (chatViewModel == null)              return@save
+    // ✅ احذف كل كود session.load() القديم
+// واستبدل saveToMemory بهذا:
 
-        isSavingMemory = true
+val saveToMemory: () -> Unit = save@{
+    if (isSavingMemory || isLoading)   return@save
+    if (platform == null)              return@save
+    if (!platform.memoryEnabled)       return@save
+    if (chatViewModel == null)         return@save
 
-        // ✅ GeckoSession.Loader — الـ API الصحيح في GeckoView 83+
-        session.load(
-            GeckoSession.Loader()
-                .uri(buildCaptureScript())
-                .flags(GeckoSession.LOAD_FLAGS_NONE)
-        )
-    }
+    isSavingMemory = true
+
+    // ✅ أرسل عبر Port — لا javascript: URI
+    app.requestManualCapture()
+}
+
+// ✅ احذف هذه الدالة نهائياً — لم نعد نحتاجها:
+// private fun buildCaptureScript(): String = "javascript:..."
 
     // ── رجوع ذكي ─────────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
