@@ -76,16 +76,13 @@ fun GeckoTestScreen(
             .getOrCreateGeckoRuntime()
     }
 
-    // ── Runtime غير متاح ──────────────────────────────────────────────────
+    // ── Runtime غير متاح ─────────────────────────────────────────────────
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
             platformUrl   = url,
-            onOpenBrowser = {
-                openExternal(context, url)
-                onBack()
-            },
-            onBack = onBack
+            onOpenBrowser = { openExternal(context, url); onBack() },
+            onBack        = onBack
         )
         return
     }
@@ -99,11 +96,13 @@ fun GeckoTestScreen(
     var loadError    by remember { mutableStateOf<String?>(null) }
     var geckoViewRef by remember { mutableStateOf<GeckoView?>(null) }
 
-    // ── ربط callback الذاكرة ─────────────────────────────────────────────
+    // ✅ جديد — حالة الحفظ اليدوي
+    var isSavingMemory by remember { mutableStateOf(false) }
+
     val app = context.applicationContext as AichatApp
 
+    // ── ربط callback التلقائي ─────────────────────────────────────────────
     DisposableEffect(platform?.id) {
-        // ✅ val محلي يحل مشكلة nullable داخل lambda
         val currentPlatform = platform
 
         if (currentPlatform != null &&
@@ -116,6 +115,7 @@ fun GeckoTestScreen(
                     platformName = currentPlatform.name,
                     text         = text
                 )
+                Log.d("GeckoTestScreen", "🧠 Auto-saved from $domain: ${text.take(50)}")
             }
             Log.d("GeckoTestScreen", "✅ Memory active: ${currentPlatform.name}")
         }
@@ -177,10 +177,59 @@ fun GeckoTestScreen(
                         WebRequestError.ERROR_CATEGORY_NETWORK  -> "تعذر الاتصال بالإنترنت"
                         WebRequestError.ERROR_CATEGORY_URI      -> "الرابط غير صالح"
                         WebRequestError.ERROR_CATEGORY_SECURITY -> "مشكلة في شهادة الأمان"
-                        else                                    -> "حدث خطأ أثناء تحميل الصفحة"
+                        else -> "حدث خطأ أثناء تحميل الصفحة"
                     }
                     return null
                 }
+            }
+        }
+    }
+
+    // ── دالة الحفظ اليدوي ────────────────────────────────────────────────
+    // ✅ JavaScript يستخرج آخر رد من الصفحة الحالية
+    val saveCurrentPageToMemory: () -> Unit = {
+        if (!isSavingMemory && platform != null && chatViewModel != null) {
+            isSavingMemory = true
+
+            // JavaScript يستخرج النص من الصفحة
+            val js = buildManualCaptureJs(platform)
+
+            session.evaluateJS(js) { result ->
+                val text = result?.toString()?.trim()
+
+                when {
+                    text.isNullOrBlank() || text == "null" || text == "undefined" -> {
+                        // ✅ لا يوجد رد — أبلغ المستخدم
+                        Toast.makeText(
+                            context,
+                            "⚠️ لم يُعثر على رد AI في الصفحة",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    text.length < 20 -> {
+                        // النص قصير جداً — ليس رداً حقيقياً
+                        Toast.makeText(
+                            context,
+                            "⚠️ النص قصير جداً للحفظ",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    else -> {
+                        // ✅ حفظ في الذاكرة
+                        chatViewModel.onWebAiResponse(
+                            platformId   = platform.id,
+                            platformName = platform.name,
+                            text         = text
+                        )
+                        Toast.makeText(
+                            context,
+                            "✅ تم حفظ الرد في الذاكرة",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        Log.d("GeckoTestScreen", "🧠 Manual save: ${text.take(80)}")
+                    }
+                }
+                isSavingMemory = false
             }
         }
     }
@@ -197,7 +246,7 @@ fun GeckoTestScreen(
             when (event) {
                 Lifecycle.Event.ON_STOP  -> session.setActive(false)
                 Lifecycle.Event.ON_START -> session.setActive(true)
-                else                     -> Unit
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -242,18 +291,27 @@ fun GeckoTestScreen(
             },
             navigationIcon = {
                 IconButton(onClick = handleBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "رجوع"
+                    )
                 }
             },
             actions = {
-                // ✅ إصلاح nullable — platform != null أولاً
-                if (platform != null && platform.memoryEnabled) {
-                    Text(
-                        text     = "🧠",
-                        style    = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
+
+                // ✅ زر الذاكرة — قابل للضغط الآن
+                if (platform != null && platform.memoryEnabled && chatViewModel != null) {
+                    IconButton(
+                        onClick  = saveCurrentPageToMemory,
+                        enabled  = !isSavingMemory && !isLoading
+                    ) {
+                        Text(
+                            text  = if (isSavingMemory) "⏳" else "🧠",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
                 }
+
                 IconButton(onClick = { session.reload() }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
                 }
@@ -303,6 +361,55 @@ fun GeckoTestScreen(
                 )
             }
         }
+    }
+}
+
+// ── JavaScript لاستخراج آخر رد يدوياً ────────────────────────────────────────
+
+private fun buildManualCaptureJs(platform: WebPlatform): String {
+    // إذا عرّف المستخدم selector مخصص استخدمه
+    // وإلا استخدم المنطق العام
+    val customSelector = platform.aiMessageSelector.trim()
+
+    return if (customSelector.isNotEmpty()) {
+        """
+        (function() {
+            var elements = document.querySelectorAll('$customSelector');
+            if (!elements || elements.length === 0) return null;
+            var last = elements[elements.length - 1];
+            return last ? last.innerText.trim() : null;
+        })()
+        """.trimIndent()
+    } else {
+        // Fallback عام — يجرب selectors معروفة بالترتيب
+        """
+        (function() {
+            var selectors = [
+                '[data-message-author-role="assistant"] .markdown',
+                '[data-message-author-role="assistant"]',
+                '.claude-response',
+                '[data-testid="conversation-turn-assistant"]',
+                '.agent-turn .whitespace-pre-wrap',
+                'article[data-testid*="message"]:last-child',
+                '.message.assistant:last-child',
+                '.ai-response:last-child',
+                '[class*="assistant"]:last-child',
+                '[class*="bot-message"]:last-child',
+                '[class*="ai-message"]:last-child'
+            ];
+            
+            for (var i = 0; i < selectors.length; i++) {
+                var elements = document.querySelectorAll(selectors[i]);
+                if (elements && elements.length > 0) {
+                    var last = elements[elements.length - 1];
+                    var text = last ? last.innerText.trim() : null;
+                    if (text && text.length > 20) return text;
+                }
+            }
+            
+            return null;
+        })()
+        """.trimIndent()
     }
 }
 
