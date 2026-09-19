@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -21,7 +22,6 @@ import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +50,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.AichatApp
+import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.ui.viewmodel.ChatViewModel
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -60,14 +62,15 @@ import org.mozilla.geckoview.WebRequestError
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GeckoTestScreen(
-    url:    String,
-    title:  String,
-    onBack: () -> Unit
+    url:           String,
+    title:         String,
+    onBack:        () -> Unit,
+    platform:      WebPlatform?   = null,   // ✅ جديد
+    chatViewModel: ChatViewModel? = null    // ✅ جديد
 ) {
-    val context       = LocalContext.current
+    val context        = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // ✅ Lazy — ينشئ عند الحاجة فقط، لا في onCreate
     val runtime: GeckoRuntime? = remember {
         (context.applicationContext as AichatApp)
             .getOrCreateGeckoRuntime()
@@ -95,6 +98,26 @@ fun GeckoTestScreen(
     var currentTitle by remember { mutableStateOf(title) }
     var loadError    by remember { mutableStateOf<String?>(null) }
     var geckoViewRef by remember { mutableStateOf<GeckoView?>(null) }
+
+    // ── ربط callback الذاكرة ─────────────────────────────────────────────
+    val app = context.applicationContext as AichatApp
+
+    DisposableEffect(platform?.id) {
+        if (platform?.memoryEnabled == true && chatViewModel != null) {
+            app.onAiResponseCaptured = { domain, text ->
+                chatViewModel.onWebAiResponse(
+                    platformId   = platform.id,
+                    platformName = platform.name,
+                    text         = text
+                )
+            }
+            Log.d("GeckoTestScreen", "✅ Memory capture active for: ${platform.name}")
+        }
+        onDispose {
+            app.onAiResponseCaptured = null
+            Log.d("GeckoTestScreen", "🧹 Memory capture cleared")
+        }
+    }
 
     // ── الجلسة ────────────────────────────────────────────────────────────
     val session = remember {
@@ -139,8 +162,8 @@ fun GeckoTestScreen(
                 }
                 override fun onLoadError(
                     session: GeckoSession,
-                    uri: String?,
-                    error: WebRequestError
+                    uri:     String?,
+                    error:   WebRequestError
                 ): GeckoResult<String>? {
                     isLoading = false
                     loadError = when (error.category) {
@@ -155,29 +178,6 @@ fun GeckoTestScreen(
         }
     }
 
-    // ✅ في GeckoTestScreen — أضف هذا في remember أو LaunchedEffect
-
-val app = context.applicationContext as AichatApp
-
-// ربط الـ callback بـ ChatViewModel
-DisposableEffect(platform?.id) {
-    if (platform?.memoryEnabled == true && chatViewModel != null) {
-        app.onAiResponseCaptured = { domain, text ->
-            chatViewModel.onWebAiResponse(
-                platformId   = platform.id,
-                platformName = platform.name,
-                text         = text
-            )
-        }
-        Log.d("GeckoScreen", "✅ Memory capture active for: ${platform.name}")
-    }
-
-    onDispose {
-        // تنظيف عند مغادرة الشاشة
-        app.onAiResponseCaptured = null
-        Log.d("GeckoScreen", "🧹 Memory capture cleared")
-    }
-}
     // ── رجوع ذكي ─────────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
         if (canGoBack) session.goBack() else onBack()
@@ -197,14 +197,14 @@ DisposableEffect(platform?.id) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── تنظيف ────────────────────────────────────────────────────────────
+    // ── تنظيف الجلسة ─────────────────────────────────────────────────────
     DisposableEffect(session) {
         onDispose {
             try {
                 geckoViewRef?.releaseSession()
                 session.close()
             } catch (e: Exception) {
-                android.util.Log.w("GeckoTestScreen", "Cleanup: ${e.message}")
+                Log.w("GeckoTestScreen", "Cleanup: ${e.message}")
             }
         }
     }
@@ -239,6 +239,14 @@ DisposableEffect(platform?.id) {
                 }
             },
             actions = {
+                // ✅ مؤشر بصري أن الذاكرة مفعّلة
+                if (platform?.memoryEnabled == true) {
+                    Text(
+                        text     = "🧠",
+                        style    = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
+                }
                 IconButton(onClick = { session.reload() }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
                 }
@@ -311,7 +319,9 @@ private fun LoadErrorView(
     onOpenBrowser: () -> Unit
 ) {
     Box(
-        modifier         = Modifier.fillMaxSize().padding(24.dp),
+        modifier         = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -325,7 +335,7 @@ private fun LoadErrorView(
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(4.dp))
-            Button(onClick = onRetry) { Text("إعادة المحاولة") }
+            Button(onClick = onRetry)          { Text("إعادة المحاولة") }
             OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
         }
     }
