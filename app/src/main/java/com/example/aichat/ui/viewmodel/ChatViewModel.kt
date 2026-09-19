@@ -30,8 +30,12 @@ import java.security.MessageDigest
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db  = ChatDatabase.getInstance(application)
-    private val dao = db.chatDao()
+    // ============================================================
+    // Dependencies
+    // ============================================================
+
+    private val db      = ChatDatabase.getInstance(application)
+    private val dao     = db.chatDao()
     private val memoryDao = db.memoryDao()
 
     val repository = ChatRepository(application)
@@ -52,7 +56,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private var messagesCollectJob: Job? = null
 
-    // ── Helper: EmbeddingService ──────────────────────────────────────────────
+    // ── EmbeddingService ─────────────────────────────────────────
     private val embeddingService: EmbeddingService
         get() = EmbeddingService(AiSettings(getApplication()).geminiKey)
 
@@ -140,18 +144,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * يبحث في الذاكرة المشتركة ويبني سياقاً نصياً للرسالة القادمة.
+     */
     private suspend fun prepareMemoryContext(userText: String) {
         if (userText.isBlank()) { _memoryContext.value = ""; return }
 
         try {
             android.util.Log.d("ChatViewModel", "🔍 Memory context for: ${userText.take(50)}")
+
             val memories = memoryRepository.searchSharedMemories(
                 query               = userText,
                 useSemanticAnalysis = true,
                 ollamaUrl           = "http://127.0.0.1:11434"
             )
+
             android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
             _memoryContext.value = memoryContextBuilder.build(memories)
+
         } catch (e: Exception) {
             android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext: ${e.message}", e)
             _memoryContext.value = ""
@@ -170,13 +180,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun newConversation() {
         messagesCollectJob?.cancel()
-        messagesCollectJob       = null
+        messagesCollectJob           = null
         _currentConversationId.value = null
-        _messages.value          = emptyList()
-        _selectedImageBase64.value = null
-        _memoryContext.value     = ""
-        _error.value             = null
-        _successMessage.value    = null
+        _messages.value              = emptyList()
+        _selectedImageBase64.value   = null
+        _memoryContext.value         = ""
+        _error.value                 = null
+        _successMessage.value        = null
     }
 
     private fun startCollecting(conversationId: Long) {
@@ -208,17 +218,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val imageBase64 = _selectedImageBase64.value
 
+                // ── إنشاء محادثة جديدة إن لم تكن موجودة ─────────────────
                 val convId = _currentConversationId.value ?: run {
                     val id = conversationRepository.insertConversation(
-                        Conversation(title = userText.take(50).ifBlank { "محادثة جديدة" })
+                        Conversation(
+                            title = userText.take(50).ifBlank { "محادثة جديدة" }
+                        )
                     )
                     _currentConversationId.value = id
                     startCollecting(id)
                     id
                 }
 
+                // ── سحب السجل قبل إضافة الرسالة الجديدة ─────────────────
                 val historySnapshot = conversationRepository.getMessagesOnce(convId)
 
+                // ── حفظ رسالة المستخدم ────────────────────────────────────
                 conversationRepository.insertMessage(
                     Message(
                         conversationId = convId,
@@ -230,8 +245,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 _selectedImageBase64.value = null
+
+                // ── بناء سياق الذاكرة ────────────────────────────────────
                 prepareMemoryContext(userText)
 
+                // ── استدعاء الـ AI ────────────────────────────────────────
                 val response = repository.sendMessage(
                     history       = historySnapshot,
                     userMessage   = userText,
@@ -239,17 +257,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     memoryContext = _memoryContext.value
                 )
 
-                conversationRepository.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role           = "assistant",
-                        content        = response,
-                        messageType    = "text"
-                    )
+                // ── حفظ رد المساعد ────────────────────────────────────────
+                val assistantMessage = Message(
+                    conversationId = convId,
+                    role           = "assistant",
+                    content        = response,
+                    messageType    = "text"
                 )
+                conversationRepository.insertMessage(assistantMessage)
 
+                // ── فهرسة رد المساعد في الذاكرة بشكل غير متزامن ──────────
+                viewModelScope.launch {
+                    try {
+                        memoryRepository.searchSharedMemories(
+                            query               = response.take(200),
+                            useSemanticAnalysis = false,
+                            ollamaUrl           = "http://127.0.0.1:11434"
+                        )
+                    } catch (e: Exception) {
+                        android.util.Log.w("ChatViewModel", "Memory index skip: ${e.message}")
+                    }
+                }
+
+                // ── تحديث عنوان المحادثة ──────────────────────────────────
                 val title = historySnapshot
-                    .firstOrNull { it.role == "user" }?.content ?: userText
+                    .firstOrNull { it.role == "user" }?.content
+                    ?: userText
 
                 conversationRepository.updateConversation(
                     Conversation(
@@ -267,29 +300,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── في sendChatMessage() بعد حفظ رسالة المساعد مباشرة ────────────────────────
-
-val assistantMessage = Message(
-    conversationId = convId,
-    role           = "assistant",
-    content        = response,
-    messageType    = "text"
-)
-
-conversationRepository.insertMessage(assistantMessage)
-
-// ✅ تحليل رد المساعد وإدخاله في الذاكرة تلقائياً
-viewModelScope.launch {
-    try {
-        memoryRepository.searchSharedMemories(
-            query               = response.take(200),
-            useSemanticAnalysis = false,
-            ollamaUrl           = "http://127.0.0.1:11434"
-        )
-    } catch (e: Exception) {
-        android.util.Log.w("ChatViewModel", "Memory index skip: ${e.message}")
-    }
-}
     // ============================================================
     // الصور
     // ============================================================
@@ -298,7 +308,10 @@ viewModelScope.launch {
         viewModelScope.launch {
             try {
                 val base64 = imageProcessor.uriToBase64(uri)
-                if (base64 == null) { _error.value = "تعذر قراءة الصورة"; return@launch }
+                if (base64 == null) {
+                    _error.value = "تعذر قراءة الصورة"
+                    return@launch
+                }
                 _selectedImageBase64.value = base64
             } catch (e: Exception) {
                 _error.value = "فشل تحميل الصورة: ${e.message}"
@@ -324,7 +337,8 @@ viewModelScope.launch {
                 if (mimeType.startsWith("image/")) {
                     selectImage(uri)
                 } else {
-                    _error.value = "⚠️ الملفات غير الصورة غير مدعومة: ${getDisplayName(uri)}"
+                    _error.value =
+                        "⚠️ الملفات غير الصورة غير مدعومة: ${getDisplayName(uri)}"
                 }
             } catch (e: Exception) {
                 _error.value = "فشل تحميل الملف: ${e.message}"
@@ -338,8 +352,8 @@ viewModelScope.launch {
 
     fun processAndSaveFile(uri: Uri) {
         viewModelScope.launch {
-            _isLoading.value  = true
-            _error.value      = null
+            _isLoading.value      = true
+            _error.value          = null
             _successMessage.value = null
 
             try {
@@ -354,13 +368,17 @@ viewModelScope.launch {
                 android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} chars")
 
                 val chunks = if (content.length > 1000)
-                    fileProcessor.chunkText(text = content, maxChunkSize = 800, overlap = 100)
+                    fileProcessor.chunkText(
+                        text         = content,
+                        maxChunkSize = 800,
+                        overlap      = 100
+                    )
                 else listOf(content)
 
                 val totalChunks   = chunks.size
                 val limitedChunks = chunks.take(20)
 
-                // ── فلترة التكرار قبل طلب API ────────────────────────────
+                // ── فلترة التكرار قبل طلب API ─────────────────────────────
                 val newChunks    = mutableListOf<String>()
                 var skippedCount = 0
 
@@ -382,13 +400,12 @@ viewModelScope.launch {
                 if (newChunks.isNotEmpty()) {
                     // ── طلب Batch واحد لكل الـ chunks ──────────────────────
                     val embeddings = try {
-                        embeddingService.getBatchEmbeddings(newChunks)
-                            .also {
-                                android.util.Log.d(
-                                    "ChatViewModel",
-                                    "🚀 Batch: ${newChunks.size} chunks → 1 API call"
-                                )
-                            }
+                        embeddingService.getBatchEmbeddings(newChunks).also {
+                            android.util.Log.d(
+                                "ChatViewModel",
+                                "🚀 Batch: ${newChunks.size} chunks → 1 API call"
+                            )
+                        }
                     } catch (e: Exception) {
                         android.util.Log.w(
                             "ChatViewModel",
@@ -408,16 +425,22 @@ viewModelScope.launch {
                         )
                         if (id > 0) {
                             savedCount++
-                            android.util.Log.d("ChatViewModel", "💾 Chunk ${i + 1}: saved (id=$id)")
+                            android.util.Log.d(
+                                "ChatViewModel",
+                                "💾 Chunk ${i + 1}: saved (id=$id)"
+                            )
                         }
                     }
                 }
 
                 _successMessage.value = buildString {
                     append("✅ تم حفظ $savedCount جزء في الذاكرة")
-                    if (skippedCount > 0) append("\n⚠️ تم تخطي $skippedCount (موجودة مسبقاً)")
-                    if (totalChunks > 20) append("\n📌 من أصل $totalChunks (الحد الأقصى 20)")
-                    if (newChunks.isNotEmpty()) append("\n🚀 Batch: طلب API واحد")
+                    if (skippedCount > 0)
+                        append("\n⚠️ تم تخطي $skippedCount (موجودة مسبقاً)")
+                    if (totalChunks > 20)
+                        append("\n📌 من أصل $totalChunks (الحد الأقصى 20)")
+                    if (newChunks.isNotEmpty())
+                        append("\n🚀 Batch: طلب API واحد")
                 }
 
             } catch (e: Exception) {
@@ -435,8 +458,8 @@ viewModelScope.launch {
 
     fun saveWebPage(url: String) {
         viewModelScope.launch {
-            _isLoading.value  = true
-            _error.value      = null
+            _isLoading.value      = true
+            _error.value          = null
             _successMessage.value = null
 
             try {
@@ -454,7 +477,11 @@ viewModelScope.launch {
                     append(result.content)
                 }
 
-                val chunks        = fileProcessor.chunkText(text = fullText, maxChunkSize = 800, overlap = 100)
+                val chunks        = fileProcessor.chunkText(
+                    text         = fullText,
+                    maxChunkSize = 800,
+                    overlap      = 100
+                )
                 val totalChunks   = chunks.size
                 val limitedChunks = chunks.take(20)
 
@@ -482,7 +509,10 @@ viewModelScope.launch {
                     val embeddings = try {
                         embeddingService.getBatchEmbeddings(newChunks)
                     } catch (e: Exception) {
-                        android.util.Log.w("ChatViewModel", "⚠️ Batch failed: ${e.message}")
+                        android.util.Log.w(
+                            "ChatViewModel",
+                            "⚠️ Batch failed: ${e.message}"
+                        )
                         newChunks.map { emptyList() }
                     }
 
@@ -501,10 +531,13 @@ viewModelScope.launch {
                 _successMessage.value = buildString {
                     append("✅ تم حفظ $savedCount جزء من:\n")
                     append("📄 ${result.title}")
-                    if (skippedCount > 0) append("\n⚠️ تم تخطي $skippedCount (موجودة مسبقاً)")
-                    if (totalChunks > 20) append("\n📌 من أصل $totalChunks (الحد الأقصى 20)")
+                    if (skippedCount > 0)
+                        append("\n⚠️ تم تخطي $skippedCount (موجودة مسبقاً)")
+                    if (totalChunks > 20)
+                        append("\n📌 من أصل $totalChunks (الحد الأقصى 20)")
                     append("\n📊 ${result.wordCount} كلمة")
-                    if (newChunks.isNotEmpty()) append("\n🚀 Batch: طلب API واحد")
+                    if (newChunks.isNotEmpty())
+                        append("\n🚀 Batch: طلب API واحد")
                 }
 
             } catch (e: Exception) {
@@ -550,7 +583,9 @@ viewModelScope.launch {
             null, null, null
         )?.use { cursor ->
             if (cursor.moveToFirst()) {
-                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val index = cursor.getColumnIndex(
+                    android.provider.OpenableColumns.DISPLAY_NAME
+                )
                 if (index >= 0) cursor.getString(index) else null
             } else null
         } ?: uri.lastPathSegment ?: "ملف"
