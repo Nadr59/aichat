@@ -206,6 +206,7 @@ app.onManualCaptureResult = { success, text, debug ->
         ).show()
     }
 }
+        }
         onDispose {
             app.onAiResponseCaptured  = null
             app.onManualCaptureResult = null
