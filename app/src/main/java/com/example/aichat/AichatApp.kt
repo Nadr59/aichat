@@ -14,11 +14,18 @@ class AichatApp : Application() {
     var geckoRuntime: GeckoRuntime? = null
         private set
 
-    // ✅ Callback — يُستدعى عند التقاط رد AI من منصة ويب
+    // ── Callbacks ─────────────────────────────────────────────────────────
+
+    /** التلقائي — يُستدعى عند رصد رد AI_RESPONSE */
     var onAiResponseCaptured: ((domain: String, text: String) -> Unit)? = null
+
+    /** ✅ اليدوي — يُستدعى عند ورود CAPTURE_RESULT */
+    var onManualCaptureResult: ((success: Boolean, text: String) -> Unit)? = null
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
+
+    // ── onCreate ──────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
@@ -30,8 +37,10 @@ class AichatApp : Application() {
             Log.e("AichatApp", "❌ Database failed: ${e.message}", e)
             throw e
         }
-        Log.d("AichatApp", "✅ App started — Gecko will init on demand")
+        Log.d("AichatApp", "✅ App started")
     }
+
+    // ── GeckoRuntime ──────────────────────────────────────────────────────
 
     @Synchronized
     fun getOrCreateGeckoRuntime(): GeckoRuntime? {
@@ -53,7 +62,7 @@ class AichatApp : Application() {
         }
     }
 
-    // ── تحميل WebExtension ────────────────────────────────────────────────
+    // ── Extension ─────────────────────────────────────────────────────────
 
     private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
         runtime.webExtensionController
@@ -67,7 +76,7 @@ class AichatApp : Application() {
                     if (extension != null) setupMessageDelegate(extension)
                 },
                 { e ->
-                    Log.e("AichatApp", "❌ Extension load failed: ${e?.message}")
+                    Log.e("AichatApp", "❌ Extension failed: ${e?.message}")
                 }
             )
     }
@@ -79,10 +88,7 @@ class AichatApp : Application() {
                 override fun onConnect(port: WebExtension.Port) {
                     Log.d("AichatApp", "✅ Port connected")
                     port.setDelegate(object : WebExtension.PortDelegate {
-                        override fun onPortMessage(
-                            message: Any,
-                            port:    WebExtension.Port
-                        ) {
+                        override fun onPortMessage(message: Any, port: WebExtension.Port) {
                             handleMessage(message)
                         }
                         override fun onDisconnect(port: WebExtension.Port) {
@@ -105,20 +111,46 @@ class AichatApp : Application() {
         Log.d("AichatApp", "✅ MessageDelegate set")
     }
 
+    // ── ✅ handleMessage — يعالج النوعين ──────────────────────────────────
+
     private fun handleMessage(message: Any) {
         try {
             @Suppress("UNCHECKED_CAST")
-            val map    = message as? Map<String, Any> ?: return
-            val type   = map["type"]   as? String ?: return
-            if (type != "AI_RESPONSE") return
+            val map  = message as? Map<String, Any> ?: return
+            val type = map["type"] as? String ?: return
 
-            val text   = map["text"]   as? String ?: return
-            val domain = map["domain"] as? String ?: "unknown"
+            when (type) {
 
-            if (text.length < 80) return
+                // ── تلقائي ──────────────────────────────────────────────
+                "AI_RESPONSE" -> {
+                    val text   = map["text"]   as? String ?: return
+                    val domain = map["domain"] as? String ?: "unknown"
 
-            Log.d("AichatApp", "📨 AI from $domain: ${text.take(60)}...")
-            onAiResponseCaptured?.invoke(domain, text)
+                    if (text.length < 80) {
+                        Log.d("AichatApp", "⏭ Too short: ${text.length}")
+                        return
+                    }
+
+                    Log.d("AichatApp", "📨 Auto AI from $domain: ${text.take(60)}…")
+                    onAiResponseCaptured?.invoke(domain, text)
+                }
+
+                // ── ✅ يدوي ───────────────────────────────────────────────
+                "CAPTURE_RESULT" -> {
+                    val success = map["success"] as? Boolean ?: false
+                    val text    = map["text"]    as? String  ?: ""
+                    val domain  = map["domain"]  as? String  ?: "unknown"
+
+                    Log.d("AichatApp",
+                        if (success) "🧠 Manual capture from $domain: ${text.take(60)}…"
+                        else         "⚠️ Manual capture failed from $domain"
+                    )
+
+                    onManualCaptureResult?.invoke(success, text)
+                }
+
+                else -> Log.d("AichatApp", "⏭ Unknown message type: $type")
+            }
 
         } catch (e: Exception) {
             Log.e("AichatApp", "❌ handleMessage: ${e.message}")
