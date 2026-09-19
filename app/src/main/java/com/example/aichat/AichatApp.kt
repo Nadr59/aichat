@@ -13,12 +13,13 @@ import org.mozilla.geckoview.WebExtension
 
 class AichatApp : Application() {
 
-    @Volatile var geckoRuntime:    GeckoRuntime?   = null
+    @Volatile var geckoRuntime:    GeckoRuntime?  = null
         private set
 
-    @Volatile var aiChatExtension: WebExtension?   = null
+    @Volatile var aiChatExtension: WebExtension?  = null
         private set
 
+    // ✅ Port يأتي من content.js عبر browser.runtime.connect()
     @Volatile private var activePort: WebExtension.Port? = null
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
@@ -26,8 +27,6 @@ class AichatApp : Application() {
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
-
-    // ── onCreate ──────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
@@ -40,8 +39,6 @@ class AichatApp : Application() {
             throw e
         }
     }
-
-    // ── GeckoRuntime ──────────────────────────────────────────────────
 
     @Synchronized
     fun getOrCreateGeckoRuntime(): GeckoRuntime? {
@@ -61,13 +58,15 @@ class AichatApp : Application() {
         }
     }
 
-    // ── ✅ الدالة التي يستدعيها زر 🧠 ────────────────────────────────
+    // ── زر 🧠 ────────────────────────────────────────────────────────
 
     fun requestManualCapture() {
         val port = activePort
         if (port == null) {
             Log.w("AichatApp", "⚠️ No active port")
-            onManualCaptureResult?.invoke(false, "", null)
+            Handler(Looper.getMainLooper()).post {
+                onManualCaptureResult?.invoke(false, "", null)
+            }
             return
         }
         try {
@@ -75,7 +74,9 @@ class AichatApp : Application() {
             Log.d("AichatApp", "📤 CAPTURE_NOW sent")
         } catch (e: Exception) {
             Log.e("AichatApp", "❌ postMessage: ${e.message}")
-            onManualCaptureResult?.invoke(false, "", null)
+            Handler(Looper.getMainLooper()).post {
+                onManualCaptureResult?.invoke(false, "", null)
+            }
         }
     }
 
@@ -103,8 +104,12 @@ class AichatApp : Application() {
         extension.setMessageDelegate(
             object : WebExtension.MessageDelegate {
 
+                // ✅ content.js اتصل عبر browser.runtime.connect()
                 override fun onConnect(port: WebExtension.Port) {
-                    Log.d("AichatApp", "🔌 Port connected (pending PORT_READY)")
+                    Log.d("AichatApp", "✅ Port connected: ${port.name}")
+
+                    // ✅ حفظ الـ Port فوراً
+                    activePort = port
 
                     port.setDelegate(object : WebExtension.PortDelegate {
 
@@ -116,22 +121,8 @@ class AichatApp : Application() {
                             val type = json.optString("type")
 
                             when (type) {
-
-                                // ✅ الـ top frame يُعرّف نفسه
-                                "PORT_READY" -> {
-                                    val domain = json.optString("domain")
-                                    Log.d("AichatApp",
-                                        "✅ PORT_READY from $domain — port updated"
-                                    )
-                                    // استبدل الـ Port القديم بالجديد
-                                    activePort = port
-                                }
-
-                                "CAPTURE_RESULT" -> {
-                                    handleCaptureResult(json)
-                                }
-
-                                else -> handleMessage(json)
+                                "CAPTURE_RESULT" -> handleCaptureResult(json)
+                                else             -> handleMessage(json)
                             }
                         }
 
@@ -142,6 +133,7 @@ class AichatApp : Application() {
                     })
                 }
 
+                // رسائل sendMessage التلقائية
                 override fun onMessage(
                     nativeApp: String,
                     message:   Any,
@@ -167,7 +159,9 @@ class AichatApp : Application() {
                 val domain = json.optString("domain", "unknown")
                 if (text.length < 80) return
                 Log.d("AichatApp", "📨 Auto from $domain: ${text.take(60)}…")
-                onAiResponseCaptured?.invoke(domain, text)
+                Handler(Looper.getMainLooper()).post {
+                    onAiResponseCaptured?.invoke(domain, text)
+                }
             }
             "CAPTURE_RESULT" -> handleCaptureResult(json)
         }
@@ -179,13 +173,11 @@ class AichatApp : Application() {
         val domain  = json.optString("domain", "unknown")
         val debug   = json.optJSONObject("debug")
 
-        if (success) {
-            Log.d("AichatApp", "🧠 Manual from $domain: ${text.take(60)}…")
-        } else {
-            Log.w("AichatApp", "⚠️ Manual failed — debug: $debug")
-        }
+        Log.d("AichatApp",
+            if (success) "🧠 Manual OK from $domain: ${text.take(60)}…"
+            else         "⚠️ Manual failed from $domain — debug: $debug"
+        )
 
-        // ✅ استدعِ على الـ Main thread لأن Toast يحتاجه
         Handler(Looper.getMainLooper()).post {
             onManualCaptureResult?.invoke(success, text, debug)
         }
