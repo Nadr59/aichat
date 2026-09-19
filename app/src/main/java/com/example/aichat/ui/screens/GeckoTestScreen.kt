@@ -156,11 +156,33 @@ fun GeckoTestScreen(
         }
         Unit
     }
-
-    // ✅ سجّل الـ session مع AichatApp
+// ✅ سجّل الـ session مع AichatApp
 DisposableEffect(session) {
     app.registerSession(session)
     onDispose { }
+}
+
+// ✅ timeout 5 ثوانٍ — تأمان
+val saveToMemory: () -> Unit = save@{
+    if (isSavingMemory || isLoading) return@save
+    if (platform == null)            return@save
+    if (!platform.memoryEnabled)     return@save
+    if (chatViewModel == null)       return@save
+
+    isSavingMemory = true
+    app.requestManualCapture()
+
+    // ✅ reset بعد 5 ثوانٍ إذا لم تصل نتيجة
+    Handler(Looper.getMainLooper()).postDelayed({
+        if (isSavingMemory) {
+            isSavingMemory = false
+            Toast.makeText(
+                context,
+                "⚠️ انتهت المهلة — حاول مرة أخرى",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }, 5000L)
 }
 
     // ── ربط callbacks الذاكرة ────────────────────────────────────────────
