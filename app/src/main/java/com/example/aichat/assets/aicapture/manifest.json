@@ -1,31 +1,32 @@
 {
   "manifest_version": 2,
-  "name": "AI Capture",
+  "name": "AiChat Capture",
   "version": "1.0",
   "description": "Captures AI responses for memory",
-  "content_scripts": [
-    {
-      "matches": [
-        "*://claude.ai/*",
-        "*://chatgpt.com/*",
-        "*://chat.openai.com/*",
-        "*://www.perplexity.ai/*",
-        "*://you.com/*",
-        "*://huggingface.co/chat/*",
-        "*://venice.ai/*",
-        "*://gemini.google.com/*",
-        "*://grok.com/*",
-        "*://copilot.microsoft.com/*",
-        "*://chat.mistral.ai/*",
-        "*://*/*"
-      ],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ],
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "aicapture@aichat.example.com"
-    }
-  }
+
+  "content_scripts": [{
+    "matches": [
+      "*://chatgpt.com/*",
+      "*://*.openai.com/*",
+      "*://claude.ai/*",
+      "*://gemini.google.com/*",
+      "*://perplexity.ai/*",
+      "*://copilot.microsoft.com/*",
+      "*://grok.com/*",
+      "*://chat.mistral.ai/*",
+      "*://you.com/*"
+    ],
+    "js": ["content.js"],
+    "run_at": "document_idle",
+    "all_frames": false
+  }],
+
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+
+  "permissions": [
+    "nativeMessaging"
+  ]
 }
