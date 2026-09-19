@@ -18,7 +18,7 @@ import com.example.aichat.data.model.WebPlatform
         MemoryItem::class,
         WebPlatform::class
     ],
-    version = 6,
+    version = 7,          // ✅ 6 → 7
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -109,6 +109,22 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        // ✅ جديد — يضيف الحقلين اللذين أُضيفا لـ WebPlatform
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // aiMessageSelector: CSS selector لاستخراج ردود الـ AI
+                db.execSQL(
+                    "ALTER TABLE web_platforms " +
+                    "ADD COLUMN aiMessageSelector TEXT NOT NULL DEFAULT ''"
+                )
+                // memoryEnabled: هل يُحفظ رد هذه المنصة في الذاكرة؟
+                db.execSQL(
+                    "ALTER TABLE web_platforms " +
+                    "ADD COLUMN memoryEnabled INTEGER NOT NULL DEFAULT 1"
+                )
+            }
+        }
+
         // ── Builder ─────────────────────────────────────────────────────────
 
         private fun buildDatabase(context: Context): ChatDatabase =
@@ -122,22 +138,16 @@ abstract class ChatDatabase : RoomDatabase() {
                     MIGRATION_2_3,
                     MIGRATION_3_4,
                     MIGRATION_4_5,
-                    MIGRATION_5_6
+                    MIGRATION_5_6,
+                    MIGRATION_6_7   // ✅ مضاف
                 )
                 .build()
 
-        /**
-         * الاسم الجديد — يُستخدم من AichatApp
-         */
         fun getDatabase(context: Context): ChatDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context).also { INSTANCE = it }
             }
 
-        /**
-         * alias للتوافق مع ChatViewModel الحالي
-         * يستدعي getDatabase داخلياً
-         */
         fun getInstance(context: Context): ChatDatabase = getDatabase(context)
     }
 }
