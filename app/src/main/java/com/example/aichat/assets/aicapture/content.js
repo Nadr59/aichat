@@ -136,3 +136,19 @@
     startObserver();
 
 })();
+// ✅ أضف هذا في نهاية content.js
+// يستقبل حدث من javascript: URI
+
+window.addEventListener('AiChatCapture', (event) => {
+    if (event?.detail?.type === 'CAPTURE_NOW') {
+        const text = extractLatestResponse();
+
+        browser.runtime.sendMessage({
+            type:    'CAPTURE_RESULT',
+            success: !!text && text.length >= 20,
+            text:    text || '',
+            domain:  location.hostname,
+            source:  'manual'
+        }).catch(() => {});
+    }
+});
