@@ -174,7 +174,7 @@ fun GeckoTestScreen(
                 Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
             }
 
-            // callback اليدوي — من زر 🧠
+            // ✅ callback اليدوي — مع Toast تشخيصي
             app.onManualCaptureResult = { success, text ->
                 isSavingMemory = false
                 if (success && text.isNotBlank()) {
@@ -185,15 +185,15 @@ fun GeckoTestScreen(
                     )
                     Toast.makeText(
                         context,
-                        "✅ تم حفظ الرد في الذاكرة",
-                        Toast.LENGTH_SHORT
+                        "✅ تم الحفظ\n${text.take(50)}",
+                        Toast.LENGTH_LONG
                     ).show()
                     Log.d("GeckoTestScreen", "🧠 Manual saved: ${text.take(60)}")
                 } else {
                     Toast.makeText(
                         context,
-                        "⚠️ لم يُعثر على رد AI في الصفحة",
-                        Toast.LENGTH_SHORT
+                        "⚠️ فشل\ndomain=${p.id}",
+                        Toast.LENGTH_LONG
                     ).show()
                 }
             }
@@ -213,8 +213,6 @@ fun GeckoTestScreen(
         if (chatViewModel == null)       return@save
 
         isSavingMemory = true
-
-        // ✅ يرسل CAPTURE_NOW عبر Port المفتوح في AichatApp
         app.requestManualCapture()
     }
 
@@ -384,27 +382,6 @@ private fun LoadErrorView(
             Button(onClick = onRetry) { Text("إعادة المحاولة") }
             OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
         }
-    }
-}
-app.onManualCaptureResult = { success, text ->
-    isSavingMemory = false
-    if (success && text.isNotBlank()) {
-        vm.onWebAiResponse(
-            platformId   = p.id,
-            platformName = p.name,
-            text         = text
-        )
-        Toast.makeText(
-            context,
-            "✅ تم الحفظ\n${text.take(50)}",  // ← أضفنا أول 50 حرف
-            Toast.LENGTH_LONG
-        ).show()
-    } else {
-        Toast.makeText(
-            context,
-            "⚠️ فشل\ndomain=${p.id}",  // ← نعرف أين وصلنا
-            Toast.LENGTH_LONG
-        ).show()
     }
 }
 
