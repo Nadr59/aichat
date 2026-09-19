@@ -267,6 +267,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ── في sendChatMessage() بعد حفظ رسالة المساعد مباشرة ────────────────────────
+
+val assistantMessage = Message(
+    conversationId = convId,
+    role           = "assistant",
+    content        = response,
+    messageType    = "text"
+)
+
+conversationRepository.insertMessage(assistantMessage)
+
+// ✅ تحليل رد المساعد وإدخاله في الذاكرة تلقائياً
+viewModelScope.launch {
+    try {
+        memoryRepository.searchSharedMemories(
+            query               = response.take(200),
+            useSemanticAnalysis = false,
+            ollamaUrl           = "http://127.0.0.1:11434"
+        )
+    } catch (e: Exception) {
+        android.util.Log.w("ChatViewModel", "Memory index skip: ${e.message}")
+    }
+}
     // ============================================================
     // الصور
     // ============================================================
