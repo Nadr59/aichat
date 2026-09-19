@@ -65,8 +65,8 @@ fun GeckoTestScreen(
     url:           String,
     title:         String,
     onBack:        () -> Unit,
-    platform:      WebPlatform?   = null,   // ✅ جديد
-    chatViewModel: ChatViewModel? = null    // ✅ جديد
+    platform:      WebPlatform?   = null,
+    chatViewModel: ChatViewModel? = null
 ) {
     val context        = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -103,16 +103,23 @@ fun GeckoTestScreen(
     val app = context.applicationContext as AichatApp
 
     DisposableEffect(platform?.id) {
-        if (platform?.memoryEnabled == true && chatViewModel != null) {
+        // ✅ val محلي يحل مشكلة nullable داخل lambda
+        val currentPlatform = platform
+
+        if (currentPlatform != null &&
+            currentPlatform.memoryEnabled &&
+            chatViewModel != null
+        ) {
             app.onAiResponseCaptured = { domain, text ->
                 chatViewModel.onWebAiResponse(
-                    platformId   = platform.id,
-                    platformName = platform.name,
+                    platformId   = currentPlatform.id,
+                    platformName = currentPlatform.name,
                     text         = text
                 )
             }
-            Log.d("GeckoTestScreen", "✅ Memory capture active for: ${platform.name}")
+            Log.d("GeckoTestScreen", "✅ Memory active: ${currentPlatform.name}")
         }
+
         onDispose {
             app.onAiResponseCaptured = null
             Log.d("GeckoTestScreen", "🧹 Memory capture cleared")
@@ -239,8 +246,8 @@ fun GeckoTestScreen(
                 }
             },
             actions = {
-                // ✅ مؤشر بصري أن الذاكرة مفعّلة
-                if (platform?.memoryEnabled == true) {
+                // ✅ إصلاح nullable — platform != null أولاً
+                if (platform != null && platform.memoryEnabled) {
                     Text(
                         text     = "🧠",
                         style    = MaterialTheme.typography.titleMedium,
@@ -335,7 +342,7 @@ private fun LoadErrorView(
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(4.dp))
-            Button(onClick = onRetry)          { Text("إعادة المحاولة") }
+            Button(onClick = onRetry) { Text("إعادة المحاولة") }
             OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
         }
     }
