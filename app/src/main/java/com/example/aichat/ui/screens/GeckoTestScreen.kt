@@ -52,13 +52,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.AichatApp
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.ui.viewmodel.ChatViewModel
-import org.json.JSONObject
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
-import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebRequestError
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -76,6 +74,7 @@ fun GeckoTestScreen(
 
     val runtime: GeckoRuntime? = remember { app.getOrCreateGeckoRuntime() }
 
+    // ── Runtime غير متاح ─────────────────────────────────────────────────
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
@@ -131,8 +130,7 @@ fun GeckoTestScreen(
             ): GeckoResult<AllowOrDeny>? {
                 val scheme = Uri.parse(request.uri).scheme?.lowercase()
                 return if (scheme in listOf(
-                        "http", "https", "about",
-                        "blob", "data", "javascript"   // ✅ أضفنا javascript
+                        "http", "https", "about", "blob", "data"
                     )
                 ) {
                     GeckoResult.allow()
@@ -151,7 +149,7 @@ fun GeckoTestScreen(
                     WebRequestError.ERROR_CATEGORY_NETWORK  -> "تعذر الاتصال بالإنترنت"
                     WebRequestError.ERROR_CATEGORY_URI      -> "الرابط غير صالح"
                     WebRequestError.ERROR_CATEGORY_SECURITY -> "مشكلة في شهادة الأمان"
-                    else -> "حدث خطأ أثناء تحميل الصفحة"
+                    else                                    -> "حدث خطأ أثناء تحميل الصفحة"
                 }
                 return null
             }
@@ -166,6 +164,7 @@ fun GeckoTestScreen(
 
         if (p != null && vm != null && p.memoryEnabled) {
 
+            // callback التلقائي — من MutationObserver
             app.onAiResponseCaptured = { domain, text ->
                 vm.onWebAiResponse(
                     platformId   = p.id,
@@ -175,6 +174,7 @@ fun GeckoTestScreen(
                 Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
             }
 
+            // callback اليدوي — من زر 🧠
             app.onManualCaptureResult = { success, text ->
                 isSavingMemory = false
                 if (success && text.isNotBlank()) {
@@ -190,7 +190,6 @@ fun GeckoTestScreen(
                     ).show()
                     Log.d("GeckoTestScreen", "🧠 Manual saved: ${text.take(60)}")
                 } else {
-                    isSavingMemory = false
                     Toast.makeText(
                         context,
                         "⚠️ لم يُعثر على رد AI في الصفحة",
@@ -206,29 +205,18 @@ fun GeckoTestScreen(
         }
     }
 
-    // ── ✅ ربط MessageDelegate بالـ Session عبر webExtensionController ────
-                }
+    // ── دالة الحفظ اليدوي — عبر Port ────────────────────────────────────
+    val saveToMemory: () -> Unit = save@{
+        if (isSavingMemory || isLoading) return@save
+        if (platform == null)            return@save
+        if (!platform.memoryEnabled)     return@save
+        if (chatViewModel == null)       return@save
 
-            
-            
+        isSavingMemory = true
 
-    
-// واستبدل saveToMemory بهذا:
-
-val saveToMemory: () -> Unit = save@{
-    if (isSavingMemory || isLoading)   return@save
-    if (platform == null)              return@save
-    if (!platform.memoryEnabled)       return@save
-    if (chatViewModel == null)         return@save
-
-    isSavingMemory = true
-
-    // ✅ أرسل عبر Port — لا javascript: URI
-    app.requestManualCapture()
-}
-
-// ✅ احذف هذه الدالة نهائياً — لم نعد نحتاجها:
-// private fun buildCaptureScript(): String = "javascript:..."
+        // ✅ يرسل CAPTURE_NOW عبر Port المفتوح في AichatApp
+        app.requestManualCapture()
+    }
 
     // ── رجوع ذكي ─────────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
@@ -249,7 +237,7 @@ val saveToMemory: () -> Unit = save@{
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── تنظيف ─────────────────────────────────────────────────────────────
+    // ── تنظيف ────────────────────────────────────────────────────────────
     DisposableEffect(Unit) {
         onDispose {
             try {
@@ -291,11 +279,12 @@ val saveToMemory: () -> Unit = save@{
                 }
             },
             actions = {
-                // ✅ زر الذاكرة
+
+                // ✅ زر الذاكرة — يعمل عبر Port
                 if (platform != null && platform.memoryEnabled && chatViewModel != null) {
                     IconButton(
-                        onClick  = saveToMemory,
-                        enabled  = !isSavingMemory && !isLoading
+                        onClick = saveToMemory,
+                        enabled = !isSavingMemory && !isLoading
                     ) {
                         Text(
                             text  = if (isSavingMemory) "⏳" else "🧠",
@@ -303,6 +292,7 @@ val saveToMemory: () -> Unit = save@{
                         )
                     }
                 }
+
                 IconButton(onClick = { session.reload() }) {
                     Icon(Icons.Filled.Refresh, "تحديث")
                 }
@@ -355,14 +345,6 @@ val saveToMemory: () -> Unit = save@{
     }
 }
 
-// ── JavaScript يُطلق CustomEvent في الصفحة ────────────────────────────────────
-private fun buildCaptureScript(): String =
-    "javascript:(function(){" +
-    "window.dispatchEvent(" +
-    "new CustomEvent('AiChatCapture',{detail:{type:'CAPTURE_NOW'}})" +
-    ");})();"
-
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 private fun openExternal(context: Context, url: String) {
@@ -383,7 +365,9 @@ private fun LoadErrorView(
     onOpenBrowser: () -> Unit
 ) {
     Box(
-        modifier         = Modifier.fillMaxSize().padding(24.dp),
+        modifier         = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -419,7 +403,11 @@ private fun GeckoUnavailableDialog(
                 "يمكنك فتح $platformTitle في المتصفح الخارجي."
             )
         },
-        confirmButton   = { Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") } },
-        dismissButton   = { OutlinedButton(onClick = onBack) { Text("رجوع") } }
+        confirmButton = {
+            Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onBack) { Text("رجوع") }
+        }
     )
 }
