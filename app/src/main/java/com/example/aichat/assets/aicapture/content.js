@@ -146,6 +146,31 @@
         }
     }
     startObserver();
+    activePort.onMessage.addListener(function (msg) {
+    if (!msg || msg.type !== 'CAPTURE_NOW') return;
+
+    var text = extractLatestResponse();
+    var ok   = !!(text && text.length >= MIN_LEN);
+
+    // ✅ أضف معلومات تشخيص حتى عند الفشل
+    var debugData = {
+        assistant: document.querySelectorAll(
+            '[data-message-author-role="assistant"]'
+        ).length,
+        articles: document.querySelectorAll('article').length,
+        bodyLen:  document.body ? document.body.innerText.length : 0,
+        hostname: location.hostname,
+        extractedLen: text ? text.length : 0
+    };
+
+    port.postMessage({
+        type:    'CAPTURE_RESULT',
+        success: ok,
+        text:    ok ? text : '',
+        domain:  location.hostname,
+        debug:   debugData
+    });
+});
 
     // ── ✅ Long-Polling — ينتظر Kotlin يوقظه ─────────────────────────
 
