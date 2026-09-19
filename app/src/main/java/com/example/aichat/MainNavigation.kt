@@ -33,17 +33,15 @@ import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 @Composable
 fun MainNavigation(app: AichatApp) {
 
-    val navController         = rememberNavController()
-    val settings              = remember { AiSettings(app) }
-    val chatViewModel: ChatViewModel = viewModel()
+    val navController                          = rememberNavController()
+    val settings                               = remember { AiSettings(app) }
+    val chatViewModel: ChatViewModel           = viewModel()
     val webPlatformsViewModel: WebPlatformsViewModel = viewModel(
         factory = WebPlatformsViewModel.Factory(app.webPlatformRepository)
     )
 
-    // ── Snackbar مشترك لكل الشاشات ───────────────────────────────────────
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // مراقبة successMessage من ChatViewModel
     val successMessage by chatViewModel.successMessage.collectAsState()
     val error          by chatViewModel.error.collectAsState()
 
@@ -85,7 +83,9 @@ fun MainNavigation(app: AichatApp) {
                         viewModel             = chatViewModel,
                         settings              = settings,
                         onBack                = { },
-                        onOpenChat            = { id -> navController.navigate("chat/$id") },
+                        onOpenChat            = { id ->
+                            navController.navigate("chat/$id")
+                        },
                         onNewChat             = {
                             chatViewModel.newConversation()
                             navController.navigate("chat/new")
@@ -119,7 +119,6 @@ fun MainNavigation(app: AichatApp) {
                         }
                     }
 
-                    // ChatScreen بدون Snackbar محلي — يستخدم المشترك
                     ChatScreen(
                         viewModel = chatViewModel,
                         settings  = settings,
@@ -166,17 +165,22 @@ fun MainNavigation(app: AichatApp) {
                         ?: return@composable
 
                     var platform by remember { mutableStateOf<WebPlatform?>(null) }
+
                     LaunchedEffect(platformId) {
                         platform = app.webPlatformRepository.getById(platformId)
                     }
 
                     platform?.let { p ->
                         when (WebEngine.valueOf(p.preferredEngine)) {
+
                             WebEngine.GECKO -> GeckoTestScreen(
-                                url    = p.url,
-                                title  = p.name,
-                                onBack = { navController.popBackStack() }
+                                url           = p.url,
+                                title         = p.name,
+                                onBack        = { navController.popBackStack() },
+                                platform      = p,              // ✅ جديد
+                                chatViewModel = chatViewModel   // ✅ جديد
                             )
+
                             WebEngine.WEBVIEW,
                             WebEngine.EXTERNAL -> WebScreen(
                                 url           = p.url,
