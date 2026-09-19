@@ -157,6 +157,12 @@ fun GeckoTestScreen(
         Unit
     }
 
+    // ✅ سجّل الـ session مع AichatApp
+DisposableEffect(session) {
+    app.registerSession(session)
+    onDispose { }
+}
+
     // ── ربط callbacks الذاكرة ────────────────────────────────────────────
     DisposableEffect(platform?.id) {
         val p  = platform
