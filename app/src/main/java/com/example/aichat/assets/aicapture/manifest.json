@@ -4,6 +4,12 @@
   "version": "1.0",
   "description": "Captures AI responses for memory",
 
+  "browser_specific_settings": {
+    "gecko_android": {
+      "id": "aicapture@aichat.example.com"
+    }
+  },
+
   "content_scripts": [{
     "matches": [
       "*://chatgpt.com/*",
