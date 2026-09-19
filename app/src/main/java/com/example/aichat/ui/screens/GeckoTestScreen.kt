@@ -155,6 +155,29 @@ fun GeckoTestScreen(
         }
     }
 
+    // ✅ في GeckoTestScreen — أضف هذا في remember أو LaunchedEffect
+
+val app = context.applicationContext as AichatApp
+
+// ربط الـ callback بـ ChatViewModel
+DisposableEffect(platform?.id) {
+    if (platform?.memoryEnabled == true && chatViewModel != null) {
+        app.onAiResponseCaptured = { domain, text ->
+            chatViewModel.onWebAiResponse(
+                platformId   = platform.id,
+                platformName = platform.name,
+                text         = text
+            )
+        }
+        Log.d("GeckoScreen", "✅ Memory capture active for: ${platform.name}")
+    }
+
+    onDispose {
+        // تنظيف عند مغادرة الشاشة
+        app.onAiResponseCaptured = null
+        Log.d("GeckoScreen", "🧹 Memory capture cleared")
+    }
+}
     // ── رجوع ذكي ─────────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
         if (canGoBack) session.goBack() else onBack()
