@@ -9,6 +9,7 @@ import com.example.aichat.repository.WebPlatformRepository
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
+import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.WebExtension
 
 class AichatApp : Application() {
@@ -19,7 +20,6 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension?  = null
         private set
 
-    // ✅ Port يأتي من content.js عبر browser.runtime.connect()
     @Volatile private var activePort: WebExtension.Port? = null
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
@@ -27,6 +27,8 @@ class AichatApp : Application() {
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
+
+    // ── onCreate ──────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
@@ -39,6 +41,8 @@ class AichatApp : Application() {
             throw e
         }
     }
+
+    // ── GeckoRuntime ──────────────────────────────────────────────────
 
     @Synchronized
     fun getOrCreateGeckoRuntime(): GeckoRuntime? {
@@ -56,6 +60,22 @@ class AichatApp : Application() {
             Log.e("AichatApp", "❌ GeckoRuntime: ${e.message}")
             null
         }
+    }
+
+    // ── ✅ يُستدعى من GeckoTestScreen لكل Session ─────────────────────
+
+    fun registerSession(session: GeckoSession) {
+        val ext = aiChatExtension
+        if (ext == null) {
+            Log.w("AichatApp", "⚠️ Extension not ready yet")
+            return
+        }
+        session.webExtensionController.setMessageDelegate(
+            ext,
+            makeDelegate(),
+            "browser"
+        )
+        Log.d("AichatApp", "✅ Session delegate registered")
     }
 
     // ── زر 🧠 ────────────────────────────────────────────────────────
@@ -92,61 +112,48 @@ class AichatApp : Application() {
                 { ext ->
                     if (ext != null) {
                         aiChatExtension = ext
-                        setupMessageDelegate(ext)
-                        Log.d("AichatApp", "✅ Extension: ${ext.id}")
+                        // ✅ delegate على الـ extension للـ background
+                        ext.setMessageDelegate(makeDelegate(), "browser")
+                        Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
                     }
                 },
                 { e -> Log.e("AichatApp", "❌ Extension: ${e?.message}") }
             )
     }
 
-    private fun setupMessageDelegate(extension: WebExtension) {
-        extension.setMessageDelegate(
-            object : WebExtension.MessageDelegate {
+    // ── Delegate مشترك ────────────────────────────────────────────────
 
-                // ✅ content.js اتصل عبر browser.runtime.connect()
-                override fun onConnect(port: WebExtension.Port) {
-                    Log.d("AichatApp", "✅ Port connected: ${port.name}")
+    private fun makeDelegate() = object : WebExtension.MessageDelegate {
 
-                    // ✅ حفظ الـ Port فوراً
-                    activePort = port
+        // ✅ content script يتصل عبر connectNative("browser")
+        override fun onConnect(port: WebExtension.Port) {
+            Log.d("AichatApp", "✅ Port connected!")
+            activePort = port
 
-                    port.setDelegate(object : WebExtension.PortDelegate {
-
-                        override fun onPortMessage(
-                            message: Any,
-                            port:    WebExtension.Port
-                        ) {
-                            val json = parseMessage(message) ?: return
-                            val type = json.optString("type")
-
-                            when (type) {
-                                "CAPTURE_RESULT" -> handleCaptureResult(json)
-                                else             -> handleMessage(json)
-                            }
-                        }
-
-                        override fun onDisconnect(port: WebExtension.Port) {
-                            Log.d("AichatApp", "⚠️ Port disconnected")
-                            if (activePort === port) activePort = null
-                        }
-                    })
+            port.setDelegate(object : WebExtension.PortDelegate {
+                override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                    val json = parseMessage(message) ?: return
+                    when (json.optString("type")) {
+                        "CAPTURE_RESULT" -> handleCaptureResult(json)
+                        else             -> handleMessage(json)
+                    }
                 }
-
-                // رسائل sendMessage التلقائية
-                override fun onMessage(
-                    nativeApp: String,
-                    message:   Any,
-                    sender:    WebExtension.MessageSender
-                ): org.mozilla.geckoview.GeckoResult<Any>? {
-                    val json = parseMessage(message)
-                    if (json != null) handleMessage(json)
-                    return null
+                override fun onDisconnect(port: WebExtension.Port) {
+                    Log.d("AichatApp", "⚠️ Port disconnected")
+                    if (activePort === port) activePort = null
                 }
-            },
-            "browser"
-        )
-        Log.d("AichatApp", "✅ MessageDelegate set")
+            })
+        }
+
+        // رسائل sendMessage التلقائية
+        override fun onMessage(
+            nativeApp: String,
+            message:   Any,
+            sender:    WebExtension.MessageSender
+        ): org.mozilla.geckoview.GeckoResult<Any>? {
+            handleMessage(parseMessage(message) ?: return null)
+            return null
+        }
     }
 
     // ── معالجة الرسائل ────────────────────────────────────────────────
@@ -174,8 +181,8 @@ class AichatApp : Application() {
         val debug   = json.optJSONObject("debug")
 
         Log.d("AichatApp",
-            if (success) "🧠 Manual OK from $domain: ${text.take(60)}…"
-            else         "⚠️ Manual failed from $domain — debug: $debug"
+            if (success) "🧠 OK from $domain: ${text.take(60)}…"
+            else         "⚠️ Failed from $domain — $debug"
         )
 
         Handler(Looper.getMainLooper()).post {
@@ -183,13 +190,11 @@ class AichatApp : Application() {
         }
     }
 
-    private fun parseMessage(message: Any): JSONObject? {
-        return try {
-            when (message) {
-                is JSONObject -> message
-                is Map<*, *>  -> JSONObject(message as Map<*, *>)
-                else          -> null
-            }
-        } catch (e: Exception) { null }
-    }
+    private fun parseMessage(message: Any): JSONObject? = try {
+        when (message) {
+            is JSONObject -> message
+            is Map<*, *>  -> JSONObject(message as Map<*, *>)
+            else          -> null
+        }
+    } catch (e: Exception) { null }
 }
