@@ -37,7 +37,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,7 +52,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.AichatApp
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.ui.viewmodel.ChatViewModel
-import kotlinx.coroutines.launch
+import org.json.JSONObject
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -73,13 +72,9 @@ fun GeckoTestScreen(
 ) {
     val context        = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val scope          = rememberCoroutineScope()
+    val app            = context.applicationContext as AichatApp
 
-    val app = context.applicationContext as AichatApp
-
-    val runtime: GeckoRuntime? = remember {
-        app.getOrCreateGeckoRuntime()
-    }
+    val runtime: GeckoRuntime? = remember { app.getOrCreateGeckoRuntime() }
 
     if (runtime == null) {
         GeckoUnavailableDialog(
@@ -104,7 +99,6 @@ fun GeckoTestScreen(
     // ── Session ───────────────────────────────────────────────────────────
     val session = remember { GeckoSession() }
 
-    // ── ربط Delegates ─────────────────────────────────────────────────────
     remember(session) {
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
@@ -136,7 +130,11 @@ fun GeckoTestScreen(
                 request: GeckoSession.NavigationDelegate.LoadRequest
             ): GeckoResult<AllowOrDeny>? {
                 val scheme = Uri.parse(request.uri).scheme?.lowercase()
-                return if (scheme in listOf("http", "https", "about", "blob", "data")) {
+                return if (scheme in listOf(
+                        "http", "https", "about",
+                        "blob", "data", "javascript"   // ✅ أضفنا javascript
+                    )
+                ) {
                     GeckoResult.allow()
                 } else {
                     openExternal(context, request.uri)
@@ -163,38 +161,42 @@ fun GeckoTestScreen(
 
     // ── ربط callbacks الذاكرة ────────────────────────────────────────────
     DisposableEffect(platform?.id) {
-        val p  = platform ?: run {
-            return@DisposableEffect onDispose {}
-        }
-        val vm = chatViewModel ?: run {
-            return@DisposableEffect onDispose {}
-        }
+        val p  = platform
+        val vm = chatViewModel
 
-        if (!p.memoryEnabled) return@DisposableEffect onDispose {}
+        if (p != null && vm != null && p.memoryEnabled) {
 
-        // callback التلقائي
-        app.onAiResponseCaptured = { domain, text ->
-            vm.onWebAiResponse(
-                platformId   = p.id,
-                platformName = p.name,
-                text         = text
-            )
-            Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
-        }
-
-        // ✅ callback اليدوي — يستقبل نتيجة CAPTURE_NOW
-        app.onManualCaptureResult = { success, text ->
-            isSavingMemory = false
-            if (success && text.isNotBlank()) {
+            app.onAiResponseCaptured = { domain, text ->
                 vm.onWebAiResponse(
                     platformId   = p.id,
                     platformName = p.name,
                     text         = text
                 )
-                Toast.makeText(context, "✅ تم حفظ الرد في الذاكرة", Toast.LENGTH_SHORT).show()
-                Log.d("GeckoTestScreen", "🧠 Manual: ${text.take(60)}")
-            } else {
-                Toast.makeText(context, "⚠️ لم يُعثر على رد AI في الصفحة", Toast.LENGTH_SHORT).show()
+                Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
+            }
+
+            app.onManualCaptureResult = { success, text ->
+                isSavingMemory = false
+                if (success && text.isNotBlank()) {
+                    vm.onWebAiResponse(
+                        platformId   = p.id,
+                        platformName = p.name,
+                        text         = text
+                    )
+                    Toast.makeText(
+                        context,
+                        "✅ تم حفظ الرد في الذاكرة",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    Log.d("GeckoTestScreen", "🧠 Manual saved: ${text.take(60)}")
+                } else {
+                    isSavingMemory = false
+                    Toast.makeText(
+                        context,
+                        "⚠️ لم يُعثر على رد AI في الصفحة",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
 
@@ -204,63 +206,70 @@ fun GeckoTestScreen(
         }
     }
 
-    // ── ربط MessageDelegate بالـ Session ─────────────────────────────────
-    // ✅ هذا هو المفتاح — نربط الـ delegate بالـ session مباشرة
+    // ── ✅ ربط MessageDelegate بالـ Session عبر webExtensionController ────
     DisposableEffect(session, platform?.id) {
-        val p = platform
+        val p   = platform
+        val ext = app.aiChatExtension
 
-        if (p != null && chatViewModel != null && p.memoryEnabled) {
-            session.setMessageDelegate(
-                object : WebExtension.MessageDelegate {
-                    override fun onMessage(
-                        nativeApp: String,
-                        message:   Any?,
-                        sender:    WebExtension.MessageSender
-                    ): GeckoResult<Any>? {
-                        val map     = message as? Map<*, *> ?: return null
-                        val type    = map["type"]    as? String ?: return null
-                        val text    = map["text"]    as? String ?: ""
-                        val success = map["success"] as? Boolean ?: false
+        if (p != null && chatViewModel != null && p.memoryEnabled && ext != null) {
 
-                        when (type) {
-                            "AI_RESPONSE" -> {
-                                if (text.isNotBlank()) {
-                                    app.onAiResponseCaptured?.invoke(
-                                        map["domain"] as? String ?: "",
-                                        text
-                                    )
-                                }
-                            }
-                            "CAPTURE_RESULT" -> {
-                                app.onManualCaptureResult?.invoke(success, text)
-                            }
-                        }
-                        return null
+            val delegate = object : WebExtension.MessageDelegate {
+                override fun onMessage(
+                    nativeApp: String,
+                    message:   Any,                        // ✅ non-null
+                    sender:    WebExtension.MessageSender
+                ): GeckoResult<Any>? {
+                    // ✅ GeckoView يُرسل JSONObject
+                    val json    = message as? JSONObject ?: return null
+                    val type    = json.optString("type").ifBlank { return null }
+                    val text    = json.optString("text")
+                    val success = json.optBoolean("success", false)
+                    val domain  = json.optString("domain", "unknown")
+
+                    when (type) {
+                        "AI_RESPONSE"    ->
+                            if (text.isNotBlank())
+                                app.onAiResponseCaptured?.invoke(domain, text)
+
+                        "CAPTURE_RESULT" ->
+                            app.onManualCaptureResult?.invoke(success, text)
                     }
-                },
-                "browser" // nativeApp — يطابق browser.runtime في content.js
-            )
+                    return null
+                }
+            }
+
+            // ✅ API الصحيح في GeckoView 130
+            session.webExtensionController
+                .setMessageDelegate(ext, delegate, "browser")
+
+            Log.d("GeckoTestScreen", "✅ Session MessageDelegate set")
         }
 
         onDispose {
-            try { session.setMessageDelegate(null, "browser") } catch (_: Exception) {}
+            val ext2 = app.aiChatExtension
+            if (ext2 != null) {
+                try {
+                    session.webExtensionController
+                        .setMessageDelegate(ext2, null, "browser")
+                } catch (_: Exception) {}
+            }
         }
     }
 
-    // ── دالة الحفظ اليدوي — ترسل CAPTURE_NOW لـ content.js ───────────────
+    // ── دالة الحفظ اليدوي ────────────────────────────────────────────────
     val saveToMemory: () -> Unit = save@{
-        if (isSavingMemory || isLoading) return@save
-        if (platform == null || chatViewModel == null) return@save
-        if (!platform.memoryEnabled) return@save
+        if (isSavingMemory || isLoading)        return@save
+        if (platform == null)                   return@save
+        if (!platform.memoryEnabled)            return@save
+        if (chatViewModel == null)              return@save
 
         isSavingMemory = true
 
-        // ✅ نرسل رسالة للـ extension عبر loadUri بـ javascript: scheme
-        // هذا يعمل في GeckoView 130
-        session.loadUri(
-            buildCaptureScript(),
-            null,
-            GeckoSession.LOAD_FLAGS_BYPASS_HISTORY
+        // ✅ GeckoSession.Loader — الـ API الصحيح في GeckoView 83+
+        session.load(
+            GeckoSession.Loader()
+                .uri(buildCaptureScript())
+                .flags(GeckoSession.LOAD_FLAGS_NONE)
         )
     }
 
@@ -276,7 +285,7 @@ fun GeckoTestScreen(
             when (event) {
                 Lifecycle.Event.ON_STOP  -> session.setActive(false)
                 Lifecycle.Event.ON_START -> session.setActive(true)
-                else -> Unit
+                else                     -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -325,11 +334,11 @@ fun GeckoTestScreen(
                 }
             },
             actions = {
-                // ✅ زر الذاكرة — يعمل الآن
+                // ✅ زر الذاكرة
                 if (platform != null && platform.memoryEnabled && chatViewModel != null) {
                     IconButton(
-                        onClick = saveToMemory,
-                        enabled = !isSavingMemory && !isLoading
+                        onClick  = saveToMemory,
+                        enabled  = !isSavingMemory && !isLoading
                     ) {
                         Text(
                             text  = if (isSavingMemory) "⏳" else "🧠",
@@ -389,15 +398,12 @@ fun GeckoTestScreen(
     }
 }
 
-// ── Script يُرسل CAPTURE_NOW عبر postMessage ─────────────────────────────────
-// GeckoView 130: الطريقة الموثوقة هي javascript: URI
-private fun buildCaptureScript(): String = """
-    javascript:(function(){
-        window.dispatchEvent(
-            new CustomEvent('AiChatCapture', { detail: { type: 'CAPTURE_NOW' } })
-        );
-    })()
-""".trimIndent()
+// ── JavaScript يُطلق CustomEvent في الصفحة ────────────────────────────────────
+private fun buildCaptureScript(): String =
+    "javascript:(function(){" +
+    "window.dispatchEvent(" +
+    "new CustomEvent('AiChatCapture',{detail:{type:'CAPTURE_NOW'}})" +
+    ");})();"
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -451,7 +457,10 @@ private fun GeckoUnavailableDialog(
         onDismissRequest = onBack,
         title = { Text("⚠️ GeckoView غير متاح") },
         text  = {
-            Text("تعذر تهيئة محرك GeckoView.\n\nيمكنك فتح $platformTitle في المتصفح الخارجي.")
+            Text(
+                "تعذر تهيئة محرك GeckoView.\n\n" +
+                "يمكنك فتح $platformTitle في المتصفح الخارجي."
+            )
         },
         confirmButton   = { Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") } },
         dismissButton   = { OutlinedButton(onClick = onBack) { Text("رجوع") } }
