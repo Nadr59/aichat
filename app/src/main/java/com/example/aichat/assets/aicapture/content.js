@@ -122,12 +122,11 @@
             ).length,
             articles:   document.querySelectorAll('article').length,
             bodyLen:    document.body ? document.body.innerText.length : 0,
-            readyState: document.readyState,
-            url:        location.href
+            readyState: document.readyState
         };
     }
 
-    // ── إرسال تلقائي عبر sendMessage ─────────────────────────────────
+    // ── إرسال تلقائي ──────────────────────────────────────────────────
 
     function sendAutoToKotlin(text) {
         if (!text || text.length < 80) return;
@@ -162,17 +161,17 @@
     }
     startObserver();
 
-    // ── ✅ Port — browser.runtime.connect() وليس connectNative ────────
+    // ── ✅ Port — connectNative الصحيح ────────────────────────────────
 
     var port = null;
 
     function connectPort() {
         try {
-            // ✅ الطريقة الصحيحة في GeckoView
-            port = browser.runtime.connect({ name: 'aichat-port' });
+            // ✅ "browser" يطابق setMessageDelegate(..., "browser") في Kotlin
+            port = browser.runtime.connectNative('browser');
 
-            port.onMessage.addListener(function (message) {
-                if (!message || message.type !== 'CAPTURE_NOW') return;
+            port.onMessage.addListener(function (msg) {
+                if (!msg || msg.type !== 'CAPTURE_NOW') return;
 
                 var text = extractLatestResponse();
                 var ok   = !!(text && text.length >= MIN_LEN);
