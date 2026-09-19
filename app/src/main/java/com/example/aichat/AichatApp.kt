@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.repository.WebPlatformRepository
+import org.json.JSONObject
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.WebExtension
@@ -14,12 +15,13 @@ class AichatApp : Application() {
     var geckoRuntime: GeckoRuntime? = null
         private set
 
+    // ✅ Extension instance — يحتاجه GeckoTestScreen
+    @Volatile
+    var aiChatExtension: WebExtension? = null
+        private set
+
     // ── Callbacks ─────────────────────────────────────────────────────────
-
-    /** التلقائي — يُستدعى عند رصد رد AI_RESPONSE */
-    var onAiResponseCaptured: ((domain: String, text: String) -> Unit)? = null
-
-    /** ✅ اليدوي — يُستدعى عند ورود CAPTURE_RESULT */
+    var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String) -> Unit)? = null
 
     lateinit var webPlatformRepository: WebPlatformRepository
@@ -72,8 +74,11 @@ class AichatApp : Application() {
             )
             .accept(
                 { extension ->
-                    Log.d("AichatApp", "✅ Extension loaded: ${extension?.id}")
-                    if (extension != null) setupMessageDelegate(extension)
+                    if (extension != null) {
+                        aiChatExtension = extension          // ✅ احفظ الـ instance
+                        setupMessageDelegate(extension)
+                        Log.d("AichatApp", "✅ Extension loaded: ${extension.id}")
+                    }
                 },
                 { e ->
                     Log.e("AichatApp", "❌ Extension failed: ${e?.message}")
@@ -99,7 +104,7 @@ class AichatApp : Application() {
 
                 override fun onMessage(
                     nativeApp: String,
-                    message:   Any,
+                    message:   Any,                    // ✅ non-null
                     sender:    WebExtension.MessageSender
                 ): org.mozilla.geckoview.GeckoResult<Any>? {
                     handleMessage(message)
@@ -108,48 +113,52 @@ class AichatApp : Application() {
             },
             "browser"
         )
-        Log.d("AichatApp", "✅ MessageDelegate set")
+        Log.d("AichatApp", "✅ MessageDelegate set on extension")
     }
 
-    // ── ✅ handleMessage — يعالج النوعين ──────────────────────────────────
+    // ── ✅ handleMessage — يقرأ JSONObject ────────────────────────────────
 
-    private fun handleMessage(message: Any) {
+    internal fun handleMessage(message: Any) {
         try {
-            @Suppress("UNCHECKED_CAST")
-            val map  = message as? Map<String, Any> ?: return
-            val type = map["type"] as? String ?: return
+            // ✅ GeckoView يُرسل JSONObject وليس Map
+            val json = when (message) {
+                is JSONObject          -> message
+                is Map<*, *>           -> JSONObject(message as Map<*, *>)  // fallback
+                else                   -> {
+                    Log.w("AichatApp", "Unknown message type: ${message::class.simpleName}")
+                    return
+                }
+            }
+
+            val type = json.optString("type").ifBlank { return }
 
             when (type) {
 
-                // ── تلقائي ──────────────────────────────────────────────
                 "AI_RESPONSE" -> {
-                    val text   = map["text"]   as? String ?: return
-                    val domain = map["domain"] as? String ?: "unknown"
+                    val text   = json.optString("text")
+                    val domain = json.optString("domain", "unknown")
 
                     if (text.length < 80) {
-                        Log.d("AichatApp", "⏭ Too short: ${text.length}")
+                        Log.d("AichatApp", "⏭ Too short (${text.length})")
                         return
                     }
-
-                    Log.d("AichatApp", "📨 Auto AI from $domain: ${text.take(60)}…")
+                    Log.d("AichatApp", "📨 Auto from $domain: ${text.take(60)}…")
                     onAiResponseCaptured?.invoke(domain, text)
                 }
 
-                // ── ✅ يدوي ───────────────────────────────────────────────
                 "CAPTURE_RESULT" -> {
-                    val success = map["success"] as? Boolean ?: false
-                    val text    = map["text"]    as? String  ?: ""
-                    val domain  = map["domain"]  as? String  ?: "unknown"
+                    val success = json.optBoolean("success", false)
+                    val text    = json.optString("text")
+                    val domain  = json.optString("domain", "unknown")
 
                     Log.d("AichatApp",
-                        if (success) "🧠 Manual capture from $domain: ${text.take(60)}…"
-                        else         "⚠️ Manual capture failed from $domain"
+                        if (success) "🧠 Manual from $domain: ${text.take(60)}…"
+                        else         "⚠️ Manual failed from $domain"
                     )
-
                     onManualCaptureResult?.invoke(success, text)
                 }
 
-                else -> Log.d("AichatApp", "⏭ Unknown message type: $type")
+                else -> Log.d("AichatApp", "⏭ Unknown type: $type")
             }
 
         } catch (e: Exception) {
