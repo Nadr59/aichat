@@ -4,6 +4,8 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.ViewGroup
 import android.widget.Toast
@@ -156,34 +158,12 @@ fun GeckoTestScreen(
         }
         Unit
     }
-// ✅ سجّل الـ session مع AichatApp
-DisposableEffect(session) {
-    app.registerSession(session)
-    onDispose { }
-}
 
-// ✅ timeout 5 ثوانٍ — تأمان
-val saveToMemory: () -> Unit = save@{
-    if (isSavingMemory || isLoading) return@save
-    if (platform == null)            return@save
-    if (!platform.memoryEnabled)     return@save
-    if (chatViewModel == null)       return@save
-
-    isSavingMemory = true
-    app.requestManualCapture()
-
-    // ✅ reset بعد 5 ثوانٍ إذا لم تصل نتيجة
-    Handler(Looper.getMainLooper()).postDelayed({
-        if (isSavingMemory) {
-            isSavingMemory = false
-            Toast.makeText(
-                context,
-                "⚠️ انتهت المهلة — حاول مرة أخرى",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }, 5000L)
-}
+    // ── ✅ تسجيل الـ session مع AichatApp ────────────────────────────────
+    DisposableEffect(session) {
+        app.registerSession(session)
+        onDispose { }
+    }
 
     // ── ربط callbacks الذاكرة ────────────────────────────────────────────
     DisposableEffect(platform?.id) {
@@ -192,7 +172,6 @@ val saveToMemory: () -> Unit = save@{
 
         if (p != null && vm != null && p.memoryEnabled) {
 
-            // callback التلقائي — من MutationObserver
             app.onAiResponseCaptured = { domain, text ->
                 vm.onWebAiResponse(
                     platformId   = p.id,
@@ -202,46 +181,43 @@ val saveToMemory: () -> Unit = save@{
                 Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
             }
 
-            // ✅ callback اليدوي — مع Toast تشخيصي
-            
-// غيّر signature الـ callback في DisposableEffect:
+            app.onManualCaptureResult = { success, text, debug ->
+                isSavingMemory = false
+                if (success && text.isNotBlank()) {
+                    vm.onWebAiResponse(
+                        platformId   = p.id,
+                        platformName = p.name,
+                        text         = text
+                    )
+                    Toast.makeText(
+                        context,
+                        "✅ تم الحفظ\n${text.take(50)}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    Log.d("GeckoTestScreen", "🧠 Manual saved: ${text.take(60)}")
+                } else {
+                    val info = debug?.let {
+                        "assistant=${it.optInt("assistant")} " +
+                        "articles=${it.optInt("articles")} " +
+                        "body=${it.optInt("bodyLen")}"
+                    } ?: "no response"
 
-app.onManualCaptureResult = { success, text, debug ->
-    isSavingMemory = false
-    if (success && text.isNotBlank()) {
-        vm.onWebAiResponse(
-            platformId   = p.id,
-            platformName = p.name,
-            text         = text
-        )
-        Toast.makeText(
-            context,
-            "✅ تم الحفظ\n${text.take(50)}",
-            Toast.LENGTH_LONG
-        ).show()
-    } else {
-        // ✅ Toast تشخيصي يعرض debug info
-        val info = debug?.let {
-            "assistant=${it.optInt("assistant")} " +
-            "articles=${it.optInt("articles")} " +
-            "body=${it.optInt("bodyLen")}"
-        } ?: "no port"
-
-        Toast.makeText(
-            context,
-            "⚠️ فشل\n$info",
-            Toast.LENGTH_LONG
-        ).show()
-    }
-}
+                    Toast.makeText(
+                        context,
+                        "⚠️ فشل\n$info",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
         }
+
         onDispose {
             app.onAiResponseCaptured  = null
             app.onManualCaptureResult = null
         }
     }
 
-    // ── دالة الحفظ اليدوي — عبر Port ────────────────────────────────────
+    // ── ✅ دالة الحفظ اليدوي — تعريف واحد فقط ───────────────────────────
     val saveToMemory: () -> Unit = save@{
         if (isSavingMemory || isLoading) return@save
         if (platform == null)            return@save
@@ -250,6 +226,18 @@ app.onManualCaptureResult = { success, text, debug ->
 
         isSavingMemory = true
         app.requestManualCapture()
+
+        // ✅ timeout 5 ثوانٍ
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (isSavingMemory) {
+                isSavingMemory = false
+                Toast.makeText(
+                    context,
+                    "⚠️ انتهت المهلة — حاول مرة أخرى",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }, 5000L)
     }
 
     // ── رجوع ذكي ─────────────────────────────────────────────────────────
@@ -313,8 +301,6 @@ app.onManualCaptureResult = { success, text, debug ->
                 }
             },
             actions = {
-
-                // ✅ زر الذاكرة — يعمل عبر Port
                 if (platform != null && platform.memoryEnabled && chatViewModel != null) {
                     IconButton(
                         onClick = saveToMemory,
@@ -326,7 +312,6 @@ app.onManualCaptureResult = { success, text, debug ->
                         )
                     }
                 }
-
                 IconButton(onClick = { session.reload() }) {
                     Icon(Icons.Filled.Refresh, "تحديث")
                 }
