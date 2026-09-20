@@ -112,14 +112,39 @@
         return text ? text.substring(0, MAX_LEN) : null;
     }
 
-    // ── إرسال تلقائي ──────────────────────────────────────────────────
+    // ── ✅ استقبال CAPTURE من background.js ──────────────────────────
 
-    function sendAutoToKotlin(text) {
+    browser.runtime.onMessage.addListener(function (message) {
+        if (!message || message.type !== 'CAPTURE') return;
+
+        var text = extractLatestResponse();
+        var ok   = !!(text && text.length >= MIN_LEN);
+
+        // ✅ رد على background.js
+        browser.runtime.sendMessage({
+            type:    'CAPTURE_RESULT',
+            success: ok,
+            text:    ok ? text : '',
+            domain:  location.hostname,
+            debug: {
+                assistant: document.querySelectorAll(
+                    '[data-message-author-role="assistant"]'
+                ).length,
+                articles:  document.querySelectorAll('article').length,
+                bodyLen:   document.body
+                           ? document.body.innerText.length : 0
+            }
+        });
+    });
+
+    // ── إرسال تلقائي لـ background.js ────────────────────────────────
+
+    function sendAutoToBackground(text) {
         if (!text || text.length < 80) return;
         if (text === lastSentText)     return;
         lastSentText = text;
         try {
-            browser.runtime.sendNativeMessage('browser', {
+            browser.runtime.sendMessage({
                 type:   'AI_RESPONSE',
                 text:   text,
                 domain: location.hostname
@@ -127,10 +152,12 @@
         } catch (e) {}
     }
 
+    // ── مراقبة تلقائية ────────────────────────────────────────────────
+
     var observer = new MutationObserver(function () {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function () {
-            sendAutoToKotlin(extractLatestResponse());
+            sendAutoToBackground(extractLatestResponse());
         }, DEBOUNCE_MS);
     });
 
@@ -145,47 +172,6 @@
         }
     }
     startObserver();
-
-    // ── ✅ Port — connectNative ────────────────────────────────────────
-
-    var port = null;
-
-    function connect() {
-        port = browser.runtime.connectNative('browser');
-
-        port.onMessage.addListener(function (msg) {
-            if (!msg || msg.type !== 'CAPTURE') return;
-
-            var text = extractLatestResponse();
-            var ok   = !!(text && text.length >= MIN_LEN);
-
-            port.postMessage({
-                type:    'CAPTURE_RESULT',
-                success: ok,
-                text:    ok ? text : '',
-                domain:  location.hostname,
-                debug: {
-                    assistant: document.querySelectorAll(
-                        '[data-message-author-role="assistant"]'
-                    ).length,
-                    articles:  document.querySelectorAll('article').length,
-                    bodyLen:   document.body
-                               ? document.body.innerText.length : 0
-                }
-            });
-        });
-
-        port.onDisconnect.addListener(function (p) {
-            // سجّل السبب الحقيقي
-            var reason = (p && p.error && p.error.message) || 'unknown';
-            console.log('[AiChat] port disconnected:', reason);
-            port = null;
-            // ✅ إعادة محاولة — الـ delegate قد يكون جاهزاً بعد ثانية
-            setTimeout(connect, 1000);
-        });
-    }
-
-    connect();
 
     window.addEventListener('pagehide', function () {
         observer.disconnect();
