@@ -21,9 +21,8 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension?  = null
         private set
 
-    @Volatile private var capturePort: WebExtension.Port? = null
-
-    private val pendingSessions = mutableListOf<GeckoSession>()
+    // ✅ Port من background.js — مستوى الـ Runtime
+    @Volatile private var bgPort: WebExtension.Port? = null
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
@@ -31,29 +30,36 @@ class AichatApp : Application() {
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
-    // ── PortDelegate ──────────────────────────────────────────────────
+    // ── PortDelegate — background.js ──────────────────────────────────
 
     private val portDelegate = object : WebExtension.PortDelegate {
         override fun onPortMessage(message: Any, port: WebExtension.Port) {
             val json = parseMessage(message) ?: return
-            Log.d("AichatApp", "📩 Port: ${json.optString("type")}")
-            when (json.optString("type")) {
+            val type = json.optString("type")
+            Log.d("AichatApp", "📩 Port msg: $type")
+
+            when (type) {
+                "BG_READY"       -> Log.d("AichatApp", "✅ Background ready!")
+                "AI_RESPONSE"    -> handleAutoResponse(json)
                 "CAPTURE_RESULT" -> handleCaptureResult(json)
+                else             -> Log.d("AichatApp", "⏭ Unknown: $type")
             }
         }
+
         override fun onDisconnect(port: WebExtension.Port) {
-            Log.d("AichatApp", "⚠️ Port disconnected")
-            if (capturePort === port) capturePort = null
+            Log.w("AichatApp", "⚠️ BG Port disconnected")
+            if (bgPort === port) bgPort = null
         }
     }
 
-    // ── MessageDelegate ───────────────────────────────────────────────
+    // ── MessageDelegate — على مستوى الـ Extension (background) ───────
 
     private val messageDelegate = object : WebExtension.MessageDelegate {
 
+        // ✅ background.js اتصل عبر connectNative('browser')
         override fun onConnect(port: WebExtension.Port) {
-            Log.d("AichatApp", "✅ onConnect — Port ready!")
-            capturePort = port
+            Log.d("AichatApp", "✅ onConnect from background.js!")
+            bgPort = port
             port.setDelegate(portDelegate)
         }
 
@@ -64,9 +70,6 @@ class AichatApp : Application() {
         ): GeckoResult<Any>? {
             val json = parseMessage(message) ?: return null
             Log.d("AichatApp", "📩 onMessage: ${json.optString("type")}")
-            when (json.optString("type")) {
-                "AI_RESPONSE" -> handleAutoResponse(json)
-            }
             return null
         }
     }
@@ -105,38 +108,21 @@ class AichatApp : Application() {
         }
     }
 
-    // ── ✅ تسجيل delegate — مستقل عن فتح الجلسة ──────────────────────
-
-    fun registerSessionDelegate(session: GeckoSession) {
-        val ext = aiChatExtension
-        if (ext != null) {
-            session.webExtensionController
-                .setMessageDelegate(ext, messageDelegate, "browser")
-            Log.d("AichatApp", "✅ Delegate registered immediately")
-        } else {
-            Log.w("AichatApp", "⏳ Extension not ready — queuing session")
-            synchronized(pendingSessions) {
-                if (!pendingSessions.contains(session)) {
-                    pendingSessions.add(session)
-                }
-            }
-        }
-    }
-
     // ── زر 🧠 ────────────────────────────────────────────────────────
 
     fun requestManualCapture() {
-        val port = capturePort
+        val port = bgPort
         if (port == null) {
-            Log.w("AichatApp", "⚠️ No port available")
+            Log.w("AichatApp", "⚠️ No background port")
             Handler(Looper.getMainLooper()).post {
                 onManualCaptureResult?.invoke(false, "", null)
             }
             return
         }
         try {
+            // ✅ أرسل لـ background.js — هو يوصّل لـ content.js
             port.postMessage(JSONObject().put("type", "CAPTURE"))
-            Log.d("AichatApp", "📤 CAPTURE sent")
+            Log.d("AichatApp", "📤 CAPTURE → background.js")
         } catch (e: Exception) {
             Log.e("AichatApp", "❌ postMessage: ${e.message}")
             Handler(Looper.getMainLooper()).post {
@@ -157,19 +143,9 @@ class AichatApp : Application() {
                 { ext ->
                     if (ext != null) {
                         aiChatExtension = ext
-                        Log.d("AichatApp", "✅ Extension: ${ext.id}")
-
-                        // ✅ سجّل كل الـ sessions المنتظرة
-                        synchronized(pendingSessions) {
-                            pendingSessions.forEach { s ->
-                                s.webExtensionController
-                                    .setMessageDelegate(
-                                        ext, messageDelegate, "browser"
-                                    )
-                                Log.d("AichatApp", "✅ Queued session registered")
-                            }
-                            pendingSessions.clear()
-                        }
+                        // ✅ delegate على مستوى Extension — للـ background
+                        ext.setMessageDelegate(messageDelegate, "browser")
+                        Log.d("AichatApp", "✅ Extension ready: ${ext.id}")
                     }
                 },
                 { e -> Log.e("AichatApp", "❌ Extension: ${e?.message}") }
