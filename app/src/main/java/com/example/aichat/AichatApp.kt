@@ -20,29 +20,21 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
+    // ✅ flag — content.js يسأل عنه كل ثانية
+    @Volatile private var captureFlag: Boolean = false
+
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
-    // ✅ flag بسيط — content.js يسأل عنه كل ثانية
 
+    // ── ✅ يُستدعى من زر 🧠 ──────────────────────────────────────────
 
-// ✅ في messageDelegate — أضف CHECK_CAPTURE
-"CHECK_CAPTURE" -> {
-    val flag = captureFlag
-    captureFlag = false
-    return GeckoResult.fromValue(
-        JSONObject().put("capture", flag)
-    )
-}
-@Volatile private var captureFlag: Boolean = false
-
-// ✅ يُستدعى من زر 🧠
-fun triggerCapture() {
-    captureFlag = true
-    Log.d("AichatApp", "📌 Capture flag set")
-}
+    fun triggerCapture() {
+        captureFlag = true
+        Log.d("AichatApp", "📌 Capture flag set")
+    }
 
     // ── MessageDelegate ───────────────────────────────────────────────
 
@@ -52,14 +44,34 @@ fun triggerCapture() {
             message:   Any,
             sender:    WebExtension.MessageSender
         ): GeckoResult<Any>? {
+
             val json = parseMessage(message) ?: return null
             val type = json.optString("type")
             Log.d("AichatApp", "📩 onMessage: $type")
-            when (type) {
-                "AI_RESPONSE"    -> handleAutoResponse(json)
-                "CAPTURE_RESULT" -> handleCaptureResult(json)
+
+            return when (type) {
+
+                // ✅ content.js يسأل كل ثانية
+                "CHECK_CAPTURE" -> {
+                    val flag    = captureFlag
+                    captureFlag = false
+                    GeckoResult.fromValue(
+                        JSONObject().put("capture", flag)
+                    )
+                }
+
+                "AI_RESPONSE" -> {
+                    handleAutoResponse(json)
+                    null
+                }
+
+                "CAPTURE_RESULT" -> {
+                    handleCaptureResult(json)
+                    null
+                }
+
+                else -> null
             }
-            return null
         }
     }
 
@@ -131,10 +143,12 @@ fun triggerCapture() {
         val success = json.optBoolean("success", false)
         val text    = json.optString("text")
         val debug   = json.optJSONObject("debug")
+
         Log.d("AichatApp",
             if (success) "🧠 OK: ${text.take(60)}…"
             else         "⚠️ Failed — debug: $debug"
         )
+
         Handler(Looper.getMainLooper()).post {
             onManualCaptureResult?.invoke(success, text, debug)
         }
