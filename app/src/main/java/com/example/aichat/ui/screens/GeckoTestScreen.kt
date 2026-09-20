@@ -224,28 +224,37 @@ fun GeckoTestScreen(
 
     // ── دالة الحفظ اليدوي ────────────────────────────────────────────────
     val saveToMemory: () -> Unit = save@{
-        if (isSavingMemory || isLoading) return@save
-        if (platform == null)            return@save
-        if (!platform.memoryEnabled)     return@save
-        if (chatViewModel == null)       return@save
+    if (isSavingMemory || isLoading) return@save
+    if (platform == null)            return@save
+    if (!platform.memoryEnabled)     return@save
+    if (chatViewModel == null)       return@save
 
-        isSavingMemory = true
+    isSavingMemory = true
 
-        // ✅ اطلب من content.js الالتقاط عبر sendNativeMessage
-        // content.js يراقب الـ flag من AichatApp
-        app.triggerCapture()
+    // ── خطوة 1 ──
+    Toast.makeText(context, "🧠 الخطوة 1: ضبط العلامة...", Toast.LENGTH_SHORT).show()
 
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (isSavingMemory) {
-                isSavingMemory = false
-                Toast.makeText(
-                    context,
-                    "⚠️ انتهت المهلة — حاول مرة أخرى",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }, 5000L)
+    app.triggerCapture()
+
+    // ── خطوة 2 ──
+    Toast.makeText(context, "⏳ الخطوة 2: انتظار رد الصفحة...", Toast.LENGTH_SHORT).show()
+
+    Handler(Looper.getMainLooper()).postDelayed({
+        if (isSavingMemory) {
+            isSavingMemory = false
+
+            // ── إذا وصلنا هنا = لا رد ──
+            Toast.makeText(
+                context,
+                "❌ الخطوة 3: لم يصل رد — timeout\n" +
+                "Extension=${app.aiChatExtension != null}\n" +
+                "Flag كان=true",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }, 5000L)
     }
+        
 
     // ── رجوع ذكي ─────────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
