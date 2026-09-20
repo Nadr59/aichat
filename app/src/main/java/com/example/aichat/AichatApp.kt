@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.repository.WebPlatformRepository
 import org.json.JSONObject
@@ -28,11 +29,20 @@ class AichatApp : Application() {
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
+    // ── Toast helper ──────────────────────────────────────────────────
+
+    fun showToast(msg: String) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // ── يُستدعى من زر 🧠 ─────────────────────────────────────────────
 
     fun triggerCapture() {
         captureFlag = true
         Log.d("AichatApp", "📌 Capture flag set")
+        showToast("🔍 جاري البحث في الصفحة...")
     }
 
     // ── MessageDelegate ───────────────────────────────────────────────
@@ -47,11 +57,12 @@ class AichatApp : Application() {
 
             val json = parseMessage(message) ?: run {
                 Log.e("AichatApp", "❌ parseMessage failed — raw: $message")
+                showToast("❌ خطأ في قراءة الرسالة")
                 return null
             }
 
             val type = json.optString("type")
-            Log.d("AichatApp", "📩 onMessage type=$type sender=${sender.url}")
+            Log.d("AichatApp", "📩 onMessage type=$type")
 
             return when (type) {
 
@@ -59,6 +70,11 @@ class AichatApp : Application() {
                     val flag    = captureFlag
                     captureFlag = false
                     Log.d("AichatApp", "✅ CHECK_CAPTURE → flag=$flag")
+
+                    if (flag) {
+                        showToast("📡 تم الاتصال بالصفحة — جاري الاستخراج...")
+                    }
+
                     GeckoResult.fromValue(
                         JSONObject().put("capture", flag)
                     )
@@ -114,6 +130,7 @@ class AichatApp : Application() {
             }
         } catch (e: Exception) {
             Log.e("AichatApp", "❌ GeckoRuntime: ${e.message}")
+            showToast("❌ فشل تهيئة GeckoRuntime")
             null
         }
     }
@@ -132,12 +149,15 @@ class AichatApp : Application() {
                         aiChatExtension = ext
                         ext.setMessageDelegate(messageDelegate, "browser")
                         Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
+                        showToast("✅ Extension جاهزة")
                     } else {
                         Log.e("AichatApp", "❌ Extension is null")
+                        showToast("❌ Extension فارغة")
                     }
                 },
                 { e ->
                     Log.e("AichatApp", "❌ Extension error: ${e?.message}")
+                    showToast("❌ Extension: ${e?.message?.take(40)}")
                 }
             )
     }
