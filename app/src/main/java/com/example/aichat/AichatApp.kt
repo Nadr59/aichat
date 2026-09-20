@@ -21,8 +21,10 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension?  = null
         private set
 
-    // ✅ GeckoResult معلّق — يُكمَل عند ضغط الزر
     @Volatile private var pendingCapture: GeckoResult<Any>? = null
+
+    // ✅ قائمة الـ sessions التي تنتظر تسجيل الـ delegate
+    private val pendingSessions = mutableListOf<GeckoSession>()
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
@@ -43,34 +45,34 @@ class AichatApp : Application() {
             val json = parseMessage(message) ?: return null
             val type = json.optString("type")
 
+            Log.d("AichatApp", "📩 onMessage: $type")
+
             return when (type) {
 
-                // ✅ content.js يرسل WAIT_CAPTURE ويستنى
                 "WAIT_CAPTURE" -> {
-                    // ألغِ الانتظار القديم إن وجد
                     pendingCapture?.complete(
                         JSONObject().put("capture", false)
                     )
-                    // أنشئ result جديد ومعلّق
                     val result = GeckoResult<Any>()
                     pendingCapture = result
                     Log.d("AichatApp", "⏳ WAIT_CAPTURE registered")
-                    result  // ← لا يُكمَل الآن — ينتظر requestManualCapture()
+                    result
                 }
 
-                // ✅ content.js أرسل النتيجة
                 "CAPTURE_RESULT" -> {
                     handleCaptureResult(json)
                     null
                 }
 
-                // التلقائي
                 "AI_RESPONSE" -> {
                     handleAutoResponse(json)
                     null
                 }
 
-                else -> null
+                else -> {
+                    Log.d("AichatApp", "⏭ Unknown: $type")
+                    null
+                }
             }
         }
     }
@@ -109,7 +111,7 @@ class AichatApp : Application() {
         }
     }
 
-    // ── ✅ زر 🧠 — يوقظ content.js فوراً ─────────────────────────────
+    // ── زر 🧠 ────────────────────────────────────────────────────────
 
     fun requestManualCapture() {
         val pending = pendingCapture
@@ -121,19 +123,28 @@ class AichatApp : Application() {
             return
         }
         pendingCapture = null
-        // ✅ يوقظ content.js — يكمل الـ Promise هناك
         pending.complete(JSONObject().put("capture", true))
         Log.d("AichatApp", "✅ Capture triggered")
     }
 
-    // ── ✅ registerSession — للـ content scripts ──────────────────────
+    // ── ✅ registerSession — يتعامل مع التأخر ─────────────────────────
 
     fun registerSession(session: GeckoSession) {
         val ext = aiChatExtension
-        if (ext == null) {
-            Log.w("AichatApp", "⚠️ Extension not ready")
-            return
+
+        if (ext != null) {
+            // ✅ Extension جاهزة — سجّل فوراً
+            doRegisterSession(session, ext)
+        } else {
+            // ✅ Extension لم تنته بعد — احفظ للتسجيل لاحقاً
+            Log.w("AichatApp", "⏳ Extension not ready — queuing session")
+            synchronized(pendingSessions) {
+                pendingSessions.add(session)
+            }
         }
+    }
+
+    private fun doRegisterSession(session: GeckoSession, ext: WebExtension) {
         session.webExtensionController
             .setMessageDelegate(ext, messageDelegate, "browser")
         Log.d("AichatApp", "✅ Session registered")
@@ -151,9 +162,16 @@ class AichatApp : Application() {
                 { ext ->
                     if (ext != null) {
                         aiChatExtension = ext
-                        // للـ background (إن وجد)
                         ext.setMessageDelegate(messageDelegate, "browser")
                         Log.d("AichatApp", "✅ Extension: ${ext.id}")
+
+                        // ✅ سجّل كل الـ sessions التي كانت تنتظر
+                        synchronized(pendingSessions) {
+                            pendingSessions.forEach { session ->
+                                doRegisterSession(session, ext)
+                            }
+                            pendingSessions.clear()
+                        }
                     }
                 },
                 { e -> Log.e("AichatApp", "❌ Extension: ${e?.message}") }
@@ -181,7 +199,9 @@ class AichatApp : Application() {
             else         "⚠️ Failed — debug: $debug"
         )
 
-        onManualCaptureResult?.invoke(success, text, debug)
+        Handler(Looper.getMainLooper()).post {
+            onManualCaptureResult?.invoke(success, text, debug)
+        }
     }
 
     private fun parseMessage(message: Any): JSONObject? = try {
