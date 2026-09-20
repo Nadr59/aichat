@@ -113,6 +113,30 @@ class AichatApp : Application() {
             throw e
         }
     }
+    private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
+    runtime.webExtensionController
+        .ensureBuiltIn(
+            "resource://android/assets/aicapture/",
+            "aicapture@aichat.example.com"
+        )
+        .accept(
+            { ext ->
+                if (ext != null) {
+                    aiChatExtension = ext
+                    ext.setMessageDelegate(messageDelegate, "browser")
+                    showToast("✅ Extension OK: ${ext.id}")
+                } else {
+                    showToast("❌ Extension = null")
+                }
+            },
+            { e ->
+                // ✅ أظهر الخطأ كاملاً
+                val msg = e?.message ?: "null"
+                val cause = e?.cause?.message ?: "no cause"
+                showToast("❌ $msg | $cause")
+            }
+        )
+    }
 
     // ── GeckoRuntime ──────────────────────────────────────────────────
 
