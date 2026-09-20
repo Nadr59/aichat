@@ -122,7 +122,8 @@
         if (text === lastSentText)     return;
         lastSentText = text;
         try {
-            browser.runtime.sendNativeMessage('browser', {
+            // ✅ sendMessage → background.js → Kotlin
+            browser.runtime.sendMessage({
                 type:   'AI_RESPONSE',
                 text:   text,
                 domain: location.hostname
@@ -155,21 +156,24 @@
 
     setInterval(function () {
 
-        // لا تسأل إذا الصفحة مخفية
         if (document.visibilityState !== 'visible') return;
 
-        browser.runtime.sendNativeMessage('browser', {
+        // ✅ sendMessage → background.js → Kotlin → رد
+        browser.runtime.sendMessage({
             type:   'CHECK_CAPTURE',
             domain: location.hostname
         }).then(function (response) {
 
+            console.log('[content] CHECK_CAPTURE response:', 
+                        JSON.stringify(response));
+
             if (!response || !response.capture) return;
 
-            // ✅ Kotlin طلب الالتقاط
             var text = extractLatestResponse();
             var ok   = !!(text && text.length >= MIN_LEN);
 
-            browser.runtime.sendNativeMessage('browser', {
+            // ✅ أرسل النتيجة لـ background.js → Kotlin
+            browser.runtime.sendMessage({
                 type:    'CAPTURE_RESULT',
                 success: ok,
                 text:    ok ? text : '',
@@ -184,11 +188,13 @@
                 }
             });
 
-        }).catch(function () {});
+        }).catch(function (e) {
+            console.error('[content] CHECK_CAPTURE error:', e);
+        });
 
     }, 1000);
 
-    // ── تنظيف عند إغلاق الصفحة ───────────────────────────────────────
+    // ── تنظيف ────────────────────────────────────────────────────────
 
     window.addEventListener('pagehide', function () {
         observer.disconnect();
