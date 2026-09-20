@@ -160,10 +160,7 @@ fun GeckoTestScreen(
     }
 
     // ── ✅ تسجيل الـ session مع AichatApp ────────────────────────────────
-    DisposableEffect(session) {
-        app.registerSession(session)
-        onDispose { }
-    }
+
 
     // ── ربط callbacks الذاكرة ────────────────────────────────────────────
     DisposableEffect(platform?.id) {
@@ -326,22 +323,23 @@ fun GeckoTestScreen(
 
         Box(modifier = Modifier.fillMaxSize()) {
 
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory  = { ctx ->
-                    GeckoView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        if (!session.isOpen) {
-                            session.open(runtime)
-                            session.loadUri(url)
-                        }
-                        setSession(session)
-                    }.also { geckoViewRef = it }
-                }
+            // ✅ غيّر AndroidView ليستخدم prepareSession:
+AndroidView(
+    modifier = Modifier.fillMaxSize(),
+    factory  = { ctx ->
+        GeckoView(ctx).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
+            // ✅ prepareSession يتولى: delegate → open → loadUri
+            if (!session.isOpen) {
+                app.prepareSession(session, url)
+            }
+            setSession(session)
+        }.also { geckoViewRef = it }
+    }
+)
 
             if (isLoading) {
                 LinearProgressIndicator(
