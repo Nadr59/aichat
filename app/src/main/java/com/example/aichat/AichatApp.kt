@@ -26,13 +26,7 @@ class AichatApp : Application() {
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
     // ✅ flag بسيط — content.js يسأل عنه كل ثانية
-@Volatile private var captureFlag: Boolean = false
 
-// ✅ يُستدعى من زر 🧠
-fun triggerCapture() {
-    captureFlag = true
-    Log.d("AichatApp", "📌 Capture flag set")
-}
 
 // ✅ في messageDelegate — أضف CHECK_CAPTURE
 "CHECK_CAPTURE" -> {
@@ -41,6 +35,13 @@ fun triggerCapture() {
     return GeckoResult.fromValue(
         JSONObject().put("capture", flag)
     )
+}
+@Volatile private var captureFlag: Boolean = false
+
+// ✅ يُستدعى من زر 🧠
+fun triggerCapture() {
+    captureFlag = true
+    Log.d("AichatApp", "📌 Capture flag set")
 }
 
     // ── MessageDelegate ───────────────────────────────────────────────
