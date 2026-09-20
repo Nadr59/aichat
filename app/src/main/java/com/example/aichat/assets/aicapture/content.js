@@ -4,11 +4,11 @@
     if (window.__aiCaptureActive) return;
     window.__aiCaptureActive = true;
 
-    var lastSentText  = '';
+    var lastSentText = '';
     var debounceTimer = null;
-    var DEBOUNCE_MS   = 1800;
-    var MIN_LEN       = 30;
-    var MAX_LEN       = 3000;
+    var DEBOUNCE_MS  = 1800;
+    var MIN_LEN      = 30;
+    var MAX_LEN      = 3000;
 
     // ── Helpers ───────────────────────────────────────────────────────
 
@@ -112,39 +112,56 @@
         return text ? text.substring(0, MAX_LEN) : null;
     }
 
-    // ── ✅ استقبال CAPTURE من background.js ──────────────────────────
-
-    browser.runtime.onMessage.addListener(function (message) {
-        if (!message || message.type !== 'CAPTURE') return;
+    function doCapture() {
+        // أزل الـ hash فوراً
+        if (location.hash.startsWith('#aichat-capture-')) {
+            history.replaceState(
+                null, '',
+                location.pathname + location.search
+            );
+        }
 
         var text = extractLatestResponse();
         var ok   = !!(text && text.length >= MIN_LEN);
 
-        // ✅ رد على background.js
-        browser.runtime.sendMessage({
-            type:    'CAPTURE_RESULT',
-            success: ok,
-            text:    ok ? text : '',
-            domain:  location.hostname,
-            debug: {
-                assistant: document.querySelectorAll(
-                    '[data-message-author-role="assistant"]'
-                ).length,
-                articles:  document.querySelectorAll('article').length,
-                bodyLen:   document.body
-                           ? document.body.innerText.length : 0
-            }
-        });
+        try {
+            browser.runtime.sendNativeMessage('browser', {
+                type:    'CAPTURE_RESULT',
+                success: ok,
+                text:    ok ? text : '',
+                domain:  location.hostname,
+                debug: {
+                    assistant: document.querySelectorAll(
+                        '[data-message-author-role="assistant"]'
+                    ).length,
+                    articles: document.querySelectorAll('article').length,
+                    bodyLen:  document.body
+                              ? document.body.innerText.length : 0
+                }
+            });
+        } catch (e) {}
+    }
+
+    // ✅ مراقبة الـ hash — الحل الرئيسي
+    window.addEventListener('hashchange', function () {
+        if (location.hash.startsWith('#aichat-capture-')) {
+            doCapture();
+        }
     });
 
-    // ── إرسال تلقائي لـ background.js ────────────────────────────────
+    // ✅ فحص عند التحميل (إذا جاء الـ hash مع الصفحة)
+    if (location.hash.startsWith('#aichat-capture-')) {
+        setTimeout(doCapture, 500);
+    }
 
-    function sendAutoToBackground(text) {
+    // ── إرسال تلقائي ──────────────────────────────────────────────────
+
+    function sendAutoToKotlin(text) {
         if (!text || text.length < 80) return;
         if (text === lastSentText)     return;
         lastSentText = text;
         try {
-            browser.runtime.sendMessage({
+            browser.runtime.sendNativeMessage('browser', {
                 type:   'AI_RESPONSE',
                 text:   text,
                 domain: location.hostname
@@ -152,12 +169,10 @@
         } catch (e) {}
     }
 
-    // ── مراقبة تلقائية ────────────────────────────────────────────────
-
     var observer = new MutationObserver(function () {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function () {
-            sendAutoToBackground(extractLatestResponse());
+            sendAutoToKotlin(extractLatestResponse());
         }, DEBOUNCE_MS);
     });
 
