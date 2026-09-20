@@ -1,159 +1,55 @@
-
 "use strict";
 
-var NATIVE_APP    = "browser";
-var RECONNECT_MS  = 2000;
-var TAB_TIMEOUT   = 10000;
+var NATIVE_APP   = "browser";
+var TAB_TIMEOUT  = 10000;
 
-var nativePort      = null;
-var reconnectTimer  = null;
-
-// ── اتصال بـ Kotlin ───────────────────────────────────────────────
-
-function connectNative() {
-    if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-    }
-
-    try {
-        nativePort = browser.runtime.connectNative(NATIVE_APP);
-    } catch (e) {
-        console.log("[bg] connectNative failed:", e.message);
-        reconnectTimer = setTimeout(connectNative, RECONNECT_MS);
-        return;
-    }
-
-    nativePort.onMessage.addListener(onNativeMessage);
-
-    nativePort.onDisconnect.addListener(function (p) {
-        var err = (p && p.error && p.error.message) || "unknown";
-        console.log("[bg] native disconnected:", err);
-        nativePort = null;
-        reconnectTimer = setTimeout(connectNative, RECONNECT_MS);
-    });
-
-    // ✅ أخبر Kotlin أن الجسر جاهز
-    safePost({ type: "BG_READY", ts: Date.now() });
-    console.log("[bg] native port connected ✅");
-}
-
-function safePost(obj) {
-    if (!nativePort) {
-        console.log("[bg] drop — no port:", obj.type);
-        return false;
-    }
-    try {
-        nativePort.postMessage(obj);
-        return true;
-    } catch (e) {
-        console.log("[bg] postMessage failed:", e.message);
-        return false;
-    }
-}
-
-// ── استقبال أوامر من Kotlin ───────────────────────────────────────
-
-function onNativeMessage(msg) {
-    if (!msg || !msg.type) return;
-    console.log("[bg] from Kotlin:", msg.type);
-
-    if (msg.type === "CAPTURE") {
-        sendCaptureToContent(msg.tabId);
-    }
-}
-
-// ── إرسال CAPTURE لـ content.js ──────────────────────────────────
-
-function sendCaptureToContent(preferredTabId) {
-    getTargetTab(preferredTabId).then(function (tab) {
-        if (!tab) {
-            safePost({ type: "CAPTURE_RESULT", success: false,
-                       text: "", error: "no_tab" });
-            return;
-        }
-
-        var done = false;
-
-        // استقبل الرد من content.js
-        function onContentReply(message, sender) {
-            if (done) return;
-            if (!message || message.type !== "CAPTURE_RESULT") return;
-            if (sender.tab && sender.tab.id !== tab.id) return;
-
-            done = true;
-            browser.runtime.onMessage.removeListener(onContentReply);
-
-            // أرسل لـ Kotlin
-            safePost({
-                type:    "CAPTURE_RESULT",
-                success: message.success,
-                text:    message.text   || "",
-                domain:  message.domain || "",
-                debug:   message.debug  || null
-            });
-        }
-
-        browser.runtime.onMessage.addListener(onContentReply);
-
-        // timeout إذا لم يرد content.js
-        setTimeout(function () {
-            if (done) return;
-            done = true;
-            browser.runtime.onMessage.removeListener(onContentReply);
-            safePost({ type: "CAPTURE_RESULT", success: false,
-                       text: "", error: "timeout" });
-        }, TAB_TIMEOUT);
-
-        // أرسل الأمر لـ content.js
-        browser.tabs.sendMessage(tab.id, { type: "CAPTURE" })
-            .catch(function (e) {
-                if (done) return;
-                done = true;
-                browser.runtime.onMessage.removeListener(onContentReply);
-                safePost({ type: "CAPTURE_RESULT", success: false,
-                           text: "", error: e.message });
-            });
-
-    }).catch(function (e) {
-        safePost({ type: "CAPTURE_RESULT", success: false,
-                   text: "", error: e.message });
-    });
-}
-
-function getTargetTab(preferredId) {
-    if (typeof preferredId === "number") {
-        return browser.tabs.get(preferredId).catch(function () {
-            return getActiveTab();
-        });
-    }
-    return getActiveTab();
-}
-
-function getActiveTab() {
-    return browser.tabs.query({ active: true }).then(function (tabs) {
-        if (tabs && tabs.length > 0) return tabs[0];
-        return browser.tabs.query({}).then(function (all) {
-            return (all && all.length > 0) ? all[0] : null;
-        });
-    });
-}
-
-// ── استقبال AI_RESPONSE من content.js ────────────────────────────
+// ══════════════════════════════════════════════════════
+// استقبال رسائل content.js
+// ══════════════════════════════════════════════════════
 
 browser.runtime.onMessage.addListener(function (message, sender) {
     if (!message || !message.type) return;
 
-    if (message.type === "AI_RESPONSE") {
-        safePost({
+    var type = message.type;
+    console.log("[bg] from content:", type);
+
+    // ── AI_RESPONSE: أرسل لـ Kotlin بدون رد ──────────────
+    if (type === "AI_RESPONSE") {
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "AI_RESPONSE",
             text:   message.text   || "",
-            domain: message.domain || "",
-            url:    message.url    || ""
+            domain: message.domain || ""
         });
+        return; // لا رد لـ content.js
+    }
+
+    // ── CHECK_CAPTURE: اسأل Kotlin وأرجع الرد لـ content.js ──
+    if (type === "CHECK_CAPTURE") {
+        // ✅ أرجع Promise — هذا يجعل content.js يحصل على الرد
+        return browser.runtime.sendNativeMessage(NATIVE_APP, {
+            type:   "CHECK_CAPTURE",
+            domain: message.domain || ""
+        }).then(function (response) {
+            console.log("[bg] CHECK_CAPTURE response from Kotlin:", 
+                        JSON.stringify(response));
+            return response; // ✅ يصل لـ content.js .then()
+        }).catch(function (e) {
+            console.error("[bg] CHECK_CAPTURE error:", e);
+            return { capture: false };
+        });
+    }
+
+    // ── CAPTURE_RESULT: أرسل لـ Kotlin ────────────────────
+    if (type === "CAPTURE_RESULT") {
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
+            type:    "CAPTURE_RESULT",
+            success: message.success || false,
+            text:    message.text    || "",
+            domain:  message.domain  || "",
+            debug:   message.debug   || null
+        });
+        return;
     }
 });
 
-// ── ابدأ ──────────────────────────────────────────────────────────
-
-connectNative();
+console.log("[bg] background ready ✅");
