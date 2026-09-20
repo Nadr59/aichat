@@ -20,7 +20,6 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
-    // ✅ flag — content.js يسأل عنه كل ثانية
     @Volatile private var captureFlag: Boolean = false
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
@@ -29,7 +28,7 @@ class AichatApp : Application() {
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
-    // ── ✅ يُستدعى من زر 🧠 ──────────────────────────────────────────
+    // ── يُستدعى من زر 🧠 ─────────────────────────────────────────────
 
     fun triggerCapture() {
         captureFlag = true
@@ -39,49 +38,52 @@ class AichatApp : Application() {
     // ── MessageDelegate ───────────────────────────────────────────────
 
     private val messageDelegate = object : WebExtension.MessageDelegate {
+
         override fun onMessage(
-    nativeApp: String,
-    message:   Any,
-    sender:    WebExtension.MessageSender
-): GeckoResult<Any>? {
+            nativeApp: String,
+            message:   Any,
+            sender:    WebExtension.MessageSender
+        ): GeckoResult<Any>? {
 
-    val json = parseMessage(message) ?: run {
-        Log.e("AichatApp", "❌ parseMessage failed — raw: $message")
-        return null
+            val json = parseMessage(message) ?: run {
+                Log.e("AichatApp", "❌ parseMessage failed — raw: $message")
+                return null
+            }
+
+            val type = json.optString("type")
+            Log.d("AichatApp", "📩 onMessage type=$type sender=${sender.url}")
+
+            return when (type) {
+
+                "CHECK_CAPTURE" -> {
+                    val flag    = captureFlag
+                    captureFlag = false
+                    Log.d("AichatApp", "✅ CHECK_CAPTURE → flag=$flag")
+                    GeckoResult.fromValue(
+                        JSONObject().put("capture", flag)
+                    )
+                }
+
+                "AI_RESPONSE" -> {
+                    Log.d("AichatApp", "📨 AI_RESPONSE received")
+                    handleAutoResponse(json)
+                    null
+                }
+
+                "CAPTURE_RESULT" -> {
+                    Log.d("AichatApp", "🧠 CAPTURE_RESULT received")
+                    handleCaptureResult(json)
+                    null
+                }
+
+                else -> {
+                    Log.w("AichatApp", "⚠️ unknown type: $type")
+                    null
+                }
+            }
+        }
     }
-    
-    val type = json.optString("type")
-    Log.d("AichatApp", "📩 onMessage type=$type sender=${sender.url}")
 
-    return when (type) {
-
-        "CHECK_CAPTURE" -> {
-            val flag = captureFlag
-            captureFlag = false
-            Log.d("AichatApp", "✅ CHECK_CAPTURE → flag=$flag")
-            GeckoResult.fromValue(
-                JSONObject().put("capture", flag)
-            )
-        }
-
-        "AI_RESPONSE" -> {
-            Log.d("AichatApp", "📨 AI_RESPONSE received")
-            handleAutoResponse(json)
-            null
-        }
-
-        "CAPTURE_RESULT" -> {
-            Log.d("AichatApp", "🧠 CAPTURE_RESULT received")
-            handleCaptureResult(json)
-            null
-        }
-
-        else -> {
-            Log.w("AichatApp", "⚠️ unknown type: $type")
-            null
-        }
-    }
-        }
     // ── onCreate ──────────────────────────────────────────────────────
 
     override fun onCreate() {
@@ -129,10 +131,14 @@ class AichatApp : Application() {
                     if (ext != null) {
                         aiChatExtension = ext
                         ext.setMessageDelegate(messageDelegate, "browser")
-                        Log.d("AichatApp", "✅ Extension: ${ext.id}")
+                        Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
+                    } else {
+                        Log.e("AichatApp", "❌ Extension is null")
                     }
                 },
-                { e -> Log.e("AichatApp", "❌ Extension: ${e?.message}") }
+                { e ->
+                    Log.e("AichatApp", "❌ Extension error: ${e?.message}")
+                }
             )
     }
 
@@ -167,5 +173,8 @@ class AichatApp : Application() {
             is Map<*, *>  -> JSONObject(message as Map<*, *>)
             else          -> null
         }
-    } catch (e: Exception) { null }
+    } catch (e: Exception) {
+        Log.e("AichatApp", "❌ parseMessage exception: ${e.message}")
+        null
+    }
 }
