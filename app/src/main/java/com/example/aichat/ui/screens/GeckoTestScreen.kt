@@ -60,7 +60,7 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
-import org.mozilla.geckoview.WebMessage
+import org.mozilla.geckoview.WebExtension
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,10 +122,10 @@ fun GeckoTestScreen(
                 if (!title.isNullOrBlank()) currentTitle = title.take(50)
             }
         }
-        session.sendWebMessage(
-    WebMessage("test"),
-    GeckoSession.WEB_MESSAGE_ALL_ORIGINS
-)
+       // session.sendWebMessage(
+  //  WebMessage("test"),
+   // GeckoSession.WEB_MESSAGE_ALL_ORIGINS
+//)
 
         session.navigationDelegate = object : GeckoSession.NavigationDelegate {
             override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
@@ -408,6 +408,7 @@ private fun LoadErrorView(
         }
     }
 }
+val test = WebExtension.UserScript.Builder()
 
 @Composable
 private fun GeckoUnavailableDialog(
