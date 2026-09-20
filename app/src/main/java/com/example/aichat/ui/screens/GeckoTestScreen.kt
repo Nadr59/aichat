@@ -60,7 +60,7 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
-import org.mozilla.geckoview.WebExtension
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -221,25 +221,28 @@ fun GeckoTestScreen(
 
     // ── ✅ دالة الحفظ اليدوي — تعريف واحد فقط ───────────────────────────
     val saveToMemory: () -> Unit = save@{
-        if (isSavingMemory || isLoading) return@save
-        if (platform == null)            return@save
-        if (!platform.memoryEnabled)     return@save
-        if (chatViewModel == null)       return@save
+    if (isSavingMemory || isLoading) return@save
+    if (platform == null)            return@save
+    if (!platform.memoryEnabled)     return@save
+    if (chatViewModel == null)       return@save
 
-        isSavingMemory = true
-        app.requestManualCapture()
+    isSavingMemory = true
 
-        // ✅ timeout 5 ثوانٍ
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (isSavingMemory) {
-                isSavingMemory = false
-                Toast.makeText(
-                    context,
-                    "⚠️ انتهت المهلة — حاول مرة أخرى",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }, 5000L)
+    // ✅ أضف hash فريد — يُطلق hashchange في content.js
+    val base       = currentUrl.substringBefore('#')
+    val captureUrl = "$base#aichat-capture-${System.currentTimeMillis()}"
+    session.loadUri(captureUrl)
+
+    Handler(Looper.getMainLooper()).postDelayed({
+        if (isSavingMemory) {
+            isSavingMemory = false
+            Toast.makeText(
+                context,
+                "⚠️ انتهت المهلة — حاول مرة أخرى",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }, 5000L)
     }
 
     // ── رجوع ذكي ─────────────────────────────────────────────────────────
@@ -408,7 +411,7 @@ private fun LoadErrorView(
         }
     }
 }
-val test = WebExtension.UserScript.Builder()
+
 
 @Composable
 private fun GeckoUnavailableDialog(
