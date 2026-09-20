@@ -61,7 +61,6 @@ import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GeckoTestScreen(
@@ -77,7 +76,6 @@ fun GeckoTestScreen(
 
     val runtime: GeckoRuntime? = remember { app.getOrCreateGeckoRuntime() }
 
-    // ── Runtime غير متاح ─────────────────────────────────────────────────
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
@@ -122,10 +120,6 @@ fun GeckoTestScreen(
                 if (!title.isNullOrBlank()) currentTitle = title.take(50)
             }
         }
-       // session.sendWebMessage(
-  //  WebMessage("test"),
-   // GeckoSession.WEB_MESSAGE_ALL_ORIGINS
-//)
 
         session.navigationDelegate = object : GeckoSession.NavigationDelegate {
             override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
@@ -135,7 +129,20 @@ fun GeckoTestScreen(
                 session: GeckoSession,
                 request: GeckoSession.NavigationDelegate.LoadRequest
             ): GeckoResult<AllowOrDeny>? {
-                val scheme = Uri.parse(request.uri).scheme?.lowercase()
+                val uri    = Uri.parse(request.uri)
+                val scheme = uri.scheme?.lowercase()
+                val host   = uri.host?.lowercase() ?: ""
+
+                // ✅ اعترض طلبات capture الخاصة بنا
+                if (scheme == "https" || scheme == "http") {
+                    val fragment = uri.fragment ?: ""
+                    if (fragment.startsWith("aichat-capture-")) {
+                        // ✅ امنع الـ navigation الفعلي
+                        // content.js يلتقط الـ hash بشكل مستقل
+                        return GeckoResult.deny()
+                    }
+                }
+
                 return if (scheme in listOf(
                         "http", "https", "about", "blob", "data"
                     )
@@ -163,9 +170,6 @@ fun GeckoTestScreen(
         }
         Unit
     }
-
-    // ── ✅ تسجيل الـ session مع AichatApp ────────────────────────────────
-
 
     // ── ربط callbacks الذاكرة ────────────────────────────────────────────
     DisposableEffect(platform?.id) {
@@ -203,7 +207,6 @@ fun GeckoTestScreen(
                         "articles=${it.optInt("articles")} " +
                         "body=${it.optInt("bodyLen")}"
                     } ?: "no response"
-
                     Toast.makeText(
                         context,
                         "⚠️ فشل\n$info",
@@ -219,30 +222,29 @@ fun GeckoTestScreen(
         }
     }
 
-    // ── ✅ دالة الحفظ اليدوي — تعريف واحد فقط ───────────────────────────
+    // ── دالة الحفظ اليدوي ────────────────────────────────────────────────
     val saveToMemory: () -> Unit = save@{
-    if (isSavingMemory || isLoading) return@save
-    if (platform == null)            return@save
-    if (!platform.memoryEnabled)     return@save
-    if (chatViewModel == null)       return@save
+        if (isSavingMemory || isLoading) return@save
+        if (platform == null)            return@save
+        if (!platform.memoryEnabled)     return@save
+        if (chatViewModel == null)       return@save
 
-    isSavingMemory = true
+        isSavingMemory = true
 
-    // ✅ أضف hash فريد — يُطلق hashchange في content.js
-    val base       = currentUrl.substringBefore('#')
-    val captureUrl = "$base#aichat-capture-${System.currentTimeMillis()}"
-    session.loadUri(captureUrl)
+        // ✅ اطلب من content.js الالتقاط عبر sendNativeMessage
+        // content.js يراقب الـ flag من AichatApp
+        app.triggerCapture()
 
-    Handler(Looper.getMainLooper()).postDelayed({
-        if (isSavingMemory) {
-            isSavingMemory = false
-            Toast.makeText(
-                context,
-                "⚠️ انتهت المهلة — حاول مرة أخرى",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }, 5000L)
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (isSavingMemory) {
+                isSavingMemory = false
+                Toast.makeText(
+                    context,
+                    "⚠️ انتهت المهلة — حاول مرة أخرى",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }, 5000L)
     }
 
     // ── رجوع ذكي ─────────────────────────────────────────────────────────
@@ -331,23 +333,22 @@ fun GeckoTestScreen(
 
         Box(modifier = Modifier.fillMaxSize()) {
 
-            // ✅ غيّر AndroidView ليستخدم prepareSession:
-AndroidView(
-    modifier = Modifier.fillMaxSize(),
-    factory  = { ctx ->
-        GeckoView(ctx).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory  = { ctx ->
+                    GeckoView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        if (!session.isOpen) {
+                            session.open(runtime)
+                            session.loadUri(url)
+                        }
+                        setSession(session)
+                    }.also { geckoViewRef = it }
+                }
             )
-            if (!session.isOpen) {
-                session.open(runtime)
-                session.loadUri(url)
-            }
-            setSession(session)
-        }.also { geckoViewRef = it }
-    }
-)
 
             if (isLoading) {
                 LinearProgressIndicator(
@@ -411,7 +412,6 @@ private fun LoadErrorView(
         }
     }
 }
-
 
 @Composable
 private fun GeckoUnavailableDialog(
