@@ -332,11 +332,19 @@ AndroidView(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            // ✅ prepareSession يتولى: delegate → open → loadUri
+
+            // ✅ 1. افتح وحمّل فوراً — لا تنتظر Extension
             if (!session.isOpen) {
-                app.prepareSession(session, url)
+                session.open(runtime)
+                session.loadUri(url)
             }
+
+            // ✅ 2. اربط الـ view
             setSession(session)
+
+            // ✅ 3. سجّل delegate — مستقل وآمن
+            app.registerSessionDelegate(session)
+
         }.also { geckoViewRef = it }
     }
 )
