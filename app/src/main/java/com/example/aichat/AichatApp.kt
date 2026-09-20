@@ -40,41 +40,48 @@ class AichatApp : Application() {
 
     private val messageDelegate = object : WebExtension.MessageDelegate {
         override fun onMessage(
-            nativeApp: String,
-            message:   Any,
-            sender:    WebExtension.MessageSender
-        ): GeckoResult<Any>? {
+    nativeApp: String,
+    message:   Any,
+    sender:    WebExtension.MessageSender
+): GeckoResult<Any>? {
 
-            val json = parseMessage(message) ?: return null
-            val type = json.optString("type")
-            Log.d("AichatApp", "📩 onMessage: $type")
+    val json = parseMessage(message) ?: run {
+        Log.e("AichatApp", "❌ parseMessage failed — raw: $message")
+        return null
+    }
+    
+    val type = json.optString("type")
+    Log.d("AichatApp", "📩 onMessage type=$type sender=${sender.url}")
 
-            return when (type) {
+    return when (type) {
 
-                // ✅ content.js يسأل كل ثانية
-                "CHECK_CAPTURE" -> {
-                    val flag    = captureFlag
-                    captureFlag = false
-                    GeckoResult.fromValue(
-                        JSONObject().put("capture", flag)
-                    )
-                }
+        "CHECK_CAPTURE" -> {
+            val flag = captureFlag
+            captureFlag = false
+            Log.d("AichatApp", "✅ CHECK_CAPTURE → flag=$flag")
+            GeckoResult.fromValue(
+                JSONObject().put("capture", flag)
+            )
+        }
 
-                "AI_RESPONSE" -> {
-                    handleAutoResponse(json)
-                    null
-                }
+        "AI_RESPONSE" -> {
+            Log.d("AichatApp", "📨 AI_RESPONSE received")
+            handleAutoResponse(json)
+            null
+        }
 
-                "CAPTURE_RESULT" -> {
-                    handleCaptureResult(json)
-                    null
-                }
+        "CAPTURE_RESULT" -> {
+            Log.d("AichatApp", "🧠 CAPTURE_RESULT received")
+            handleCaptureResult(json)
+            null
+        }
 
-                else -> null
-            }
+        else -> {
+            Log.w("AichatApp", "⚠️ unknown type: $type")
+            null
         }
     }
-
+        }
     // ── onCreate ──────────────────────────────────────────────────────
 
     override fun onCreate() {
