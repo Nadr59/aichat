@@ -154,39 +154,22 @@
 
     // ── ✅ Polling — CHECK_CAPTURE كل ثانية ───────────────────────────
 
-    setInterval(function () {
+    // في بداية الـ setInterval
+setInterval(function () {
+    if (document.visibilityState !== 'visible') return;
+    
+    console.log('[content] sending CHECK_CAPTURE...');
+    
+    browser.runtime.sendMessage({
+        type:   'CHECK_CAPTURE',
+        domain: location.hostname
+    }).then(function (response) {
+        console.log('[content] got response:', JSON.stringify(response));
+    }).catch(function (e) {
+        console.error('[content] error:', String(e));
+    });
 
-        if (document.visibilityState !== 'visible') return;
-
-        // ✅ sendMessage → background.js → Kotlin → رد
-        browser.runtime.sendMessage({
-            type:   'CHECK_CAPTURE',
-            domain: location.hostname
-        }).then(function (response) {
-
-            console.log('[content] CHECK_CAPTURE response:', 
-                        JSON.stringify(response));
-
-            if (!response || !response.capture) return;
-
-            var text = extractLatestResponse();
-            var ok   = !!(text && text.length >= MIN_LEN);
-
-            // ✅ أرسل النتيجة لـ background.js → Kotlin
-            browser.runtime.sendMessage({
-                type:    'CAPTURE_RESULT',
-                success: ok,
-                text:    ok ? text : '',
-                domain:  location.hostname,
-                debug: {
-                    assistant: document.querySelectorAll(
-                        '[data-message-author-role="assistant"]'
-                    ).length,
-                    articles: document.querySelectorAll('article').length,
-                    bodyLen:  document.body
-                              ? document.body.innerText.length : 0
-                }
-            });
+}, 1000);
 
         }).catch(function (e) {
             console.error('[content] CHECK_CAPTURE error:', e);
