@@ -33,7 +33,7 @@ class AichatApp : Application() {
 
     fun showToast(msg: String) {
         Handler(Looper.getMainLooper()).post {
-            Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+            Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -70,11 +70,9 @@ class AichatApp : Application() {
                     val flag    = captureFlag
                     captureFlag = false
                     Log.d("AichatApp", "✅ CHECK_CAPTURE → flag=$flag")
-
                     if (flag) {
-                        showToast("📡 تم الاتصال بالصفحة — جاري الاستخراج...")
+                        showToast("📡 تم الاتصال — جاري الاستخراج...")
                     }
-
                     GeckoResult.fromValue(
                         JSONObject().put("capture", flag)
                     )
@@ -113,30 +111,6 @@ class AichatApp : Application() {
             throw e
         }
     }
-    private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
-    runtime.webExtensionController
-        .ensureBuiltIn(
-            "resource://android/assets/aicapture/",
-            "aicapture@aichat.example.com"
-        )
-        .accept(
-            { ext ->
-                if (ext != null) {
-                    aiChatExtension = ext
-                    ext.setMessageDelegate(messageDelegate, "browser")
-                    showToast("✅ Extension OK: ${ext.id}")
-                } else {
-                    showToast("❌ Extension = null")
-                }
-            },
-            { e ->
-                // ✅ أظهر الخطأ كاملاً
-                val msg = e?.message ?: "null"
-                val cause = e?.cause?.message ?: "no cause"
-                showToast("❌ $msg | $cause")
-            }
-        )
-    }
 
     // ── GeckoRuntime ──────────────────────────────────────────────────
 
@@ -173,15 +147,18 @@ class AichatApp : Application() {
                         aiChatExtension = ext
                         ext.setMessageDelegate(messageDelegate, "browser")
                         Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
-                        showToast("✅ Extension جاهزة")
+                        showToast("✅ Extension جاهزة: ${ext.id}")
                     } else {
                         Log.e("AichatApp", "❌ Extension is null")
-                        showToast("❌ Extension فارغة")
+                        showToast("❌ Extension = null")
                     }
                 },
                 { e ->
-                    Log.e("AichatApp", "❌ Extension error: ${e?.message}")
-                    showToast("❌ Extension: ${e?.message?.take(40)}")
+                    val msg   = e?.message   ?: "null"
+                    val cause = e?.cause?.message ?: "no cause"
+                    Log.e("AichatApp", "❌ Extension error: $msg | cause: $cause")
+                    showToast("❌ خطأ: $msg")
+                    showToast("❌ السبب: $cause")
                 }
             )
     }
