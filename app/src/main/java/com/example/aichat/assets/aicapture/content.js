@@ -107,9 +107,9 @@
         var host = location.hostname;
         var text = null;
 
-        if (/chatgpt\.com|openai\.com/.test(host))  text = extractChatGPT();
-        else if (/claude\.ai/.test(host))           text = extractClaude();
-        else if (/gemini\.google\.com/.test(host))  text = extractGemini();
+        if (/chatgpt\.com|openai\.com/.test(host)) text = extractChatGPT();
+        else if (/claude\.ai/.test(host))          text = extractClaude();
+        else if (/gemini\.google\.com/.test(host)) text = extractGemini();
 
         if (!text) text = extractByLongestBlock();
         return text ? text.substring(0, MAX_LEN) : null;
@@ -122,7 +122,6 @@
         if (text === lastSentText)     return;
         lastSentText = text;
         try {
-            // ✅ sendMessage → background.js → Kotlin
             browser.runtime.sendMessage({
                 type:   'AI_RESPONSE',
                 text:   text,
@@ -152,32 +151,44 @@
     }
     startObserver();
 
-    // ── ✅ Polling — CHECK_CAPTURE كل ثانية ───────────────────────────
+    // ── Polling — CHECK_CAPTURE كل ثانية ─────────────────────────────
 
-    // في بداية الـ setInterval
-setInterval(function () {
-    if (document.visibilityState !== 'visible') return;
-    
-    console.log('[content] sending CHECK_CAPTURE...');
-    
-    browser.runtime.sendMessage({
-        type:   'CHECK_CAPTURE',
-        domain: location.hostname
-    }).then(function (response) {
-        console.log('[content] got response:', JSON.stringify(response));
-    }).catch(function (e) {
-        console.error('[content] error:', String(e));
-    });
+    setInterval(function () {
 
-}, 1000);
+        if (document.visibilityState !== 'visible') return;
+
+        browser.runtime.sendMessage({
+            type:   'CHECK_CAPTURE',
+            domain: location.hostname
+        }).then(function (response) {
+
+            if (!response || !response.capture) return;
+
+            var text = extractLatestResponse();
+            var ok   = !!(text && text.length >= MIN_LEN);
+
+            browser.runtime.sendMessage({
+                type:    'CAPTURE_RESULT',
+                success: ok,
+                text:    ok ? text : '',
+                domain:  location.hostname,
+                debug: {
+                    assistant: document.querySelectorAll(
+                        '[data-message-author-role="assistant"]'
+                    ).length,
+                    articles: document.querySelectorAll('article').length,
+                    bodyLen:  document.body
+                              ? document.body.innerText.length : 0
+                }
+            });
 
         }).catch(function (e) {
-            console.error('[content] CHECK_CAPTURE error:', e);
+            // صامت — background.js قد لا يكون جاهزاً بعد
         });
 
     }, 1000);
 
-    // ── تنظيف ────────────────────────────────────────────────────────
+    // ── تنظيف ─────────────────────────────────────────────────────────
 
     window.addEventListener('pagehide', function () {
         observer.disconnect();
