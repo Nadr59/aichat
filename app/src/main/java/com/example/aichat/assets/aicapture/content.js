@@ -4,7 +4,7 @@
     if (window.__aiCaptureActive) return;
     window.__aiCaptureActive = true;
 
-    var lastSentText = '';
+    var lastSentText  = '';
     var debounceTimer = null;
     var DEBOUNCE_MS   = 1800;
     var MIN_LEN       = 30;
@@ -119,7 +119,6 @@
         if (text === lastSentText)     return;
         lastSentText = text;
         try {
-            // ✅ sendNativeMessage وليس sendMessage
             browser.runtime.sendNativeMessage('browser', {
                 type:   'AI_RESPONSE',
                 text:   text,
@@ -146,85 +145,50 @@
         }
     }
     startObserver();
-    activePort.onMessage.addListener(function (msg) {
-    if (!msg || msg.type !== 'CAPTURE_NOW') return;
 
-    var text = extractLatestResponse();
-    var ok   = !!(text && text.length >= MIN_LEN);
+    // ── ✅ Port — connectNative ────────────────────────────────────────
 
-    // ✅ أضف معلومات تشخيص حتى عند الفشل
-    var debugData = {
-        assistant: document.querySelectorAll(
-            '[data-message-author-role="assistant"]'
-        ).length,
-        articles: document.querySelectorAll('article').length,
-        bodyLen:  document.body ? document.body.innerText.length : 0,
-        hostname: location.hostname,
-        extractedLen: text ? text.length : 0
-    };
+    var port = null;
 
-    port.postMessage({
-        type:    'CAPTURE_RESULT',
-        success: ok,
-        text:    ok ? text : '',
-        domain:  location.hostname,
-        debug:   debugData
-    });
-});
+    function connect() {
+        port = browser.runtime.connectNative('browser');
 
-    // ── ✅ Long-Polling — ينتظر Kotlin يوقظه ─────────────────────────
+        port.onMessage.addListener(function (msg) {
+            if (!msg || msg.type !== 'CAPTURE') return;
 
-    function waitForCapture() {
+            var text = extractLatestResponse();
+            var ok   = !!(text && text.length >= MIN_LEN);
 
-        // لا تسأل إذا الصفحة مخفية
-        if (document.visibilityState !== 'visible') {
-            setTimeout(waitForCapture, 1000);
-            return;
-        }
+            port.postMessage({
+                type:    'CAPTURE_RESULT',
+                success: ok,
+                text:    ok ? text : '',
+                domain:  location.hostname,
+                debug: {
+                    assistant: document.querySelectorAll(
+                        '[data-message-author-role="assistant"]'
+                    ).length,
+                    articles:  document.querySelectorAll('article').length,
+                    bodyLen:   document.body
+                               ? document.body.innerText.length : 0
+                }
+            });
+        });
 
-        // ✅ sendNativeMessage — يصل لـ Kotlin مباشرة
-        browser.runtime.sendNativeMessage('browser', {
-            type:   'WAIT_CAPTURE',
-            domain: location.hostname
-        })
-        .then(function (response) {
-
-            if (response && response.capture) {
-                // Kotlin أيقظنا — استخرج النص
-                var text = extractLatestResponse();
-                var ok   = !!(text && text.length >= MIN_LEN);
-
-                // أرسل النتيجة
-                return browser.runtime.sendNativeMessage('browser', {
-                    type:    'CAPTURE_RESULT',
-                    success: ok,
-                    text:    ok ? text : '',
-                    domain:  location.hostname,
-                    debug: {
-                        assistant: document.querySelectorAll(
-                            '[data-message-author-role="assistant"]'
-                        ).length,
-                        articles:  document.querySelectorAll(
-                            'article'
-                        ).length,
-                        bodyLen:   document.body
-                                   ? document.body.innerText.length : 0
-                    }
-                });
-            }
-        })
-        .catch(function () {})
-        .then(function () {
-            // ✅ أعد الانتظار دائماً
-            setTimeout(waitForCapture, 300);
+        port.onDisconnect.addListener(function (p) {
+            // سجّل السبب الحقيقي
+            var reason = (p && p.error && p.error.message) || 'unknown';
+            console.log('[AiChat] port disconnected:', reason);
+            port = null;
+            // ✅ إعادة محاولة — الـ delegate قد يكون جاهزاً بعد ثانية
+            setTimeout(connect, 1000);
         });
     }
 
-    // نظّف عند إغلاق الصفحة
+    connect();
+
     window.addEventListener('pagehide', function () {
         observer.disconnect();
     });
-
-    waitForCapture();
 
 })();
