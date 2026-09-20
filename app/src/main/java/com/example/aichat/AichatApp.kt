@@ -55,23 +55,18 @@ class AichatApp : Application() {
     // ── MessageDelegate — على مستوى الـ Extension (background) ───────
 
     private val messageDelegate = object : WebExtension.MessageDelegate {
-
-        // ✅ background.js اتصل عبر connectNative('browser')
-        override fun onConnect(port: WebExtension.Port) {
-            Log.d("AichatApp", "✅ onConnect from background.js!")
-            bgPort = port
-            port.setDelegate(portDelegate)
+    override fun onMessage(
+        nativeApp: String,
+        message:   Any,
+        sender:    WebExtension.MessageSender
+    ): GeckoResult<Any>? {
+        val json = parseMessage(message) ?: return null
+        when (json.optString("type")) {
+            "AI_RESPONSE"    -> handleAutoResponse(json)
+            "CAPTURE_RESULT" -> handleCaptureResult(json)
         }
-
-        override fun onMessage(
-            nativeApp: String,
-            message:   Any,
-            sender:    WebExtension.MessageSender
-        ): GeckoResult<Any>? {
-            val json = parseMessage(message) ?: return null
-            Log.d("AichatApp", "📩 onMessage: ${json.optString("type")}")
-            return null
-        }
+        return null
+    }
     }
 
     // ── onCreate ──────────────────────────────────────────────────────
