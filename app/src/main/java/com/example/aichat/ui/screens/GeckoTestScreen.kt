@@ -54,6 +54,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.AichatApp
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -223,7 +226,7 @@ fun GeckoTestScreen(
         }
     }
 
-    // ── دالة الحفظ اليدوي ────────────────────────────────────────────
+    // ── دالة الحفظ اليدوي 🧠 ─────────────────────────────────────────
     val saveToMemory: () -> Unit = save@{
         if (isSavingMemory || isLoading) return@save
         if (platform == null)            return@save
@@ -231,10 +234,13 @@ fun GeckoTestScreen(
         if (chatViewModel == null)       return@save
 
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-
         isSavingMemory = true
 
-        Toast.makeText(context, "🧠 جاري البحث في الصفحة...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            context,
+            "🧠 جاري البحث في الصفحة...",
+            Toast.LENGTH_SHORT
+        ).show()
         app.triggerCapture()
 
         val r = Runnable {
@@ -251,44 +257,38 @@ fun GeckoTestScreen(
         mainHandler.postDelayed(r, 5000L)
     }
 
-    // أضف بعد دالة saveToMemory مباشرة
+    // ── دالة إرسال السياق 📤 ─────────────────────────────────────────
+    val sendContext: () -> Unit = ctx@{
+        if (platform == null)        return@ctx
+        if (!platform.memoryEnabled) return@ctx
+        if (chatViewModel == null)   return@ctx
 
-val sendContext: () -> Unit = ctx@{
-    if (platform == null)        return@ctx
-    if (!platform.memoryEnabled) return@ctx
-    if (chatViewModel == null)   return@ctx
+        Toast.makeText(
+            context,
+            "📤 جاري تحضير السياق...",
+            Toast.LENGTH_SHORT
+        ).show()
 
-    Toast.makeText(
-        context,
-        "📤 جاري تحضير السياق...",
-        Toast.LENGTH_SHORT
-    ).show()
-
-    // جلب الذكريات وإرسالها
-    kotlinx.coroutines.CoroutineScope(
-        kotlinx.coroutines.Dispatchers.IO
-    ).launch {
-        try {
-            val memories = chatViewModel.getSharedMemories()
-
-            Handler(Looper.getMainLooper()).post {
-                app.sendContextToPage(
-                    memories          = memories,
-                    customInstruction = ""
-                )
-            }
-
-        } catch (e: Exception) {
-            Handler(Looper.getMainLooper()).post {
-                Toast.makeText(
-                    context,
-                    "❌ فشل جلب الذاكرة: ${e.message}",
-                    Toast.LENGTH_SHORT
-                ).show()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val memories = chatViewModel.getSharedMemories()
+                mainHandler.post {
+                    app.sendContextToPage(
+                        memories          = memories,
+                        customInstruction = ""
+                    )
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    Toast.makeText(
+                        context,
+                        "❌ فشل جلب الذاكرة: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
     }
-}
 
     // ── رجوع ذكي ─────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
@@ -353,33 +353,30 @@ val sendContext: () -> Unit = ctx@{
             },
             actions = {
                 if (platform != null && platform.memoryEnabled && chatViewModel != null) {
-                    // أضف في الـ actions داخل TopAppBar
-// بعد زر 🧠 مباشرة
 
-if (platform != null && platform.memoryEnabled && chatViewModel != null) {
+                    // ── زر الحفظ 🧠 ──
+                    IconButton(
+                        onClick = saveToMemory,
+                        enabled = !isSavingMemory && !isLoading
+                    ) {
+                        Text(
+                            text  = if (isSavingMemory) "⏳" else "🧠",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
 
-    // ── زر الحفظ 🧠 ──
-    IconButton(
-        onClick = saveToMemory,
-        enabled = !isSavingMemory && !isLoading
-    ) {
-        Text(
-            text  = if (isSavingMemory) "⏳" else "🧠",
-            style = MaterialTheme.typography.titleMedium
-        )
-    }
+                    // ── زر إرسال السياق 📤 ──
+                    IconButton(
+                        onClick = sendContext,
+                        enabled = !isLoading
+                    ) {
+                        Text(
+                            text  = "📤",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                }
 
-    // ── زر إرسال السياق 📤 ──
-    IconButton(
-        onClick = sendContext,
-        enabled = !isLoading
-    ) {
-        Text(
-            text  = "📤",
-            style = MaterialTheme.typography.titleMedium
-        )
-    }
-}
                 IconButton(onClick = { session.reload() }) {
                     Icon(Icons.Filled.Refresh, "تحديث")
                 }
@@ -441,7 +438,11 @@ private fun openExternal(context: Context, url: String) {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, "لا يوجد تطبيق لفتح هذا الرابط", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            context,
+            "لا يوجد تطبيق لفتح هذا الرابط",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 }
 
