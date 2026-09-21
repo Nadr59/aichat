@@ -137,6 +137,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun getMemoryById(memoryId: Long): MemoryItem? =
         memoryRepository.getMemoryById(memoryId)
+        // أضف في ChatViewModel
+
+suspend fun getSharedMemories(): List<MemoryItem> {
+    return memoryRepository.getAllSharedMemoriesList()
+}
 
     fun deleteConversationMemories(conversationId: Long) {
         viewModelScope.launch {
@@ -596,6 +601,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    
     // ============================================================
     // Helpers
     // ============================================================
