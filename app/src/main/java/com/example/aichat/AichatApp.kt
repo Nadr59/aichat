@@ -6,6 +6,9 @@ import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import com.example.aichat.data.local.ChatDatabase
+import com.example.aichat.data.local.SystemPrompt
+import com.example.aichat.data.model.MemoryItem
+import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
@@ -21,7 +24,8 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
-    @Volatile private var captureFlag: Boolean = false
+    @Volatile private var captureFlag:          Boolean = false
+    @Volatile var contextPendingMessage: String  = ""
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
@@ -45,6 +49,30 @@ class AichatApp : Application() {
         showToast("🔍 جاري البحث في الصفحة...")
     }
 
+    // ── إرسال السياق لـ content.js ───────────────────────────────────
+
+    fun sendContextToPage(
+        memories:          List<MemoryItem>,
+        customInstruction: String = ""
+    ) {
+        if (aiChatExtension == null) {
+            showToast("❌ Extension غير جاهزة")
+            return
+        }
+
+        val memoryContext = MemoryContextBuilder().build(memories)
+
+        val systemPrompt = SystemPrompt.build(
+            memoryContext     = memoryContext,
+            customInstruction = customInstruction,
+            includeAccuracy   = true
+        )
+
+        contextPendingMessage = systemPrompt
+        Log.d("AichatApp", "📤 Context ready: ${systemPrompt.length} chars")
+        showToast("📤 السياق جاهز — افتح المحادثة في الصفحة")
+    }
+
     // ── MessageDelegate ───────────────────────────────────────────────
 
     private val messageDelegate = object : WebExtension.MessageDelegate {
@@ -57,7 +85,6 @@ class AichatApp : Application() {
 
             val json = parseMessage(message) ?: run {
                 Log.e("AichatApp", "❌ parseMessage failed — raw: $message")
-                showToast("❌ خطأ في قراءة الرسالة")
                 return null
             }
 
@@ -66,26 +93,34 @@ class AichatApp : Application() {
 
             return when (type) {
 
+                // ── content.js يسأل كل ثانية ──
                 "CHECK_CAPTURE" -> {
                     val flag    = captureFlag
                     captureFlag = false
-                    Log.d("AichatApp", "✅ CHECK_CAPTURE → flag=$flag")
-                    if (flag) {
-                        showToast("📡 تم الاتصال — جاري الاستخراج...")
-                    }
+                    if (flag) showToast("📡 تم الاتصال — جاري الاستخراج...")
                     GeckoResult.fromValue(
                         JSONObject().put("capture", flag)
                     )
                 }
 
+                // ── content.js يطلب السياق عند فتح الصفحة ──
+                "GET_CONTEXT" -> {
+                    val pending           = contextPendingMessage
+                    contextPendingMessage = ""
+                    Log.d("AichatApp", "📤 GET_CONTEXT → ${pending.take(80)}")
+                    GeckoResult.fromValue(
+                        JSONObject()
+                            .put("hasContext", pending.isNotBlank())
+                            .put("context",    pending)
+                    )
+                }
+
                 "AI_RESPONSE" -> {
-                    Log.d("AichatApp", "📨 AI_RESPONSE received")
                     handleAutoResponse(json)
                     null
                 }
 
                 "CAPTURE_RESULT" -> {
-                    Log.d("AichatApp", "🧠 CAPTURE_RESULT received")
                     handleCaptureResult(json)
                     null
                 }
@@ -147,16 +182,16 @@ class AichatApp : Application() {
                         aiChatExtension = ext
                         ext.setMessageDelegate(messageDelegate, "browser")
                         Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
-                        showToast("✅ Extension جاهزة: ${ext.id}")
+                        showToast("✅ Extension جاهزة")
                     } else {
                         Log.e("AichatApp", "❌ Extension is null")
                         showToast("❌ Extension = null")
                     }
                 },
                 { e ->
-                    val msg   = e?.message   ?: "null"
+                    val msg   = e?.message        ?: "null"
                     val cause = e?.cause?.message ?: "no cause"
-                    Log.e("AichatApp", "❌ Extension error: $msg | cause: $cause")
+                    Log.e("AichatApp", "❌ Extension error: $msg | $cause")
                     showToast("❌ خطأ: $msg")
                     showToast("❌ السبب: $cause")
                 }
@@ -177,12 +212,10 @@ class AichatApp : Application() {
         val success = json.optBoolean("success", false)
         val text    = json.optString("text")
         val debug   = json.optJSONObject("debug")
-
         Log.d("AichatApp",
             if (success) "🧠 OK: ${text.take(60)}…"
             else         "⚠️ Failed — debug: $debug"
         )
-
         Handler(Looper.getMainLooper()).post {
             onManualCaptureResult?.invoke(success, text, debug)
         }
@@ -195,7 +228,7 @@ class AichatApp : Application() {
             else          -> null
         }
     } catch (e: Exception) {
-        Log.e("AichatApp", "❌ parseMessage exception: ${e.message}")
+        Log.e("AichatApp", "❌ parseMessage: ${e.message}")
         null
     }
 }
