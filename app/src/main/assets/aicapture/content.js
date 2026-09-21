@@ -261,6 +261,46 @@
         }).catch(function () {});
     }
 
+    // ── كشف أزرار الإرسال وإرسالها لـ Kotlin ────────────────────────
+
+function detectAndReportButtons() {
+    var buttons  = document.querySelectorAll('button');
+    var visible  = [];
+
+    buttons.forEach(function(btn) {
+        if (!isVisible(btn)) return;
+
+        var label  = btn.getAttribute('aria-label') || '';
+        var testid = btn.getAttribute('data-testid') || '';
+        var type   = btn.getAttribute('type') || '';
+
+        // فقط الأزرار التي تبدو أزرار إرسال
+        var isSend = label.toLowerCase().includes('send')
+            || label.includes('إرسال')
+            || label.includes('Submit')
+            || testid.toLowerCase().includes('send')
+            || type === 'submit';
+
+        if (isSend || label || testid) {
+            visible.push({
+                label:  label,
+                testid: testid,
+                type:   type
+            });
+        }
+    });
+
+    // أرسل النتيجة لـ Kotlin ليعرضها Toast
+    browser.runtime.sendMessage({
+        type:    'DEBUG_BUTTONS',
+        buttons: visible,
+        domain:  location.hostname
+    });
+}
+
+// استدعِها بعد ثانيتين من تحميل الصفحة
+setTimeout(detectAndReportButtons, 2000);
+
     // ── إرسال تلقائي ──────────────────────────────────────────────────
 
     function sendAutoToKotlin(text) {
