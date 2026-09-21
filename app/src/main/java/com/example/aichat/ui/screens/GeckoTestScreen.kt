@@ -75,9 +75,9 @@ fun GeckoTestScreen(
     val app            = context.applicationContext as AichatApp
     val mainHandler    = remember { Handler(Looper.getMainLooper()) }
 
-val runtime: GeckoRuntime? = remember { app.getOrCreateGeckoRuntime() }
+    val runtime: GeckoRuntime? = remember { app.getOrCreateGeckoRuntime() }
 
-if (runtime == null) {
+    if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
             platformUrl   = url,
@@ -87,57 +87,43 @@ if (runtime == null) {
         return
     }
 
-// ── الحالة ────────────────────────────────────────────────────────────
-    var isLoading        by remember { mutableStateOf(true) }
-    var progress         by remember { mutableIntStateOf(0) }
-    var canGoBack        by remember { mutableStateOf(false) }
-    var currentUrl       by remember { mutableStateOf(url) }
-    var currentTitle     by remember { mutableStateOf(title) }
-    var loadError        by remember { mutableStateOf<String?>(null) }
-    var geckoViewRef     by remember { mutableStateOf<GeckoView?>(null) }
-    var isSavingMemory   by remember { mutableStateOf(false) }
-    var timeoutRunnable  by remember { mutableStateOf<Runnable?>(null) }
+    // ── الحالة ───────────────────────────────────────────────────────
+    var isLoading       by remember { mutableStateOf(true) }
+    var progress        by remember { mutableIntStateOf(0) }
+    var canGoBack       by remember { mutableStateOf(false) }
+    var currentUrl      by remember { mutableStateOf(url) }
+    var currentTitle    by remember { mutableStateOf(title) }
+    var loadError       by remember { mutableStateOf<String?>(null) }
+    var geckoViewRef    by remember { mutableStateOf<GeckoView?>(null) }
+    var isSavingMemory  by remember { mutableStateOf(false) }
+    var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
 
-// ── Session ───────────────────────────────────────────────────────────
+    // ── Session ──────────────────────────────────────────────────────
     val session = remember { GeckoSession() }
 
-remember(session) {
+    remember(session) {
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
                 isLoading  = true
                 progress   = 0
                 loadError  = null
                 currentUrl = url
-                Log.d("GeckoTestScreen", "📄 onPageStart: $url")
             }
             override fun onProgressChange(session: GeckoSession, progress_: Int) {
                 progress = progress_
             }
             override fun onPageStop(session: GeckoSession, success: Boolean) {
                 isLoading = false
-                Log.d("GeckoTestScreen", "📄 onPageStop success=$success")
             }
         }
 
-session.contentDelegate = object : GeckoSession.ContentDelegate {
+        session.contentDelegate = object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) {
                 if (!title.isNullOrBlank()) currentTitle = title.take(50)
             }
         }
 
-// 🆕 رؤية رسائل console.log من content.js في logcat
-        // (يتطلب أيضاً consoleOutputEnabled(true) في GeckoRuntimeSettings —
-        //  سطر واحد في AichatApp.kt — انظر الملاحظة أسفل الملف)
-        session.consoleDelegate = object : GeckoSession.ConsoleDelegate {
-            override fun onConsoleMessage(
-                console: GeckoSession.ConsoleController,
-                message: GeckoSession.ConsoleController.Message
-            ) {
-                Log.d("GeckoJS", "[${message.level}] ${message.message}")
-            }
-        }
-
-session.navigationDelegate = object : GeckoSession.NavigationDelegate {
+        session.navigationDelegate = object : GeckoSession.NavigationDelegate {
             override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
                 canGoBack = canGoBack_
             }
@@ -148,14 +134,13 @@ session.navigationDelegate = object : GeckoSession.NavigationDelegate {
                 val uri    = Uri.parse(request.uri)
                 val scheme = uri.scheme?.lowercase()
 
-// ✅ اعترض طلبات capture الخاصة بنا
                 if (scheme == "https" || scheme == "http") {
                     if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
                         return GeckoResult.deny()
                     }
                 }
 
-return if (scheme in listOf(
+                return if (scheme in listOf(
                         "http", "https", "about", "blob", "data"
                     )
                 ) {
@@ -183,35 +168,33 @@ return if (scheme in listOf(
         Unit
     }
 
-// ── ربط callbacks الذاكرة ────────────────────────────────────────────
+    // ── ربط callbacks الذاكرة ────────────────────────────────────────
     DisposableEffect(platform?.id) {
         val p  = platform
         val vm = chatViewModel
 
-if (p != null && vm != null && p.memoryEnabled) {
+        if (p != null && vm != null && p.memoryEnabled) {
 
-app.onAiResponseCaptured = { domain, text ->
+            app.onAiResponseCaptured = { domain, text ->
                 vm.onWebAiResponse(
                     platformId   = p.id,
                     platformName = p.name,
                     text         = text
                 )
-                Log.d("GeckoTestScreen", "🧠 Auto from=$domain: ${text.take(60)}")
+                Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
             }
 
-app.onManualCaptureResult = { success, text, debug ->
-                // 🆕 أولاً: ألغِ الـ timeout فوراً — وصل الرد!
+            app.onManualCaptureResult = { success, text, debug ->
                 timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
                 timeoutRunnable = null
-                isSavingMemory = false
+                isSavingMemory  = false
 
-if (success && text.isNotBlank()) {
+                if (success && text.isNotBlank()) {
                     vm.onWebAiResponse(
                         platformId   = p.id,
                         platformName = p.name,
                         text         = text
                     )
-                    Log.d("GeckoTestScreen", "🧠 Manual saved: ${text.take(60)}")
                     Toast.makeText(
                         context,
                         "✅ تم الحفظ\n${text.take(50)}",
@@ -223,7 +206,6 @@ if (success && text.isNotBlank()) {
                         "articles=${it.optInt("articles")} " +
                         "body=${it.optInt("bodyLen")}"
                     } ?: "no response"
-                    Log.w("GeckoTestScreen", "⚠️ Manual failed — $info")
                     Toast.makeText(
                         context,
                         "⚠️ فشل الاستخراج\n$info",
@@ -233,8 +215,7 @@ if (success && text.isNotBlank()) {
             }
         }
 
-onDispose {
-            // 🆕 نظّف الـ timeout والـ callbacks عند الخروج من الشاشة
+        onDispose {
             timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
             timeoutRunnable = null
             app.onAiResponseCaptured  = null
@@ -242,37 +223,26 @@ onDispose {
         }
     }
 
-// ── دالة الحفظ اليدوي ────────────────────────────────────────────────
+    // ── دالة الحفظ اليدوي ────────────────────────────────────────────
     val saveToMemory: () -> Unit = save@{
         if (isSavingMemory || isLoading) return@save
         if (platform == null)            return@save
         if (!platform.memoryEnabled)     return@save
         if (chatViewModel == null)       return@save
 
-// 🆕 إذا كان هناك timeout قديم — ألغه
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
 
-isSavingMemory = true
-        Log.d("GeckoTestScreen", "🧠 saveToMemory: trigger + timeout armed (5s)")
+        isSavingMemory = true
 
-// ── خطوة 1: ضبط العلامة ──
         Toast.makeText(context, "🧠 جاري البحث في الصفحة...", Toast.LENGTH_SHORT).show()
         app.triggerCapture()
 
-// ── خطوة 2: timeout قابل للإلغاء ──
-        // يُلغى تلقائياً في onManualCaptureResult عند وصول الرد.
         val r = Runnable {
             if (isSavingMemory) {
                 isSavingMemory = false
-                Log.w(
-                    "GeckoTestScreen",
-                    "❌ capture timeout — lastUrl=$currentUrl " +
-                    "ext=${app.aiChatExtension != null}"
-                )
                 Toast.makeText(
                     context,
-                    "❌ انتهت المهلة — حاول مرة أخرى\n" +
-                    "Ext=${app.aiChatExtension != null}",
+                    "❌ انتهت المهلة\nExt=${app.aiChatExtension != null}",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -281,13 +251,13 @@ isSavingMemory = true
         mainHandler.postDelayed(r, 5000L)
     }
 
-// ── رجوع ذكي ─────────────────────────────────────────────────────────
+    // ── رجوع ذكي ─────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
         if (canGoBack) session.goBack() else onBack()
     }
     BackHandler(onBack = handleBack)
 
-// ── دورة حياة ────────────────────────────────────────────────────────
+    // ── دورة حياة ────────────────────────────────────────────────────
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -300,7 +270,7 @@ isSavingMemory = true
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-// ── تنظيف ────────────────────────────────────────────────────────────
+    // ── تنظيف ────────────────────────────────────────────────────────
     DisposableEffect(Unit) {
         onDispose {
             timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -313,10 +283,10 @@ isSavingMemory = true
         }
     }
 
-// ── الواجهة ───────────────────────────────────────────────────────────
+    // ── الواجهة ──────────────────────────────────────────────────────
     Column(modifier = Modifier.fillMaxSize()) {
 
-TopAppBar(
+        TopAppBar(
             title = {
                 Column {
                     Text(
@@ -366,9 +336,9 @@ TopAppBar(
             )
         )
 
-Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
 
-AndroidView(
+            AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory  = { ctx ->
                     GeckoView(ctx).apply {
@@ -385,7 +355,7 @@ AndroidView(
                 }
             )
 
-if (isLoading) {
+            if (isLoading) {
                 LinearProgressIndicator(
                     progress = { progress / 100f },
                     modifier = Modifier
@@ -395,7 +365,7 @@ if (isLoading) {
                 )
             }
 
-loadError?.let { message ->
+            loadError?.let { message ->
                 LoadErrorView(
                     message       = message,
                     onRetry       = { loadError = null; session.reload() },
@@ -406,7 +376,7 @@ loadError?.let { message ->
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 private fun openExternal(context: Context, url: String) {
     try {
