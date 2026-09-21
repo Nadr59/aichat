@@ -28,6 +28,23 @@ browser.runtime.onMessage.addListener(function (message, sender) {
             return { capture: false };
         });
     }
+    if (type === "CONTEXT_WRITTEN") {
+    browser.runtime.sendNativeMessage(NATIVE_APP, {
+        type:   "CONTEXT_WRITTEN",
+        len:    message.len    || 0,
+        domain: message.domain || ""
+    });
+    return;
+}
+
+if (type === "CONTEXT_WRITE_FAILED") {
+    browser.runtime.sendNativeMessage(NATIVE_APP, {
+        type:   "CONTEXT_WRITE_FAILED",
+        reason: message.reason || "",
+        domain: message.domain || ""
+    });
+    return;
+}
 
     // ── GET_CONTEXT ───────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
