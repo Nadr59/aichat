@@ -361,16 +361,39 @@
         }).catch(function () {});
 
         // GET_CONTEXT — عبر background.js
-        browser.runtime.sendMessage({
-            type:   'GET_CONTEXT',
-            domain: location.hostname
-        }).then(function (response) {
-            if (!response || !response.hasContext) return;
-            if (!response.context || !response.context.trim()) return;
-            handleIncomingContext(response.context);
-        }).catch(function () {});
+        // GET_CONTEXT في الـ polling
+browser.runtime.sendMessage({
+    type:   'GET_CONTEXT',
+    domain: location.hostname
+}).then(function (response) {
 
-    }, 1000);
+    // ✅ سجّل كل رد بغض النظر عن القيمة
+    browser.runtime.sendMessage({
+        type:   'DEBUG_INFO',
+        info:   'GET_CONTEXT_RESPONSE'
+                + ' hasContext=' + (response ? response.hasContext : 'NULL')
+                + ' contextLen=' + (response && response.context
+                                    ? response.context.length : 0)
+                + ' url=' + location.href.slice(0, 50),
+        domain: location.hostname
+    }).catch(function(){});
+
+    if (!response) return;
+    if (!response.hasContext) return;
+    if (!response.context || !response.context.trim()) return;
+
+    handleIncomingContext(response.context);
+
+}).catch(function (e) {
+
+    // ✅ سجّل الخطأ
+    browser.runtime.sendMessage({
+        type:   'DEBUG_INFO',
+        info:   'GET_CONTEXT_ERROR: ' + String(e),
+        domain: location.hostname
+    }).catch(function(){});
+
+});
 
     // ── detectAndReportButtons ────────────────────────────────────────
 
