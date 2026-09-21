@@ -101,21 +101,6 @@ class AichatApp : Application() {
                         JSONObject().put("capture", flag)
                     )
                 }
-                "DEBUG_INFO" -> {
-    val info   = json.optString("info")
-    val domain = json.optString("domain")
-    Log.d("AichatApp", "🔍 DEBUG: $info @ $domain")
-    showToast("🔍 $info")
-    null
-}
-
-"CONTEXT_WRITTEN" -> {
-    val len    = json.optInt("len")
-    val domain = json.optString("domain")
-    Log.d("AichatApp", "✅ Context written: $len chars on $domain")
-    showToast("✅ السياق وصل: $len حرف")
-    null
-}
 
                 "GET_CONTEXT" -> {
                     val pending           = contextPendingMessage
@@ -127,21 +112,40 @@ class AichatApp : Application() {
                             .put("context",    pending)
                     )
                 }
-                "CONTEXT_WRITTEN" -> {
-    val len    = json.optInt("len")
-    val domain = json.optString("domain")
-    Log.d("AichatApp", "✅ Context written: $len chars on $domain")
-    showToast("✅ السياق وصل للصفحة\n$len حرف على $domain")
-    null
-}
 
-"CONTEXT_WRITE_FAILED" -> {
-    val reason = json.optString("reason")
-    val domain = json.optString("domain")
-    Log.w("AichatApp", "❌ Write failed: $reason on $domain")
-    showToast("❌ فشل عند: $reason\n$domain")
-    null
-}
+                "AI_RESPONSE" -> {
+                    handleAutoResponse(json)
+                    null
+                }
+
+                "CAPTURE_RESULT" -> {
+                    handleCaptureResult(json)
+                    null
+                }
+
+                "CONTEXT_WRITTEN" -> {
+                    val len    = json.optInt("len")
+                    val domain = json.optString("domain")
+                    Log.d("AichatApp", "✅ Context written: $len chars on $domain")
+                    showToast("✅ السياق وصل: $len حرف")
+                    null
+                }
+
+                "CONTEXT_WRITE_FAILED" -> {
+                    val reason = json.optString("reason")
+                    val domain = json.optString("domain")
+                    Log.w("AichatApp", "❌ Write failed: $reason on $domain")
+                    showToast("❌ فشل عند: $reason")
+                    null
+                }
+
+                "DEBUG_INFO" -> {
+                    val info   = json.optString("info")
+                    val domain = json.optString("domain")
+                    Log.d("AichatApp", "🔍 DEBUG: $info @ $domain")
+                    showToast("🔍 $info")
+                    null
+                }
 
                 "DEBUG_BUTTONS" -> {
                     val buttons = json.optJSONArray("buttons")
@@ -160,16 +164,6 @@ class AichatApp : Application() {
                     }
                     Log.d("AichatApp", sb.toString())
                     showToast(sb.toString())
-                    null
-                }
-
-                "AI_RESPONSE" -> {
-                    handleAutoResponse(json)
-                    null
-                }
-
-                "CAPTURE_RESULT" -> {
-                    handleCaptureResult(json)
                     null
                 }
 
