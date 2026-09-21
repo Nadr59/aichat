@@ -112,6 +112,48 @@
         return text ? text.substring(0, MAX_LEN) : null;
     }
 
+    function handleIncomingContext(context) {
+
+    // ✅ هل تُستدعى الدالة؟
+    console.log('[AiChat] handleIncomingContext len=' + context.length);
+
+    var input = findInputBox();
+    console.log('[AiChat] input=', input ? input.tagName + '#' + input.id : 'NULL');
+
+    if (!input) {
+        // أخبر Kotlin
+        browser.runtime.sendMessage({
+            type:    'DEBUG_BUTTONS',
+            buttons: [{ label: 'NO INPUT BOX FOUND', testid: '', type: '' }],
+            domain:  location.hostname
+        });
+        return;
+    }
+
+    input.focus();
+    console.log('[AiChat] activeElement=', document.activeElement?.tagName);
+
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    var range = document.createRange();
+    range.selectNodeContents(input);
+    range.collapse(false);
+    sel.addRange(range);
+
+    var done = document.execCommand('insertText', false, 'TEST');
+    console.log('[AiChat] execCommand done=', done);
+
+    // أخبر Kotlin بالنتيجة
+    browser.runtime.sendMessage({
+        type:    'DEBUG_BUTTONS',
+        buttons: [{
+            label:  'execCommand=' + done,
+            testid: 'active=' + (document.activeElement?.tagName || 'null'),
+            type:   ''
+        }],
+        domain: location.hostname
+    });
+    }
     // ── إيجاد صندوق الإدخال ──────────────────────────────────────────
 
     function findInputBox() {
