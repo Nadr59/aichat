@@ -101,6 +101,21 @@ class AichatApp : Application() {
                         JSONObject().put("capture", flag)
                     )
                 }
+                "DEBUG_INFO" -> {
+    val info   = json.optString("info")
+    val domain = json.optString("domain")
+    Log.d("AichatApp", "🔍 DEBUG: $info @ $domain")
+    showToast("🔍 $info")
+    null
+}
+
+"CONTEXT_WRITTEN" -> {
+    val len    = json.optInt("len")
+    val domain = json.optString("domain")
+    Log.d("AichatApp", "✅ Context written: $len chars on $domain")
+    showToast("✅ السياق وصل: $len حرف")
+    null
+}
 
                 "GET_CONTEXT" -> {
                     val pending           = contextPendingMessage
