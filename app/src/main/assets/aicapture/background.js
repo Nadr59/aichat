@@ -6,18 +6,25 @@ var port       = null;
 // ── اتصال Port مع Kotlin ──────────────────────────────────────────
 
 function connect() {
-    port = browser.runtime.connectNative(NATIVE_APP);
+    try {
+        port = browser.runtime.connectNative(NATIVE_APP);
+    } catch(e) {
+        console.log("[bg] connectNative failed:", e);
+        setTimeout(connect, 2000);
+        return;
+    }
 
     port.onMessage.addListener(function (msg) {
-        // رسائل من Kotlin للـ background
-        console.log("[bg] from Kotlin:", JSON.stringify(msg));
+        console.log("[bg] from Kotlin port:", JSON.stringify(msg));
     });
 
     port.onDisconnect.addListener(function () {
-        console.log("[bg] port disconnected — reconnecting...");
+        console.log("[bg] port disconnected");
         port = null;
-        setTimeout(connect, 1000);
+        setTimeout(connect, 2000);
     });
+
+    console.log("[bg] port connected ✅");
 }
 
 connect();
@@ -28,8 +35,10 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     if (!message || !message.type) return;
 
     var type = message.type;
+    console.log("[bg] from content:", type);
 
-    // ── رسائل بدون رد ─────────────────────────────────────────────
+    // ── رسائل بدون رد — عبر Port ──────────────────────────────────
+
     if (type === "AI_RESPONSE") {
         if (port) port.postMessage({
             type:   "AI_RESPONSE",
@@ -77,30 +86,76 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         return;
     }
 
-    // ── رسائل تحتاج رد — عبر sendNativeMessage ───────────────────
+    // ── رسائل تحتاج رد — عبر Port أيضاً ─────────────────────────
 
     if (type === "CHECK_CAPTURE") {
-        browser.runtime.sendNativeMessage(NATIVE_APP, {
+        if (!port) {
+            sendResponse({ capture: false });
+            return;
+        }
+
+        // ✅ أرسل عبر Port وانتظر الرد
+        var done = false;
+
+        var listener = function (msg) {
+            if (done) return;
+            if (!msg || msg.type !== "CHECK_CAPTURE_RESULT") return;
+            done = true;
+            port.onMessage.removeListener(listener);
+            sendResponse({ capture: msg.capture || false });
+        };
+
+        port.onMessage.addListener(listener);
+        port.postMessage({
             type:   "CHECK_CAPTURE",
             domain: message.domain || ""
-        }).then(function (r) {
-            sendResponse(r);
-        }).catch(function () {
-            sendResponse({ capture: false });
         });
-        return true; // ← مهم: يبقي القناة مفتوحة للرد
+
+        // timeout
+        setTimeout(function () {
+            if (done) return;
+            done = true;
+            port.onMessage.removeListener(listener);
+            sendResponse({ capture: false });
+        }, 3000);
+
+        return true; // ← يبقي القناة مفتوحة
     }
 
     if (type === "GET_CONTEXT") {
-        browser.runtime.sendNativeMessage(NATIVE_APP, {
+        if (!port) {
+            sendResponse({ hasContext: false, context: "" });
+            return;
+        }
+
+        // ✅ أرسل عبر Port وانتظر الرد
+        var done = false;
+
+        var listener = function (msg) {
+            if (done) return;
+            if (!msg || msg.type !== "GET_CONTEXT_RESULT") return;
+            done = true;
+            port.onMessage.removeListener(listener);
+            sendResponse({
+                hasContext: msg.hasContext || false,
+                context:    msg.context    || ""
+            });
+        };
+
+        port.onMessage.addListener(listener);
+        port.postMessage({
             type:   "GET_CONTEXT",
             domain: message.domain || ""
-        }).then(function (r) {
-            sendResponse(r);
-        }).catch(function (e) {
-            console.log("[bg] GET_CONTEXT error:", e);
-            sendResponse({ hasContext: false, context: "" });
         });
-        return true; // ← مهم جداً
+
+        // timeout
+        setTimeout(function () {
+            if (done) return;
+            done = true;
+            port.onMessage.removeListener(listener);
+            sendResponse({ hasContext: false, context: "" });
+        }, 3000);
+
+        return true; // ← يبقي القناة مفتوحة
     }
 });
