@@ -1,0 +1,35 @@
+{
+  "manifest_version": 2,
+  "name": "Session Memory Bridge",
+  "version": "1.0.0",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "session-memory-bridge@example.local"
+    }
+  },
+  "permissions": [
+    "nativeMessaging",
+    "nativeMessagingFromContent",
+    "geckoViewAddons"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://copilot.microsoft.com/*",
+        "https://grok.com/*",
+        "https://chat.mistral.ai/*",
+        "https://you.com/*",
+        "https://www.you.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}
