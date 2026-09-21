@@ -124,55 +124,52 @@
             return document.querySelector('#prompt-textarea')
                 || document.querySelector('[contenteditable="true"]');
         }
-
         if (/claude\.ai/.test(host)) {
             return document.querySelector('.ProseMirror')
                 || document.querySelector('[contenteditable="true"]');
         }
-
         if (/gemini\.google\.com/.test(host)) {
             return document.querySelector('.ql-editor')
                 || document.querySelector('[contenteditable="true"]');
         }
 
-        if (/perplexity\.ai/.test(host)) {
-            return document.querySelector('textarea')
-                || document.querySelector('[contenteditable="true"]');
-        }
-
-        if (/copilot\.microsoft\.com/.test(host)) {
-            return document.querySelector('textarea')
-                || document.querySelector('[contenteditable="true"]');
-        }
-
-        if (/grok\.com/.test(host)) {
-            return document.querySelector('textarea')
-                || document.querySelector('[contenteditable="true"]');
-        }
-
-        if (/chat\.mistral\.ai/.test(host)) {
-            return document.querySelector('textarea')
-                || document.querySelector('[contenteditable="true"]');
-        }
-
-        if (/you\.com/.test(host)) {
-            return document.querySelector('textarea')
-                || document.querySelector('[contenteditable="true"]');
-        }
-
-        // عام
         return document.querySelector('textarea')
             || document.querySelector('[contenteditable="true"]');
+    }
+
+    // ── إيجاد زر الإرسال ─────────────────────────────────────────────
+
+    function findSendButton() {
+        var host = location.hostname;
+
+        if (/chatgpt\.com/.test(host)) {
+            return document.querySelector('[data-testid="send-button"]')
+                || document.querySelector('button[aria-label="Send prompt"]')
+                || document.querySelector('button[aria-label="إرسال الرسالة"]');
+        }
+        if (/claude\.ai/.test(host)) {
+            return document.querySelector('button[aria-label="Send Message"]')
+                || document.querySelector('button[type="submit"]');
+        }
+        if (/gemini\.google\.com/.test(host)) {
+            return document.querySelector('button.send-button')
+                || document.querySelector('button[aria-label="Send message"]');
+        }
+        if (/perplexity\.ai/.test(host)) {
+            return document.querySelector('button[aria-label="Submit"]')
+                || document.querySelector('button[type="submit"]');
+        }
+
+        return document.querySelector('button[type="submit"]')
+            || document.querySelector('button[aria-label*="send" i]')
+            || document.querySelector('button[aria-label*="إرسال" i]');
     }
 
     // ── كتابة النص في صندوق الإدخال ──────────────────────────────────
 
     function writeToInputBox(text) {
         var input = findInputBox();
-        if (!input) {
-            console.warn('[AiChat] ❌ لم يُعثر على صندوق الإدخال');
-            return false;
-        }
+        if (!input) return false;
 
         try {
             input.focus();
@@ -184,20 +181,38 @@
                 nativeInputValueSetter.call(input, text);
                 input.dispatchEvent(new Event('input',  { bubbles: true }));
                 input.dispatchEvent(new Event('change', { bubbles: true }));
-
             } else {
-                // contenteditable — ChatGPT / Claude / Gemini
                 input.focus();
                 document.execCommand('selectAll', false, null);
                 document.execCommand('insertText', false, text);
             }
 
-            console.log('[AiChat] ✅ تم كتابة السياق في صندوق الإدخال');
             return true;
 
         } catch (e) {
             console.error('[AiChat] ❌ خطأ في الكتابة:', e);
             return false;
+        }
+    }
+
+    // ── ضغط زر الإرسال ───────────────────────────────────────────────
+
+    function clickSendButton() {
+        var btn = findSendButton();
+        if (btn) {
+            btn.click();
+            return;
+        }
+        // بديل: Enter
+        var input = findInputBox();
+        if (input) {
+            input.dispatchEvent(new KeyboardEvent('keydown', {
+                key:      'Enter',
+                code:     'Enter',
+                keyCode:  13,
+                bubbles:  true,
+                composed: true
+            }));
         }
     }
 
@@ -214,22 +229,36 @@
 
             console.log('[AiChat] 📥 استُلم السياق من Kotlin');
 
-            // انتظر حتى يتحمل صندوق الإدخال
+            // ── رسالة كاملة = سياق + طلب تأكيد ──
+            var confirmMsg =
+                'اقرأ السياق أعلاه.\n' +
+                'ثم أجب بجملة واحدة فقط:\n' +
+                '"فهمت السياق — أنا جاهز لأسئلتك."';
+
+            var fullMessage = response.context
+                + '\n\n---\n'
+                + confirmMsg;
+
             var attempts = 0;
             var interval = setInterval(function () {
                 attempts++;
-                var ok = writeToInputBox(response.context);
-                if (ok || attempts >= 10) {
+
+                var ok = writeToInputBox(fullMessage);
+
+                if (ok) {
                     clearInterval(interval);
-                    if (!ok) {
-                        console.warn('[AiChat] ⚠️ فشل كتابة السياق بعد ' + attempts + ' محاولة');
-                    }
+                    // انتظر ثانية ثم أرسل
+                    setTimeout(clickSendButton, 1000);
+                    console.log('[AiChat] ✅ تم إرسال السياق');
+
+                } else if (attempts >= 10) {
+                    clearInterval(interval);
+                    console.warn('[AiChat] ⚠️ فشل الكتابة بعد 10 محاولات');
                 }
+
             }, 500);
 
-        }).catch(function () {
-            // صامت — لا يوجد سياق معلق
-        });
+        }).catch(function () {});
     }
 
     // ── إرسال تلقائي ──────────────────────────────────────────────────
@@ -271,7 +300,6 @@
     // ── Polling — CHECK_CAPTURE كل ثانية ─────────────────────────────
 
     setInterval(function () {
-
         if (document.visibilityState !== 'visible') return;
 
         browser.runtime.sendMessage({
