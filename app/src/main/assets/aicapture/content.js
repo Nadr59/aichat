@@ -87,7 +87,6 @@
             '[role="navigation"]', '[role="banner"]',
             '[contenteditable="true"]'
         ].join(', ');
-
         var blocks = document.querySelectorAll(
             'article, section, main div, p, li, pre, blockquote'
         );
@@ -106,11 +105,9 @@
     function extractLatestResponse() {
         var host = location.hostname;
         var text = null;
-
         if (/chatgpt\.com|openai\.com/.test(host)) text = extractChatGPT();
         else if (/claude\.ai/.test(host))          text = extractClaude();
         else if (/gemini\.google\.com/.test(host)) text = extractGemini();
-
         if (!text) text = extractByLongestBlock();
         return text ? text.substring(0, MAX_LEN) : null;
     }
@@ -119,7 +116,6 @@
 
     function findInputBox() {
         var host = location.hostname;
-
         if (/chatgpt\.com/.test(host)) {
             return document.querySelector('#prompt-textarea')
                 || document.querySelector('[contenteditable="true"]');
@@ -133,7 +129,6 @@
                 || document.querySelector('rich-textarea')
                 || document.querySelector('[contenteditable="true"]');
         }
-
         return document.querySelector('textarea')
             || document.querySelector('[contenteditable="true"]');
     }
@@ -142,7 +137,6 @@
 
     function findSendButton() {
         var host = location.hostname;
-
         if (/chatgpt\.com/.test(host)) {
             return document.querySelector('button[aria-label="إرسال رسالة"]')
                 || document.querySelector('button[aria-label="Send prompt"]')
@@ -160,44 +154,90 @@
             return document.querySelector('button[aria-label="Send Message"]')
                 || document.querySelector('button[type="submit"]');
         }
-        if (/perplexity\.ai/.test(host)) {
-            return document.querySelector('button[aria-label="Submit"]')
-                || document.querySelector('button[type="submit"]');
-        }
-
         return document.querySelector('button[type="submit"]')
             || document.querySelector('button[aria-label*="إرسال" i]')
             || document.querySelector('button[aria-label*="send" i]');
     }
 
-    // ── كتابة النص في صندوق الإدخال ──────────────────────────────────
+    // ── ✅ writeToInputBox المُصلَّح ───────────────────────────────────
 
     function writeToInputBox(text) {
         var input = findInputBox();
-        if (!input) return false;
-
-        try {
-            input.focus();
-
-            if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
-                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                    window.HTMLTextAreaElement.prototype, 'value'
-                ).set;
-                nativeInputValueSetter.call(input, text);
-                input.dispatchEvent(new Event('input',  { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-            } else {
-                input.focus();
-                document.execCommand('selectAll', false, null);
-                document.execCommand('insertText', false, text);
-            }
-
-            return true;
-
-        } catch (e) {
-            console.error('[AiChat] ❌ خطأ في الكتابة:', e);
+        if (!input) {
+            reportStage('find');
             return false;
         }
+
+        // ── TEXTAREA / INPUT ──────────────────────────────────────────
+        if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
+            input.focus();
+            if (document.activeElement !== input) {
+                reportStage('focus');
+                return false;
+            }
+            try {
+                var setter = Object.getOwnPropertyDescriptor(
+                    window.HTMLTextAreaElement.prototype, 'value'
+                ).set;
+                setter.call(input, text);
+                input.dispatchEvent(new Event('input',  { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            } catch (e) {
+                reportStage('textarea-setter');
+                return false;
+            }
+        }
+
+        // ── contenteditable ───────────────────────────────────────────
+        input.focus();
+
+        // 1) تحقق من التركيز
+        if (document.activeElement !== input &&
+            !input.contains(document.activeElement)) {
+            reportStage('focus');
+            return false;
+        }
+
+        // 2) أنشئ caret صراحة داخل المحرر
+        try {
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            var range = document.createRange();
+            range.selectNodeContents(input);
+            range.collapse(false);   // caret في النهاية
+            sel.addRange(range);
+        } catch (e) {
+            reportStage('selection');
+            return false;
+        }
+
+        // 3) نفّذ الإدراج وافحص النتيجة
+        var done = document.execCommand('insertText', false, text);
+        if (!done) {
+            reportStage('execCommand-false');
+            return false;
+        }
+
+        // 4) تحقق من DOM فعلياً
+        var preview = text.slice(0, 20);
+        var content = input.textContent || input.innerText || '';
+        if (!content.includes(preview)) {
+            reportStage('reverted');
+            return false;
+        }
+
+        return true;
+    }
+
+    // ── إبلاغ Kotlin بمرحلة الفشل ────────────────────────────────────
+
+    function reportStage(stage) {
+        browser.runtime.sendMessage({
+            type:   'CONTEXT_WRITE_FAILED',
+            reason: stage,
+            domain: location.hostname
+        }).catch(function () {});
     }
 
     // ── ضغط زر الإرسال ───────────────────────────────────────────────
@@ -207,21 +247,15 @@
 
         if (/gemini\.google\.com/.test(host)) {
             var attempts = 0;
-            var interval = setInterval(function () {
+            var iv = setInterval(function () {
                 attempts++;
                 var btn = findSendButton();
                 if (btn && !btn.disabled) {
                     btn.click();
-                    clearInterval(interval);
+                    clearInterval(iv);
                 } else if (attempts >= 15) {
-                    clearInterval(interval);
-                    var input = findInputBox();
-                    if (input) {
-                        input.dispatchEvent(new KeyboardEvent('keydown', {
-                            key: 'Enter', keyCode: 13,
-                            bubbles: true, composed: true
-                        }));
-                    }
+                    clearInterval(iv);
+                    pressEnter();
                 }
             }, 300);
             return;
@@ -232,14 +266,16 @@
             btn.click();
             return;
         }
+        pressEnter();
+    }
 
+    function pressEnter() {
         var input = findInputBox();
-        if (input) {
-            input.dispatchEvent(new KeyboardEvent('keydown', {
-                key: 'Enter', keyCode: 13,
-                bubbles: true, composed: true
-            }));
-        }
+        if (!input) return;
+        input.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter', keyCode: 13,
+            bubbles: true, composed: true
+        }));
     }
 
     // ── معالجة السياق الوارد ──────────────────────────────────────────
@@ -253,16 +289,33 @@
         var fullMessage = context + '\n\n---\n' + confirmMsg;
 
         var attempts = 0;
-        var interval = setInterval(function () {
+        var iv = setInterval(function () {
             attempts++;
             var ok = writeToInputBox(fullMessage);
+
             if (ok) {
-                clearInterval(interval);
-                setTimeout(clickSendButton, 1000);
-                console.log('[AiChat] ✅ السياق كُتب — جاري الإرسال');
+                clearInterval(iv);
+
+                // تحقق إضافي من DOM
+                var input   = findInputBox();
+                var current = input
+                    ? (input.value || input.textContent || '').trim()
+                    : '';
+
+                if (current.length > 20) {
+                    // ✅ نجح — أرسل بعد ثانية
+                    setTimeout(clickSendButton, 1000);
+                    browser.runtime.sendMessage({
+                        type:   'CONTEXT_WRITTEN',
+                        len:    current.length,
+                        domain: location.hostname
+                    }).catch(function () {});
+                } else {
+                    reportStage('empty-after-write');
+                }
+
             } else if (attempts >= 10) {
-                clearInterval(interval);
-                console.warn('[AiChat] ⚠️ فشل الكتابة بعد 10 محاولات');
+                clearInterval(iv);
             }
         }, 500);
     }
@@ -308,16 +361,14 @@
     setInterval(function () {
         if (document.visibilityState !== 'visible') return;
 
-        // ── CHECK_CAPTURE ──────────────────────────────────────────
+        // CHECK_CAPTURE
         browser.runtime.sendMessage({
             type:   'CHECK_CAPTURE',
             domain: location.hostname
         }).then(function (response) {
             if (!response || !response.capture) return;
-
             var text = extractLatestResponse();
             var ok   = !!(text && text.length >= MIN_LEN);
-
             browser.runtime.sendMessage({
                 type:    'CAPTURE_RESULT',
                 success: ok,
@@ -334,17 +385,14 @@
             });
         }).catch(function () {});
 
-        // ── GET_CONTEXT ────────────────────────────────────────────
+        // GET_CONTEXT
         browser.runtime.sendMessage({
             type:   'GET_CONTEXT',
             domain: location.hostname
         }).then(function (response) {
             if (!response || !response.hasContext) return;
             if (!response.context || !response.context.trim()) return;
-
-            console.log('[AiChat] 📥 وصل السياق — جاري الكتابة...');
             handleIncomingContext(response.context);
-
         }).catch(function () {});
 
     }, 1000);
@@ -367,10 +415,8 @@
             type:    'DEBUG_BUTTONS',
             buttons: visible,
             domain:  location.hostname
-        });
+        }).catch(function () {});
     }
-
-    // ── تشغيل عند البدء ───────────────────────────────────────────────
 
     setTimeout(detectAndReportButtons, 2000);
 
