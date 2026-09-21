@@ -7,7 +7,6 @@ browser.runtime.onMessage.addListener(function (message, sender) {
 
     var type = message.type;
 
-    // ── AI_RESPONSE ───────────────────────────────────────────────
     if (type === "AI_RESPONSE") {
         browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "AI_RESPONSE",
@@ -17,48 +16,22 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         return;
     }
 
-    // ── CHECK_CAPTURE ─────────────────────────────────────────────
     if (type === "CHECK_CAPTURE") {
         return browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "CHECK_CAPTURE",
             domain: message.domain || ""
-        }).then(function (response) {
-            return response;
-        }).catch(function (e) {
-            return { capture: false };
-        });
+        }).then(function (r) { return r; })
+          .catch(function () { return { capture: false }; });
     }
-    if (type === "CONTEXT_WRITTEN") {
-    browser.runtime.sendNativeMessage(NATIVE_APP, {
-        type:   "CONTEXT_WRITTEN",
-        len:    message.len    || 0,
-        domain: message.domain || ""
-    });
-    return;
-}
 
-if (type === "CONTEXT_WRITE_FAILED") {
-    browser.runtime.sendNativeMessage(NATIVE_APP, {
-        type:   "CONTEXT_WRITE_FAILED",
-        reason: message.reason || "",
-        domain: message.domain || ""
-    });
-    return;
-}
-
-    // ── GET_CONTEXT ───────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
         return browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "GET_CONTEXT",
             domain: message.domain || ""
-        }).then(function (response) {
-            return response;
-        }).catch(function (e) {
-            return { hasContext: false, context: "" };
-        });
+        }).then(function (r) { return r; })
+          .catch(function () { return { hasContext: false, context: "" }; });
     }
 
-    // ── CAPTURE_RESULT ────────────────────────────────────────────
     if (type === "CAPTURE_RESULT") {
         browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:    "CAPTURE_RESULT",
@@ -70,7 +43,24 @@ if (type === "CONTEXT_WRITE_FAILED") {
         return;
     }
 
-    // ── DEBUG_BUTTONS ─────────────────────────────────────────────
+    if (type === "CONTEXT_WRITTEN") {
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
+            type:   "CONTEXT_WRITTEN",
+            len:    message.len    || 0,
+            domain: message.domain || ""
+        });
+        return;
+    }
+
+    if (type === "DEBUG_INFO") {
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
+            type:   "DEBUG_INFO",
+            info:   message.info   || "",
+            domain: message.domain || ""
+        });
+        return;
+    }
+
     if (type === "DEBUG_BUTTONS") {
         browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:    "DEBUG_BUTTONS",
