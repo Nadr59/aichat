@@ -114,6 +114,27 @@ class AichatApp : Application() {
                             .put("context",    pending)
                     )
                 }
+                "DEBUG_BUTTONS" -> {
+    val buttons = json.optJSONArray("buttons")
+    val domain  = json.optString("domain")
+    val sb      = StringBuilder("🔍 أزرار $domain:\n")
+
+    if (buttons != null) {
+        for (i in 0 until buttons.length()) {
+            val btn    = buttons.optJSONObject(i)
+            val label  = btn?.optString("label")  ?: ""
+            val testid = btn?.optString("testid") ?: ""
+            val type   = btn?.optString("type")   ?: ""
+            sb.append("• label=$label testid=$testid type=$type\n")
+        }
+    } else {
+        sb.append("لا يوجد أزرار!")
+    }
+
+    Log.d("AichatApp", sb.toString())
+    showToast(sb.toString())
+    null
+                }
 
                 "AI_RESPONSE" -> {
                     handleAutoResponse(json)
