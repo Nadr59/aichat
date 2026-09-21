@@ -150,19 +150,16 @@
                 || document.querySelector('[data-testid="send-button"]')
                 || document.querySelector('button[type="submit"]');
         }
-
         if (/gemini\.google\.com/.test(host)) {
             return document.querySelector('button[aria-label="إرسال الرسالة"]')
                 || document.querySelector('button[aria-label="Send message"]')
                 || document.querySelector('button.send-button')
                 || document.querySelector('button[type="submit"]');
         }
-
         if (/claude\.ai/.test(host)) {
             return document.querySelector('button[aria-label="Send Message"]')
                 || document.querySelector('button[type="submit"]');
         }
-
         if (/perplexity\.ai/.test(host)) {
             return document.querySelector('button[aria-label="Submit"]')
                 || document.querySelector('button[type="submit"]');
@@ -208,7 +205,6 @@
     function clickSendButton() {
         var host = location.hostname;
 
-        // Gemini — الزر يظهر بعد الكتابة
         if (/gemini\.google\.com/.test(host)) {
             var attempts = 0;
             var interval = setInterval(function () {
@@ -217,17 +213,13 @@
                 if (btn && !btn.disabled) {
                     btn.click();
                     clearInterval(interval);
-                    console.log('[AiChat] ✅ Gemini send clicked');
                 } else if (attempts >= 15) {
                     clearInterval(interval);
-                    // بديل: Enter
                     var input = findInputBox();
                     if (input) {
                         input.dispatchEvent(new KeyboardEvent('keydown', {
-                            key:      'Enter',
-                            keyCode:  13,
-                            bubbles:  true,
-                            composed: true
+                            key: 'Enter', keyCode: 13,
+                            bubbles: true, composed: true
                         }));
                     }
                 }
@@ -235,88 +227,44 @@
             return;
         }
 
-        // بقية المنصات
         var btn = findSendButton();
         if (btn && !btn.disabled) {
             btn.click();
-            console.log('[AiChat] ✅ Send clicked');
             return;
         }
 
-        // بديل: Enter
         var input = findInputBox();
         if (input) {
             input.dispatchEvent(new KeyboardEvent('keydown', {
-                key:      'Enter',
-                keyCode:  13,
-                bubbles:  true,
-                composed: true
+                key: 'Enter', keyCode: 13,
+                bubbles: true, composed: true
             }));
-            console.log('[AiChat] ✅ Enter pressed');
         }
     }
 
-    // ── كشف الأزرار للتشخيص ──────────────────────────────────────────
+    // ── معالجة السياق الوارد ──────────────────────────────────────────
 
-    function detectAndReportButtons() {
-        var buttons = document.querySelectorAll('button');
-        var visible = [];
+    function handleIncomingContext(context) {
+        var confirmMsg =
+            'اقرأ السياق أعلاه.\n' +
+            'ثم أجب بجملة واحدة فقط:\n' +
+            '"فهمت السياق — أنا جاهز لأسئلتك."';
 
-        buttons.forEach(function (btn) {
-            if (!isVisible(btn)) return;
-            var label  = btn.getAttribute('aria-label') || '';
-            var testid = btn.getAttribute('data-testid') || '';
-            var type   = btn.getAttribute('type') || '';
-            if (label || testid || type === 'submit') {
-                visible.push({ label: label, testid: testid, type: type });
+        var fullMessage = context + '\n\n---\n' + confirmMsg;
+
+        var attempts = 0;
+        var interval = setInterval(function () {
+            attempts++;
+            var ok = writeToInputBox(fullMessage);
+            if (ok) {
+                clearInterval(interval);
+                setTimeout(clickSendButton, 1000);
+                console.log('[AiChat] ✅ السياق كُتب — جاري الإرسال');
+            } else if (attempts >= 10) {
+                clearInterval(interval);
+                console.warn('[AiChat] ⚠️ فشل الكتابة بعد 10 محاولات');
             }
-        });
-
-        browser.runtime.sendMessage({
-            type:    'DEBUG_BUTTONS',
-            buttons: visible,
-            domain:  location.hostname
-        });
-    }
-
-    // ── طلب السياق من Kotlin ──────────────────────────────────────────
-
-    function requestContext() {
-        browser.runtime.sendMessage({
-            type:   'GET_CONTEXT',
-            domain: location.hostname
-        }).then(function (response) {
-
-            if (!response || !response.hasContext) return;
-            if (!response.context || !response.context.trim()) return;
-
-            console.log('[AiChat] 📥 استُلم السياق');
-
-            var confirmMsg =
-                'اقرأ السياق أعلاه.\n' +
-                'ثم أجب بجملة واحدة فقط:\n' +
-                '"فهمت السياق — أنا جاهز لأسئلتك."';
-
-            var fullMessage = response.context
-                + '\n\n---\n'
-                + confirmMsg;
-
-            var attempts = 0;
-            var interval = setInterval(function () {
-                attempts++;
-                var ok = writeToInputBox(fullMessage);
-
-                if (ok) {
-                    clearInterval(interval);
-                    setTimeout(clickSendButton, 1000);
-                    console.log('[AiChat] ✅ السياق كُتب — جاري الإرسال');
-                } else if (attempts >= 10) {
-                    clearInterval(interval);
-                    console.warn('[AiChat] ⚠️ فشل الكتابة');
-                }
-            }, 500);
-
-        }).catch(function () {});
+        }, 500);
     }
 
     // ── إرسال تلقائي ──────────────────────────────────────────────────
@@ -355,16 +303,16 @@
     }
     startObserver();
 
-    // ── Polling — CHECK_CAPTURE كل ثانية ─────────────────────────────
+    // ── Polling كل ثانية ─────────────────────────────────────────────
 
     setInterval(function () {
         if (document.visibilityState !== 'visible') return;
 
+        // ── CHECK_CAPTURE ──────────────────────────────────────────
         browser.runtime.sendMessage({
             type:   'CHECK_CAPTURE',
             domain: location.hostname
         }).then(function (response) {
-
             if (!response || !response.capture) return;
 
             var text = extractLatestResponse();
@@ -384,15 +332,47 @@
                                ? document.body.innerText.length : 0
                 }
             });
+        }).catch(function () {});
+
+        // ── GET_CONTEXT ────────────────────────────────────────────
+        browser.runtime.sendMessage({
+            type:   'GET_CONTEXT',
+            domain: location.hostname
+        }).then(function (response) {
+            if (!response || !response.hasContext) return;
+            if (!response.context || !response.context.trim()) return;
+
+            console.log('[AiChat] 📥 وصل السياق — جاري الكتابة...');
+            handleIncomingContext(response.context);
 
         }).catch(function () {});
 
     }, 1000);
 
+    // ── كشف الأزرار للتشخيص ──────────────────────────────────────────
+
+    function detectAndReportButtons() {
+        var buttons = document.querySelectorAll('button');
+        var visible = [];
+        buttons.forEach(function (btn) {
+            if (!isVisible(btn)) return;
+            var label  = btn.getAttribute('aria-label') || '';
+            var testid = btn.getAttribute('data-testid') || '';
+            var type   = btn.getAttribute('type') || '';
+            if (label || testid || type === 'submit') {
+                visible.push({ label: label, testid: testid, type: type });
+            }
+        });
+        browser.runtime.sendMessage({
+            type:    'DEBUG_BUTTONS',
+            buttons: visible,
+            domain:  location.hostname
+        });
+    }
+
     // ── تشغيل عند البدء ───────────────────────────────────────────────
 
-    setTimeout(requestContext,          1500);
-    setTimeout(detectAndReportButtons,  2000);
+    setTimeout(detectAndReportButtons, 2000);
 
     // ── تنظيف ─────────────────────────────────────────────────────────
 
