@@ -251,6 +251,45 @@ fun GeckoTestScreen(
         mainHandler.postDelayed(r, 5000L)
     }
 
+    // أضف بعد دالة saveToMemory مباشرة
+
+val sendContext: () -> Unit = ctx@{
+    if (platform == null)        return@ctx
+    if (!platform.memoryEnabled) return@ctx
+    if (chatViewModel == null)   return@ctx
+
+    Toast.makeText(
+        context,
+        "📤 جاري تحضير السياق...",
+        Toast.LENGTH_SHORT
+    ).show()
+
+    // جلب الذكريات وإرسالها
+    kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.Dispatchers.IO
+    ).launch {
+        try {
+            val memories = chatViewModel.getSharedMemories()
+
+            Handler(Looper.getMainLooper()).post {
+                app.sendContextToPage(
+                    memories          = memories,
+                    customInstruction = ""
+                )
+            }
+
+        } catch (e: Exception) {
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(
+                    context,
+                    "❌ فشل جلب الذاكرة: ${e.message}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+}
+
     // ── رجوع ذكي ─────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
         if (canGoBack) session.goBack() else onBack()
@@ -314,16 +353,33 @@ fun GeckoTestScreen(
             },
             actions = {
                 if (platform != null && platform.memoryEnabled && chatViewModel != null) {
-                    IconButton(
-                        onClick = saveToMemory,
-                        enabled = !isSavingMemory && !isLoading
-                    ) {
-                        Text(
-                            text  = if (isSavingMemory) "⏳" else "🧠",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
-                }
+                    // أضف في الـ actions داخل TopAppBar
+// بعد زر 🧠 مباشرة
+
+if (platform != null && platform.memoryEnabled && chatViewModel != null) {
+
+    // ── زر الحفظ 🧠 ──
+    IconButton(
+        onClick = saveToMemory,
+        enabled = !isSavingMemory && !isLoading
+    ) {
+        Text(
+            text  = if (isSavingMemory) "⏳" else "🧠",
+            style = MaterialTheme.typography.titleMedium
+        )
+    }
+
+    // ── زر إرسال السياق 📤 ──
+    IconButton(
+        onClick = sendContext,
+        enabled = !isLoading
+    ) {
+        Text(
+            text  = "📤",
+            style = MaterialTheme.typography.titleMedium
+        )
+    }
+}
                 IconButton(onClick = { session.reload() }) {
                     Icon(Icons.Filled.Refresh, "تحديث")
                 }
