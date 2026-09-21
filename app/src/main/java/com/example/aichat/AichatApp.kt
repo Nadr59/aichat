@@ -24,8 +24,8 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
-    @Volatile private var captureFlag:          Boolean = false
-    @Volatile var contextPendingMessage: String  = ""
+    @Volatile private var captureFlag:       Boolean = false
+    @Volatile var contextPendingMessage:     String  = ""
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
@@ -61,16 +61,16 @@ class AichatApp : Application() {
         }
 
         val memoryContext = MemoryContextBuilder().build(memories)
-
-        val systemPrompt = SystemPrompt.build(
+        val systemPrompt  = SystemPrompt.build(
             memoryContext     = memoryContext,
             customInstruction = customInstruction,
             includeAccuracy   = true
         )
 
         contextPendingMessage = systemPrompt
-        Log.d("AichatApp", "📤 Context ready: ${systemPrompt.length} chars")
-        showToast("📤 السياق جاهز — افتح المحادثة في الصفحة")
+
+        showToast("📤 حجم السياق: ${systemPrompt.length} حرف")
+        Log.d("AichatApp", "📤 contextPendingMessage set: ${systemPrompt.length} chars")
     }
 
     // ── MessageDelegate ───────────────────────────────────────────────
@@ -93,7 +93,6 @@ class AichatApp : Application() {
 
             return when (type) {
 
-                // ── content.js يسأل كل ثانية ──
                 "CHECK_CAPTURE" -> {
                     val flag    = captureFlag
                     captureFlag = false
@@ -103,7 +102,6 @@ class AichatApp : Application() {
                     )
                 }
 
-                // ── content.js يطلب السياق عند فتح الصفحة ──
                 "GET_CONTEXT" -> {
                     val pending           = contextPendingMessage
                     contextPendingMessage = ""
@@ -114,26 +112,25 @@ class AichatApp : Application() {
                             .put("context",    pending)
                     )
                 }
+
                 "DEBUG_BUTTONS" -> {
-    val buttons = json.optJSONArray("buttons")
-    val domain  = json.optString("domain")
-    val sb      = StringBuilder("🔍 أزرار $domain:\n")
-
-    if (buttons != null) {
-        for (i in 0 until buttons.length()) {
-            val btn    = buttons.optJSONObject(i)
-            val label  = btn?.optString("label")  ?: ""
-            val testid = btn?.optString("testid") ?: ""
-            val type   = btn?.optString("type")   ?: ""
-            sb.append("• label=$label testid=$testid type=$type\n")
-        }
-    } else {
-        sb.append("لا يوجد أزرار!")
-    }
-
-    Log.d("AichatApp", sb.toString())
-    showToast(sb.toString())
-    null
+                    val buttons = json.optJSONArray("buttons")
+                    val domain  = json.optString("domain")
+                    val sb      = StringBuilder("🔍 أزرار $domain:\n")
+                    if (buttons != null) {
+                        for (i in 0 until buttons.length()) {
+                            val btn    = buttons.optJSONObject(i)
+                            val label  = btn?.optString("label")  ?: ""
+                            val testid = btn?.optString("testid") ?: ""
+                            val t      = btn?.optString("type")   ?: ""
+                            sb.append("• label=$label testid=$testid type=$t\n")
+                        }
+                    } else {
+                        sb.append("لا يوجد أزرار!")
+                    }
+                    Log.d("AichatApp", sb.toString())
+                    showToast(sb.toString())
+                    null
                 }
 
                 "AI_RESPONSE" -> {
@@ -189,28 +186,6 @@ class AichatApp : Application() {
         }
     }
 
-    fun sendContextToPage(
-    memories:          List<MemoryItem>,
-    customInstruction: String = ""
-) {
-    if (aiChatExtension == null) {
-        showToast("❌ Extension غير جاهزة")
-        return
-    }
-
-    val memoryContext = MemoryContextBuilder().build(memories)
-    val systemPrompt  = SystemPrompt.build(
-        memoryContext     = memoryContext,
-        customInstruction = customInstruction,
-        includeAccuracy   = true
-    )
-
-    contextPendingMessage = systemPrompt
-
-    // ✅ تأكيد أن القيمة حُفظت
-    showToast("📤 حجم السياق: ${systemPrompt.length} حرف\ncontextPending=${contextPendingMessage.length}")
-    Log.d("AichatApp", "📤 contextPendingMessage set: ${systemPrompt.length} chars")
-    }
     // ── Extension ─────────────────────────────────────────────────────
 
     private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
