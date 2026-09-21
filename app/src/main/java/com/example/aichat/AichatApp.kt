@@ -112,6 +112,21 @@ class AichatApp : Application() {
                             .put("context",    pending)
                     )
                 }
+                "CONTEXT_WRITTEN" -> {
+    val len    = json.optInt("len")
+    val domain = json.optString("domain")
+    Log.d("AichatApp", "✅ Context written: $len chars on $domain")
+    showToast("✅ السياق وصل للصفحة\n$len حرف على $domain")
+    null
+}
+
+"CONTEXT_WRITE_FAILED" -> {
+    val reason = json.optString("reason")
+    val domain = json.optString("domain")
+    Log.w("AichatApp", "❌ Write failed: $reason on $domain")
+    showToast("❌ فشل عند: $reason\n$domain")
+    null
+}
 
                 "DEBUG_BUTTONS" -> {
                     val buttons = json.optJSONArray("buttons")
