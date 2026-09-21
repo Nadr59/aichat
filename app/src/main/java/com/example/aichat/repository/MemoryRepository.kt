@@ -23,6 +23,11 @@ class MemoryRepository(
 
     private val embeddingService: EmbeddingService
         get() = EmbeddingService(aiSettings.geminiKey)
+        // أضف في MemoryRepository
+
+suspend fun getAllSharedMemoriesList(): List<MemoryItem> {
+    return memoryDao.getAllSharedMemories()
+}
 
     // ============================================================
     // ✅ حساب Hash للمحتوى لمنع التكرار (مرحلة 3)
@@ -127,6 +132,8 @@ class MemoryRepository(
         Log.d(TAG, "✅ Memory saved with id=$id, hash=${hash.take(8)}...")
         return id
     }
+
+    
 
     // ============================================================
     // تعديل ذاكرة مع إعادة حساب الـ Embedding والـ Hash
