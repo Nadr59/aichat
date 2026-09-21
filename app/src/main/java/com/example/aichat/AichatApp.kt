@@ -74,64 +74,63 @@ class AichatApp : Application() {
         Log.d("AichatApp", "📤 contextPendingMessage: ${systemPrompt.length} chars")
     }
 
+    // ── PortDelegate للـ background.js ───────────────────────────────
+
+    private val portDelegate = object : WebExtension.PortDelegate {
+
+        override fun onPortMessage(message: Any, port: WebExtension.Port) {
+            val json = parseMessage(message) ?: return
+            val type = json.optString("type")
+            Log.d("AichatApp", "📩 port: $type")
+
+            when (type) {
+                "AI_RESPONSE"    -> handleAutoResponse(json)
+                "CAPTURE_RESULT" -> handleCaptureResult(json)
+
+                "CONTEXT_WRITTEN" -> {
+                    val len    = json.optInt("len")
+                    val domain = json.optString("domain")
+                    Log.d("AichatApp", "✅ written: $len @ $domain")
+                    showToast("✅ السياق وصل: $len حرف")
+                }
+
+                "DEBUG_INFO" -> {
+                    val info = json.optString("info")
+                    Log.d("AichatApp", "🔍 $info")
+                    showToast("🔍 $info")
+                }
+
+                "DEBUG_BUTTONS" -> {
+                    val buttons = json.optJSONArray("buttons")
+                    val domain  = json.optString("domain")
+                    val sb      = StringBuilder("🔍 أزرار $domain:\n")
+                    if (buttons != null) {
+                        for (i in 0 until buttons.length()) {
+                            val btn   = buttons.optJSONObject(i)
+                            val label = btn?.optString("label") ?: ""
+                            val t     = btn?.optString("type")  ?: ""
+                            if (label.isNotBlank() || t == "submit") {
+                                sb.append("• $label type=$t\n")
+                            }
+                        }
+                    }
+                    showToast(sb.toString())
+                }
+            }
+        }
+    }
+
     // ── MessageDelegate ───────────────────────────────────────────────
 
     private val messageDelegate = object : WebExtension.MessageDelegate {
 
-        // ✅ background.js يتصل عبر connectNative
         override fun onConnect(port: WebExtension.Port) {
             backgroundPort = port
+            port.setDelegate(portDelegate)
             Log.d("AichatApp", "✅ background port connected")
             showToast("✅ background port connected")
-
-            port.setDelegate(object : WebExtension.PortDelegate {
-
-                override fun onPortMessage(message: Any, port: WebExtension.Port) {
-                    val json = parseMessage(message) ?: return
-                    val type = json.optString("type")
-                    Log.d("AichatApp", "📩 port: $type")
-
-                    when (type) {
-                        "AI_RESPONSE"    -> handleAutoResponse(json)
-                        "CAPTURE_RESULT" -> handleCaptureResult(json)
-                        "CONTEXT_WRITTEN" -> {
-                            val len    = json.optInt("len")
-                            val domain = json.optString("domain")
-                            Log.d("AichatApp", "✅ written: $len @ $domain")
-                            showToast("✅ السياق وصل: $len حرف")
-                        }
-                        "DEBUG_INFO" -> {
-                            val info = json.optString("info")
-                            Log.d("AichatApp", "🔍 $info")
-                            showToast("🔍 $info")
-                        }
-                        "DEBUG_BUTTONS" -> {
-                            val buttons = json.optJSONArray("buttons")
-                            val domain  = json.optString("domain")
-                            val sb      = StringBuilder("🔍 أزرار $domain:\n")
-                            if (buttons != null) {
-                                for (i in 0 until buttons.length()) {
-                                    val btn   = buttons.optJSONObject(i)
-                                    val label = btn?.optString("label") ?: ""
-                                    val t     = btn?.optString("type")  ?: ""
-                                    if (label.isNotBlank() || t == "submit") {
-                                        sb.append("• $label type=$t\n")
-                                    }
-                                }
-                            }
-                            showToast(sb.toString())
-                        }
-                    }
-                }
-
-                override fun onDisconnect(port: WebExtension.Port, error: Throwable?) {
-                    backgroundPort = null
-                    Log.d("AichatApp", "🔌 port disconnected")
-                }
-            })
         }
 
-        // ✅ content.js يرسل مباشرة عبر sendNativeMessage
         override fun onMessage(
             nativeApp: String,
             message:   Any,
@@ -161,8 +160,9 @@ class AichatApp : Application() {
                     val pending           = contextPendingMessage
                     contextPendingMessage = ""
                     val senderUrl = sender.url ?: "unknown"
-                    Log.d("AichatApp", "📤 GET_CONTEXT from=$senderUrl has=${pending.isNotBlank()}")
-                    showToast("📤 GET_CONTEXT\nhas=${pending.isNotBlank()}")
+                    Log.d("AichatApp",
+                        "📤 GET_CONTEXT from=$senderUrl has=${pending.isNotBlank()}")
+                    showToast("📤 GET_CONTEXT has=${pending.isNotBlank()}")
                     GeckoResult.fromValue(
                         JSONObject()
                             .put("hasContext", pending.isNotBlank())
