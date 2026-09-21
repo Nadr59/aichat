@@ -15,6 +15,14 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         });
         return;
     }
+    if (type === "DEBUG_BUTTONS") {
+    browser.runtime.sendNativeMessage(NATIVE_APP, {
+        type:    "DEBUG_BUTTONS",
+        buttons: message.buttons || [],
+        domain:  message.domain  || ""
+    });
+    return;
+    }
 
     if (type === "CHECK_CAPTURE") {
         return browser.runtime.sendNativeMessage(NATIVE_APP, {
