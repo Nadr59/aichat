@@ -74,7 +74,7 @@ class AichatApp : Application() {
         Log.d("AichatApp", "📤 contextPendingMessage: ${systemPrompt.length} chars")
     }
 
-    // ── PortDelegate للـ background.js ───────────────────────────────
+    // ── PortDelegate — يستقبل من background.js ───────────────────────
 
     private val portDelegate = object : WebExtension.PortDelegate {
 
@@ -84,6 +84,43 @@ class AichatApp : Application() {
             Log.d("AichatApp", "📩 port: $type")
 
             when (type) {
+
+                // ── طلبات تحتاج رد عبر Port ──────────────────────
+
+                "CHECK_CAPTURE" -> {
+                    val flag    = captureFlag
+                    captureFlag = false
+                    if (flag) showToast("📡 تم الاتصال — جاري الاستخراج...")
+                    try {
+                        port.postMessage(
+                            JSONObject()
+                                .put("type",    "CHECK_CAPTURE_RESULT")
+                                .put("capture", flag)
+                        )
+                    } catch (e: Exception) {
+                        Log.e("AichatApp", "❌ port.postMessage: ${e.message}")
+                    }
+                }
+
+                "GET_CONTEXT" -> {
+                    val pending           = contextPendingMessage
+                    contextPendingMessage = ""
+                    Log.d("AichatApp", "📤 GET_CONTEXT has=${pending.isNotBlank()}")
+                    showToast("📤 GET_CONTEXT has=${pending.isNotBlank()}")
+                    try {
+                        port.postMessage(
+                            JSONObject()
+                                .put("type",       "GET_CONTEXT_RESULT")
+                                .put("hasContext", pending.isNotBlank())
+                                .put("context",    pending)
+                        )
+                    } catch (e: Exception) {
+                        Log.e("AichatApp", "❌ port.postMessage GET_CONTEXT: ${e.message}")
+                    }
+                }
+
+                // ── رسائل بدون رد ─────────────────────────────────
+
                 "AI_RESPONSE"    -> handleAutoResponse(json)
                 "CAPTURE_RESULT" -> handleCaptureResult(json)
 
@@ -116,6 +153,8 @@ class AichatApp : Application() {
                     }
                     showToast(sb.toString())
                 }
+
+                else -> Log.w("AichatApp", "⚠️ unknown port type: $type")
             }
         }
     }
@@ -136,50 +175,13 @@ class AichatApp : Application() {
             message:   Any,
             sender:    WebExtension.MessageSender
         ): GeckoResult<Any>? {
-
-            val json = parseMessage(message) ?: run {
-                Log.e("AichatApp", "❌ parseMessage failed")
-                return null
-            }
-
+            // content.js يرسل مباشرة عبر sendNativeMessage
+            // لكن الآن كل شيء عبر Port
+            // نتركها فارغة للتوافق
+            val json = parseMessage(message) ?: return null
             val type = json.optString("type")
-            Log.d("AichatApp", "📩 onMessage: $type")
-
-            return when (type) {
-
-                "CHECK_CAPTURE" -> {
-                    val flag    = captureFlag
-                    captureFlag = false
-                    if (flag) showToast("📡 تم الاتصال — جاري الاستخراج...")
-                    GeckoResult.fromValue(
-                        JSONObject().put("capture", flag)
-                    )
-                }
-
-                "GET_CONTEXT" -> {
-                    val pending           = contextPendingMessage
-                    contextPendingMessage = ""
-                    val senderUrl = sender.url ?: "unknown"
-                    Log.d("AichatApp",
-                        "📤 GET_CONTEXT from=$senderUrl has=${pending.isNotBlank()}")
-                    showToast("📤 GET_CONTEXT has=${pending.isNotBlank()}")
-                    GeckoResult.fromValue(
-                        JSONObject()
-                            .put("hasContext", pending.isNotBlank())
-                            .put("context",    pending)
-                    )
-                }
-
-                "CAPTURE_RESULT" -> {
-                    handleCaptureResult(json)
-                    null
-                }
-
-                else -> {
-                    Log.w("AichatApp", "⚠️ unknown: $type")
-                    null
-                }
-            }
+            Log.w("AichatApp", "⚠️ onMessage مباشر (غير متوقع): $type")
+            return null
         }
     }
 
@@ -234,12 +236,14 @@ class AichatApp : Application() {
                         Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
                         showToast("✅ Extension جاهزة")
                     } else {
+                        Log.e("AichatApp", "❌ Extension is null")
                         showToast("❌ Extension = null")
                     }
                 },
                 { e ->
                     val msg   = e?.message        ?: "null"
                     val cause = e?.cause?.message ?: "no cause"
+                    Log.e("AichatApp", "❌ Extension error: $msg | $cause")
                     showToast("❌ $msg | $cause")
                 }
             )
