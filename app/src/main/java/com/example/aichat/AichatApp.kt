@@ -103,15 +103,21 @@ class AichatApp : Application() {
                 }
 
                 "GET_CONTEXT" -> {
-                    val pending           = contextPendingMessage
-                    contextPendingMessage = ""
-                    Log.d("AichatApp", "📤 GET_CONTEXT → ${pending.take(80)}")
-                    GeckoResult.fromValue(
-                        JSONObject()
-                            .put("hasContext", pending.isNotBlank())
-                            .put("context",    pending)
-                    )
+    val pending           = contextPendingMessage
+    contextPendingMessage = ""
+    
+    // ✅ سجّل من أين جاء الطلب
+    val senderUrl = sender.url ?: "unknown"
+    Log.d("AichatApp", "📤 GET_CONTEXT from=$senderUrl hasContext=${pending.isNotBlank()}")
+    showToast("📤 GET_CONTEXT\nfrom=${senderUrl.takeLast(40)}\nhas=${pending.isNotBlank()}")
+    
+    GeckoResult.fromValue(
+        JSONObject()
+            .put("hasContext", pending.isNotBlank())
+            .put("context",    pending)
+    )
                 }
+                 
 
                 "AI_RESPONSE" -> {
                     handleAutoResponse(json)
