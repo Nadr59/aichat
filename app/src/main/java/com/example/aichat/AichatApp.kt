@@ -189,6 +189,28 @@ class AichatApp : Application() {
         }
     }
 
+    fun sendContextToPage(
+    memories:          List<MemoryItem>,
+    customInstruction: String = ""
+) {
+    if (aiChatExtension == null) {
+        showToast("❌ Extension غير جاهزة")
+        return
+    }
+
+    val memoryContext = MemoryContextBuilder().build(memories)
+    val systemPrompt  = SystemPrompt.build(
+        memoryContext     = memoryContext,
+        customInstruction = customInstruction,
+        includeAccuracy   = true
+    )
+
+    contextPendingMessage = systemPrompt
+
+    // ✅ تأكيد أن القيمة حُفظت
+    showToast("📤 حجم السياق: ${systemPrompt.length} حرف\ncontextPending=${contextPendingMessage.length}")
+    Log.d("AichatApp", "📤 contextPendingMessage set: ${systemPrompt.length} chars")
+    }
     // ── Extension ─────────────────────────────────────────────────────
 
     private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
