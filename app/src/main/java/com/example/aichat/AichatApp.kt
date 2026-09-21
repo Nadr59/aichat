@@ -248,6 +248,34 @@ class AichatApp : Application() {
                 }
             )
     }
+    // أضف في AichatApp.kt
+
+@Volatile var contextBridgeExtension: WebExtension? = null
+    private set
+
+private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
+    runtime.webExtensionController
+        .ensureBuiltIn(
+            "resource://android/assets/contextbridge/",
+            "session-memory-bridge@example.local"
+        )
+        .accept(
+            { ext ->
+                if (ext != null) {
+                    contextBridgeExtension = ext
+                    Log.d("AichatApp", "✅ ContextBridge loaded")
+                    showToast("✅ Bridge جاهز")
+                }
+            },
+            { e ->
+                Log.e("AichatApp", "❌ Bridge: ${e?.message}")
+                showToast("❌ Bridge: ${e?.message}")
+            }
+        )
+}
+
+// في getOrCreateGeckoRuntime — أضف بعد loadAiCaptureExtension:
+loadContextBridgeExtension(rt)
 
     // ── معالجة الرسائل ────────────────────────────────────────────────
 
