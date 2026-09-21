@@ -115,6 +115,123 @@
         return text ? text.substring(0, MAX_LEN) : null;
     }
 
+    // ── إيجاد صندوق الإدخال ──────────────────────────────────────────
+
+    function findInputBox() {
+        var host = location.hostname;
+
+        if (/chatgpt\.com/.test(host)) {
+            return document.querySelector('#prompt-textarea')
+                || document.querySelector('[contenteditable="true"]');
+        }
+
+        if (/claude\.ai/.test(host)) {
+            return document.querySelector('.ProseMirror')
+                || document.querySelector('[contenteditable="true"]');
+        }
+
+        if (/gemini\.google\.com/.test(host)) {
+            return document.querySelector('.ql-editor')
+                || document.querySelector('[contenteditable="true"]');
+        }
+
+        if (/perplexity\.ai/.test(host)) {
+            return document.querySelector('textarea')
+                || document.querySelector('[contenteditable="true"]');
+        }
+
+        if (/copilot\.microsoft\.com/.test(host)) {
+            return document.querySelector('textarea')
+                || document.querySelector('[contenteditable="true"]');
+        }
+
+        if (/grok\.com/.test(host)) {
+            return document.querySelector('textarea')
+                || document.querySelector('[contenteditable="true"]');
+        }
+
+        if (/chat\.mistral\.ai/.test(host)) {
+            return document.querySelector('textarea')
+                || document.querySelector('[contenteditable="true"]');
+        }
+
+        if (/you\.com/.test(host)) {
+            return document.querySelector('textarea')
+                || document.querySelector('[contenteditable="true"]');
+        }
+
+        // عام
+        return document.querySelector('textarea')
+            || document.querySelector('[contenteditable="true"]');
+    }
+
+    // ── كتابة النص في صندوق الإدخال ──────────────────────────────────
+
+    function writeToInputBox(text) {
+        var input = findInputBox();
+        if (!input) {
+            console.warn('[AiChat] ❌ لم يُعثر على صندوق الإدخال');
+            return false;
+        }
+
+        try {
+            input.focus();
+
+            if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLTextAreaElement.prototype, 'value'
+                ).set;
+                nativeInputValueSetter.call(input, text);
+                input.dispatchEvent(new Event('input',  { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+
+            } else {
+                // contenteditable — ChatGPT / Claude / Gemini
+                input.focus();
+                document.execCommand('selectAll', false, null);
+                document.execCommand('insertText', false, text);
+            }
+
+            console.log('[AiChat] ✅ تم كتابة السياق في صندوق الإدخال');
+            return true;
+
+        } catch (e) {
+            console.error('[AiChat] ❌ خطأ في الكتابة:', e);
+            return false;
+        }
+    }
+
+    // ── طلب السياق من Kotlin ──────────────────────────────────────────
+
+    function requestContext() {
+        browser.runtime.sendMessage({
+            type:   'GET_CONTEXT',
+            domain: location.hostname
+        }).then(function (response) {
+
+            if (!response || !response.hasContext) return;
+            if (!response.context || !response.context.trim()) return;
+
+            console.log('[AiChat] 📥 استُلم السياق من Kotlin');
+
+            // انتظر حتى يتحمل صندوق الإدخال
+            var attempts = 0;
+            var interval = setInterval(function () {
+                attempts++;
+                var ok = writeToInputBox(response.context);
+                if (ok || attempts >= 10) {
+                    clearInterval(interval);
+                    if (!ok) {
+                        console.warn('[AiChat] ⚠️ فشل كتابة السياق بعد ' + attempts + ' محاولة');
+                    }
+                }
+            }, 500);
+
+        }).catch(function () {
+            // صامت — لا يوجد سياق معلق
+        });
+    }
+
     // ── إرسال تلقائي ──────────────────────────────────────────────────
 
     function sendAutoToKotlin(text) {
@@ -176,17 +293,19 @@
                     assistant: document.querySelectorAll(
                         '[data-message-author-role="assistant"]'
                     ).length,
-                    articles: document.querySelectorAll('article').length,
-                    bodyLen:  document.body
-                              ? document.body.innerText.length : 0
+                    articles:  document.querySelectorAll('article').length,
+                    bodyLen:   document.body
+                               ? document.body.innerText.length : 0
                 }
             });
 
-        }).catch(function (e) {
-            // صامت — background.js قد لا يكون جاهزاً بعد
-        });
+        }).catch(function () {});
 
     }, 1000);
+
+    // ── طلب السياق عند بدء التشغيل ───────────────────────────────────
+
+    setTimeout(requestContext, 1500);
 
     // ── تنظيف ─────────────────────────────────────────────────────────
 
