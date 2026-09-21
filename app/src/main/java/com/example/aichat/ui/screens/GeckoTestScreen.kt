@@ -429,6 +429,79 @@ fun GeckoTestScreen(
     }
 }
 
+// أضف في GeckoTestScreen
+
+var bridge by remember { mutableStateOf<SessionContextBridge?>(null) }
+
+// أنشئ الجسر عند فتح الصفحة
+DisposableEffect(session, app.aiChatExtension) {
+    val ext = app.aiChatExtension
+    if (ext != null) {
+        bridge = SessionContextBridge(session, ext)
+    }
+    onDispose {
+        bridge?.close()
+        bridge = null
+    }
+}
+
+// ── زر 📤 ──
+val sendContext: () -> Unit = ctx@{
+    if (platform == null)        return@ctx
+    if (!platform.memoryEnabled) return@ctx
+    if (chatViewModel == null)   return@ctx
+
+    Toast.makeText(context, "📤 جاري إرسال السياق...", Toast.LENGTH_SHORT).show()
+
+    CoroutineScope(Dispatchers.IO).launch {
+        try {
+            val memories      = chatViewModel.getSharedMemories()
+            val memoryContext = com.example.aichat.repository
+                                    .MemoryContextBuilder().build(memories)
+            val systemDoc     = com.example.aichat.data.local
+                                    .SystemPrompt.ACCURACY_PROMPT
+
+            val result = bridge?.deliver(
+                systemDocument = systemDoc,
+                memoryContext  = memoryContext,
+                submit         = true,
+                timeoutMs      = 10_000L
+            )
+
+            mainHandler.post {
+                when (result?.stage) {
+                    "clicked"     ->
+                        Toast.makeText(context,
+                            "✅ تم الإرسال — انتظر رد المنصة",
+                            Toast.LENGTH_LONG).show()
+                    "filled"      ->
+                        Toast.makeText(context,
+                            "✅ السياق في الصندوق — اضغط إرسال",
+                            Toast.LENGTH_LONG).show()
+                    "write_failed" ->
+                        Toast.makeText(context,
+                            "❌ فشل الكتابة: ${result.detail}",
+                            Toast.LENGTH_LONG).show()
+                    null          ->
+                        Toast.makeText(context,
+                            "❌ الجسر غير متصل",
+                            Toast.LENGTH_SHORT).show()
+                    else          ->
+                        Toast.makeText(context,
+                            "⚠️ ${result.stage}: ${result.detail}",
+                            Toast.LENGTH_LONG).show()
+                }
+            }
+
+        } catch (e: Exception) {
+            mainHandler.post {
+                Toast.makeText(context,
+                    "❌ ${e.message}",
+                    Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+}
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 private fun openExternal(context: Context, url: String) {
