@@ -130,6 +130,7 @@
         }
         if (/gemini\.google\.com/.test(host)) {
             return document.querySelector('.ql-editor')
+                || document.querySelector('rich-textarea')
                 || document.querySelector('[contenteditable="true"]');
         }
 
@@ -143,26 +144,33 @@
         var host = location.hostname;
 
         if (/chatgpt\.com/.test(host)) {
-            return document.querySelector('[data-testid="send-button"]')
+            return document.querySelector('button[aria-label="إرسال رسالة"]')
                 || document.querySelector('button[aria-label="Send prompt"]')
-                || document.querySelector('button[aria-label="إرسال الرسالة"]');
+                || document.querySelector('button[aria-label="Send message"]')
+                || document.querySelector('[data-testid="send-button"]')
+                || document.querySelector('button[type="submit"]');
         }
+
+        if (/gemini\.google\.com/.test(host)) {
+            return document.querySelector('button[aria-label="إرسال الرسالة"]')
+                || document.querySelector('button[aria-label="Send message"]')
+                || document.querySelector('button.send-button')
+                || document.querySelector('button[type="submit"]');
+        }
+
         if (/claude\.ai/.test(host)) {
             return document.querySelector('button[aria-label="Send Message"]')
                 || document.querySelector('button[type="submit"]');
         }
-        if (/gemini\.google\.com/.test(host)) {
-            return document.querySelector('button.send-button')
-                || document.querySelector('button[aria-label="Send message"]');
-        }
+
         if (/perplexity\.ai/.test(host)) {
             return document.querySelector('button[aria-label="Submit"]')
                 || document.querySelector('button[type="submit"]');
         }
 
         return document.querySelector('button[type="submit"]')
-            || document.querySelector('button[aria-label*="send" i]')
-            || document.querySelector('button[aria-label*="إرسال" i]');
+            || document.querySelector('button[aria-label*="إرسال" i]')
+            || document.querySelector('button[aria-label*="send" i]');
     }
 
     // ── كتابة النص في صندوق الإدخال ──────────────────────────────────
@@ -198,22 +206,77 @@
     // ── ضغط زر الإرسال ───────────────────────────────────────────────
 
     function clickSendButton() {
-        var btn = findSendButton();
-        if (btn) {
-            btn.click();
+        var host = location.hostname;
+
+        // Gemini — الزر يظهر بعد الكتابة
+        if (/gemini\.google\.com/.test(host)) {
+            var attempts = 0;
+            var interval = setInterval(function () {
+                attempts++;
+                var btn = findSendButton();
+                if (btn && !btn.disabled) {
+                    btn.click();
+                    clearInterval(interval);
+                    console.log('[AiChat] ✅ Gemini send clicked');
+                } else if (attempts >= 15) {
+                    clearInterval(interval);
+                    // بديل: Enter
+                    var input = findInputBox();
+                    if (input) {
+                        input.dispatchEvent(new KeyboardEvent('keydown', {
+                            key:      'Enter',
+                            keyCode:  13,
+                            bubbles:  true,
+                            composed: true
+                        }));
+                    }
+                }
+            }, 300);
             return;
         }
+
+        // بقية المنصات
+        var btn = findSendButton();
+        if (btn && !btn.disabled) {
+            btn.click();
+            console.log('[AiChat] ✅ Send clicked');
+            return;
+        }
+
         // بديل: Enter
         var input = findInputBox();
         if (input) {
             input.dispatchEvent(new KeyboardEvent('keydown', {
                 key:      'Enter',
-                code:     'Enter',
                 keyCode:  13,
                 bubbles:  true,
                 composed: true
             }));
+            console.log('[AiChat] ✅ Enter pressed');
         }
+    }
+
+    // ── كشف الأزرار للتشخيص ──────────────────────────────────────────
+
+    function detectAndReportButtons() {
+        var buttons = document.querySelectorAll('button');
+        var visible = [];
+
+        buttons.forEach(function (btn) {
+            if (!isVisible(btn)) return;
+            var label  = btn.getAttribute('aria-label') || '';
+            var testid = btn.getAttribute('data-testid') || '';
+            var type   = btn.getAttribute('type') || '';
+            if (label || testid || type === 'submit') {
+                visible.push({ label: label, testid: testid, type: type });
+            }
+        });
+
+        browser.runtime.sendMessage({
+            type:    'DEBUG_BUTTONS',
+            buttons: visible,
+            domain:  location.hostname
+        });
     }
 
     // ── طلب السياق من Kotlin ──────────────────────────────────────────
@@ -227,9 +290,8 @@
             if (!response || !response.hasContext) return;
             if (!response.context || !response.context.trim()) return;
 
-            console.log('[AiChat] 📥 استُلم السياق من Kotlin');
+            console.log('[AiChat] 📥 استُلم السياق');
 
-            // ── رسالة كاملة = سياق + طلب تأكيد ──
             var confirmMsg =
                 'اقرأ السياق أعلاه.\n' +
                 'ثم أجب بجملة واحدة فقط:\n' +
@@ -242,64 +304,20 @@
             var attempts = 0;
             var interval = setInterval(function () {
                 attempts++;
-
                 var ok = writeToInputBox(fullMessage);
 
                 if (ok) {
                     clearInterval(interval);
-                    // انتظر ثانية ثم أرسل
                     setTimeout(clickSendButton, 1000);
-                    console.log('[AiChat] ✅ تم إرسال السياق');
-
+                    console.log('[AiChat] ✅ السياق كُتب — جاري الإرسال');
                 } else if (attempts >= 10) {
                     clearInterval(interval);
-                    console.warn('[AiChat] ⚠️ فشل الكتابة بعد 10 محاولات');
+                    console.warn('[AiChat] ⚠️ فشل الكتابة');
                 }
-
             }, 500);
 
         }).catch(function () {});
     }
-
-    // ── كشف أزرار الإرسال وإرسالها لـ Kotlin ────────────────────────
-
-function detectAndReportButtons() {
-    var buttons  = document.querySelectorAll('button');
-    var visible  = [];
-
-    buttons.forEach(function(btn) {
-        if (!isVisible(btn)) return;
-
-        var label  = btn.getAttribute('aria-label') || '';
-        var testid = btn.getAttribute('data-testid') || '';
-        var type   = btn.getAttribute('type') || '';
-
-        // فقط الأزرار التي تبدو أزرار إرسال
-        var isSend = label.toLowerCase().includes('send')
-            || label.includes('إرسال')
-            || label.includes('Submit')
-            || testid.toLowerCase().includes('send')
-            || type === 'submit';
-
-        if (isSend || label || testid) {
-            visible.push({
-                label:  label,
-                testid: testid,
-                type:   type
-            });
-        }
-    });
-
-    // أرسل النتيجة لـ Kotlin ليعرضها Toast
-    browser.runtime.sendMessage({
-        type:    'DEBUG_BUTTONS',
-        buttons: visible,
-        domain:  location.hostname
-    });
-}
-
-// استدعِها بعد ثانيتين من تحميل الصفحة
-setTimeout(detectAndReportButtons, 2000);
 
     // ── إرسال تلقائي ──────────────────────────────────────────────────
 
@@ -371,9 +389,10 @@ setTimeout(detectAndReportButtons, 2000);
 
     }, 1000);
 
-    // ── طلب السياق عند بدء التشغيل ───────────────────────────────────
+    // ── تشغيل عند البدء ───────────────────────────────────────────────
 
-    setTimeout(requestContext, 1500);
+    setTimeout(requestContext,          1500);
+    setTimeout(detectAndReportButtons,  2000);
 
     // ── تنظيف ─────────────────────────────────────────────────────────
 
