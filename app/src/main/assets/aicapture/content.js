@@ -428,16 +428,42 @@
         }).catch(function () {});
 
         // GET_CONTEXT
-        browser.runtime.sendMessage({
-            type:   'GET_CONTEXT',
-            domain: location.hostname
-        }).then(function (response) {
-            if (!response || !response.hasContext) return;
-            if (!response.context || !response.context.trim()) return;
-            handleIncomingContext(response.context);
-        }).catch(function () {});
+        // GET_CONTEXT في الـ polling
+browser.runtime.sendMessage({
+    type:   'GET_CONTEXT',
+    domain: location.hostname
+}).then(function (response) {
 
-    }, 1000);
+    // ✅ أضف هذا السطر فقط
+    browser.runtime.sendMessage({
+        type:    'DEBUG_BUTTONS',
+        buttons: [{
+            label:  'GET_CONTEXT response: hasContext=' + 
+                    (response ? response.hasContext : 'NULL'),
+            testid: 'context_len=' + 
+                    (response && response.context 
+                        ? response.context.length : 0),
+            type:   ''
+        }],
+        domain: location.hostname
+    }).catch(function(){});
+
+    if (!response || !response.hasContext) return;
+    if (!response.context || !response.context.trim()) return;
+    handleIncomingContext(response.context);
+
+}).catch(function (e) {
+    // ✅ أضف هذا
+    browser.runtime.sendMessage({
+        type:    'DEBUG_BUTTONS',
+        buttons: [{
+            label:  'GET_CONTEXT ERROR: ' + String(e),
+            testid: '',
+            type:   ''
+        }],
+        domain: location.hostname
+    }).catch(function(){});
+});
 
     // ── كشف الأزرار للتشخيص ──────────────────────────────────────────
 
