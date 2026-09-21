@@ -27,6 +27,8 @@ class AichatApp : Application() {
     @Volatile private var captureFlag:       Boolean = false
     @Volatile var contextPendingMessage:     String  = ""
 
+    private var backgroundPort: WebExtension.Port? = null
+
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
 
@@ -41,7 +43,7 @@ class AichatApp : Application() {
         }
     }
 
-    // ── يُستدعى من زر 🧠 ─────────────────────────────────────────────
+    // ── triggerCapture ────────────────────────────────────────────────
 
     fun triggerCapture() {
         captureFlag = true
@@ -49,7 +51,7 @@ class AichatApp : Application() {
         showToast("🔍 جاري البحث في الصفحة...")
     }
 
-    // ── إرسال السياق لـ content.js ───────────────────────────────────
+    // ── sendContextToPage ─────────────────────────────────────────────
 
     fun sendContextToPage(
         memories:          List<MemoryItem>,
@@ -68,15 +70,68 @@ class AichatApp : Application() {
         )
 
         contextPendingMessage = systemPrompt
-
         showToast("📤 حجم السياق: ${systemPrompt.length} حرف")
-        Log.d("AichatApp", "📤 contextPendingMessage set: ${systemPrompt.length} chars")
+        Log.d("AichatApp", "📤 contextPendingMessage: ${systemPrompt.length} chars")
     }
 
     // ── MessageDelegate ───────────────────────────────────────────────
 
     private val messageDelegate = object : WebExtension.MessageDelegate {
 
+        // ✅ background.js يتصل عبر connectNative
+        override fun onConnect(port: WebExtension.Port) {
+            backgroundPort = port
+            Log.d("AichatApp", "✅ background port connected")
+            showToast("✅ background port connected")
+
+            port.setDelegate(object : WebExtension.PortDelegate {
+
+                override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                    val json = parseMessage(message) ?: return
+                    val type = json.optString("type")
+                    Log.d("AichatApp", "📩 port: $type")
+
+                    when (type) {
+                        "AI_RESPONSE"    -> handleAutoResponse(json)
+                        "CAPTURE_RESULT" -> handleCaptureResult(json)
+                        "CONTEXT_WRITTEN" -> {
+                            val len    = json.optInt("len")
+                            val domain = json.optString("domain")
+                            Log.d("AichatApp", "✅ written: $len @ $domain")
+                            showToast("✅ السياق وصل: $len حرف")
+                        }
+                        "DEBUG_INFO" -> {
+                            val info = json.optString("info")
+                            Log.d("AichatApp", "🔍 $info")
+                            showToast("🔍 $info")
+                        }
+                        "DEBUG_BUTTONS" -> {
+                            val buttons = json.optJSONArray("buttons")
+                            val domain  = json.optString("domain")
+                            val sb      = StringBuilder("🔍 أزرار $domain:\n")
+                            if (buttons != null) {
+                                for (i in 0 until buttons.length()) {
+                                    val btn   = buttons.optJSONObject(i)
+                                    val label = btn?.optString("label") ?: ""
+                                    val t     = btn?.optString("type")  ?: ""
+                                    if (label.isNotBlank() || t == "submit") {
+                                        sb.append("• $label type=$t\n")
+                                    }
+                                }
+                            }
+                            showToast(sb.toString())
+                        }
+                    }
+                }
+
+                override fun onDisconnect(port: WebExtension.Port, error: Throwable?) {
+                    backgroundPort = null
+                    Log.d("AichatApp", "🔌 port disconnected")
+                }
+            })
+        }
+
+        // ✅ content.js يرسل مباشرة عبر sendNativeMessage
         override fun onMessage(
             nativeApp: String,
             message:   Any,
@@ -84,12 +139,12 @@ class AichatApp : Application() {
         ): GeckoResult<Any>? {
 
             val json = parseMessage(message) ?: run {
-                Log.e("AichatApp", "❌ parseMessage failed — raw: $message")
+                Log.e("AichatApp", "❌ parseMessage failed")
                 return null
             }
 
             val type = json.optString("type")
-            Log.d("AichatApp", "📩 onMessage type=$type")
+            Log.d("AichatApp", "📩 onMessage: $type")
 
             return when (type) {
 
@@ -103,25 +158,16 @@ class AichatApp : Application() {
                 }
 
                 "GET_CONTEXT" -> {
-    val pending           = contextPendingMessage
-    contextPendingMessage = ""
-    
-    // ✅ سجّل من أين جاء الطلب
-    val senderUrl = sender.url ?: "unknown"
-    Log.d("AichatApp", "📤 GET_CONTEXT from=$senderUrl hasContext=${pending.isNotBlank()}")
-    showToast("📤 GET_CONTEXT\nfrom=${senderUrl.takeLast(40)}\nhas=${pending.isNotBlank()}")
-    
-    GeckoResult.fromValue(
-        JSONObject()
-            .put("hasContext", pending.isNotBlank())
-            .put("context",    pending)
-    )
-                }
-                 
-
-                "AI_RESPONSE" -> {
-                    handleAutoResponse(json)
-                    null
+                    val pending           = contextPendingMessage
+                    contextPendingMessage = ""
+                    val senderUrl = sender.url ?: "unknown"
+                    Log.d("AichatApp", "📤 GET_CONTEXT from=$senderUrl has=${pending.isNotBlank()}")
+                    showToast("📤 GET_CONTEXT\nhas=${pending.isNotBlank()}")
+                    GeckoResult.fromValue(
+                        JSONObject()
+                            .put("hasContext", pending.isNotBlank())
+                            .put("context",    pending)
+                    )
                 }
 
                 "CAPTURE_RESULT" -> {
@@ -129,52 +175,8 @@ class AichatApp : Application() {
                     null
                 }
 
-                "CONTEXT_WRITTEN" -> {
-                    val len    = json.optInt("len")
-                    val domain = json.optString("domain")
-                    Log.d("AichatApp", "✅ Context written: $len chars on $domain")
-                    showToast("✅ السياق وصل: $len حرف")
-                    null
-                }
-
-                "CONTEXT_WRITE_FAILED" -> {
-                    val reason = json.optString("reason")
-                    val domain = json.optString("domain")
-                    Log.w("AichatApp", "❌ Write failed: $reason on $domain")
-                    showToast("❌ فشل عند: $reason")
-                    null
-                }
-
-                "DEBUG_INFO" -> {
-                    val info   = json.optString("info")
-                    val domain = json.optString("domain")
-                    Log.d("AichatApp", "🔍 DEBUG: $info @ $domain")
-                    showToast("🔍 $info")
-                    null
-                }
-
-                "DEBUG_BUTTONS" -> {
-                    val buttons = json.optJSONArray("buttons")
-                    val domain  = json.optString("domain")
-                    val sb      = StringBuilder("🔍 أزرار $domain:\n")
-                    if (buttons != null) {
-                        for (i in 0 until buttons.length()) {
-                            val btn    = buttons.optJSONObject(i)
-                            val label  = btn?.optString("label")  ?: ""
-                            val testid = btn?.optString("testid") ?: ""
-                            val t      = btn?.optString("type")   ?: ""
-                            sb.append("• label=$label testid=$testid type=$t\n")
-                        }
-                    } else {
-                        sb.append("لا يوجد أزرار!")
-                    }
-                    Log.d("AichatApp", sb.toString())
-                    showToast(sb.toString())
-                    null
-                }
-
                 else -> {
-                    Log.w("AichatApp", "⚠️ unknown type: $type")
+                    Log.w("AichatApp", "⚠️ unknown: $type")
                     null
                 }
             }
@@ -232,16 +234,13 @@ class AichatApp : Application() {
                         Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
                         showToast("✅ Extension جاهزة")
                     } else {
-                        Log.e("AichatApp", "❌ Extension is null")
                         showToast("❌ Extension = null")
                     }
                 },
                 { e ->
                     val msg   = e?.message        ?: "null"
                     val cause = e?.cause?.message ?: "no cause"
-                    Log.e("AichatApp", "❌ Extension error: $msg | $cause")
-                    showToast("❌ خطأ: $msg")
-                    showToast("❌ السبب: $cause")
+                    showToast("❌ $msg | $cause")
                 }
             )
     }
@@ -252,7 +251,7 @@ class AichatApp : Application() {
         val text   = json.optString("text")
         val domain = json.optString("domain", "unknown")
         if (text.length < 80) return
-        Log.d("AichatApp", "📨 Auto from $domain: ${text.take(60)}…")
+        Log.d("AichatApp", "📨 Auto: ${text.take(60)}…")
         onAiResponseCaptured?.invoke(domain, text)
     }
 
@@ -262,7 +261,7 @@ class AichatApp : Application() {
         val debug   = json.optJSONObject("debug")
         Log.d("AichatApp",
             if (success) "🧠 OK: ${text.take(60)}…"
-            else         "⚠️ Failed — debug: $debug"
+            else         "⚠️ Failed: $debug"
         )
         Handler(Looper.getMainLooper()).post {
             onManualCaptureResult?.invoke(success, text, debug)
