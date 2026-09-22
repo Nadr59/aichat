@@ -77,7 +77,7 @@ fun GeckoTestScreen(
     var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
 
     // ── المسار 2: Bridge ─────────────────────────────────────────────
-    val bridge = remember { SessionContextBridge(app) }
+   // val bridge = remember { SessionContextBridge(app) }
     DisposableEffect(Unit) {
         onDispose { bridge.close() }
     }
