@@ -18,24 +18,29 @@ import org.mozilla.geckoview.WebExtension
 
 class AichatApp : Application() {
 
-    @Volatile var geckoRuntime:    GeckoRuntime? = null
+    // ── المتغيرات العامة ──────────────────────────────────────────────
+
+    @Volatile var geckoRuntime: GeckoRuntime? = null
         private set
 
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
-    @Volatile private var captureFlag:       Boolean = false
-    @Volatile var contextPendingMessage:     String  = ""
+    @Volatile var contextBridgeExtension: WebExtension? = null
+        private set
+
+    @Volatile private var captureFlag = false
+    @Volatile var contextPendingMessage = ""
 
     private var backgroundPort: WebExtension.Port? = null
 
-    var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
+    var onAiResponseCaptured: ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
-    // ── Toast helper ──────────────────────────────────────────────────
+    // ── Toast ─────────────────────────────────────────────────────────
 
     fun showToast(msg: String) {
         Handler(Looper.getMainLooper()).post {
@@ -54,27 +59,25 @@ class AichatApp : Application() {
     // ── sendContextToPage ─────────────────────────────────────────────
 
     fun sendContextToPage(
-        memories:          List<MemoryItem>,
+        memories: List<MemoryItem>,
         customInstruction: String = ""
     ) {
         if (aiChatExtension == null) {
             showToast("❌ Extension غير جاهزة")
             return
         }
-
         val memoryContext = MemoryContextBuilder().build(memories)
-        val systemPrompt  = SystemPrompt.build(
-            memoryContext     = memoryContext,
+        val systemPrompt = SystemPrompt.build(
+            memoryContext = memoryContext,
             customInstruction = customInstruction,
-            includeAccuracy   = true
+            includeAccuracy = true
         )
-
         contextPendingMessage = systemPrompt
         showToast("📤 حجم السياق: ${systemPrompt.length} حرف")
         Log.d("AichatApp", "📤 contextPendingMessage: ${systemPrompt.length} chars")
     }
 
-    // ── PortDelegate — يستقبل من background.js ───────────────────────
+    // ── PortDelegate ──────────────────────────────────────────────────
 
     private val portDelegate = object : WebExtension.PortDelegate {
 
@@ -84,17 +87,14 @@ class AichatApp : Application() {
             Log.d("AichatApp", "📩 port: $type")
 
             when (type) {
-
-                // ── طلبات تحتاج رد عبر Port ──────────────────────
-
                 "CHECK_CAPTURE" -> {
-                    val flag    = captureFlag
+                    val flag = captureFlag
                     captureFlag = false
                     if (flag) showToast("📡 تم الاتصال — جاري الاستخراج...")
                     try {
                         port.postMessage(
                             JSONObject()
-                                .put("type",    "CHECK_CAPTURE_RESULT")
+                                .put("type", "CHECK_CAPTURE_RESULT")
                                 .put("capture", flag)
                         )
                     } catch (e: Exception) {
@@ -103,23 +103,21 @@ class AichatApp : Application() {
                 }
 
                 "GET_CONTEXT" -> {
-                    val pending           = contextPendingMessage
+                    val pending = contextPendingMessage
                     contextPendingMessage = ""
                     Log.d("AichatApp", "📤 GET_CONTEXT has=${pending.isNotBlank()}")
                     showToast("📤 GET_CONTEXT has=${pending.isNotBlank()}")
                     try {
                         port.postMessage(
                             JSONObject()
-                                .put("type",       "GET_CONTEXT_RESULT")
+                                .put("type", "GET_CONTEXT_RESULT")
                                 .put("hasContext", pending.isNotBlank())
-                                .put("context",    pending)
+                                .put("context", pending)
                         )
                     } catch (e: Exception) {
                         Log.e("AichatApp", "❌ port.postMessage GET_CONTEXT: ${e.message}")
                     }
                 }
-
-                // ── رسائل بدون رد ─────────────────────────────────
 
                 "AI_RESPONSE"    -> handleAutoResponse(json)
                 "CAPTURE_RESULT" -> handleCaptureResult(json)
@@ -132,15 +130,13 @@ class AichatApp : Application() {
                 }
 
                 "DEBUG_INFO" -> {
-                    val info = json.optString("info")
-                    Log.d("AichatApp", "🔍 $info")
-                    showToast("🔍 $info")
+                    showToast("🔍 ${json.optString("info")}")
                 }
 
                 "DEBUG_BUTTONS" -> {
                     val buttons = json.optJSONArray("buttons")
                     val domain  = json.optString("domain")
-                    val sb      = StringBuilder("🔍 أزرار $domain:\n")
+                    val sb = StringBuilder("🔍 أزرار $domain:\n")
                     if (buttons != null) {
                         for (i in 0 until buttons.length()) {
                             val btn   = buttons.optJSONObject(i)
@@ -159,7 +155,7 @@ class AichatApp : Application() {
         }
     }
 
-    // ── MessageDelegate ───────────────────────────────────────────────
+    // ── MessageDelegate — aicapture ───────────────────────────────────
 
     private val messageDelegate = object : WebExtension.MessageDelegate {
 
@@ -172,12 +168,9 @@ class AichatApp : Application() {
 
         override fun onMessage(
             nativeApp: String,
-            message:   Any,
-            sender:    WebExtension.MessageSender
+            message: Any,
+            sender: WebExtension.MessageSender
         ): GeckoResult<Any>? {
-            // content.js يرسل مباشرة عبر sendNativeMessage
-            // لكن الآن كل شيء عبر Port
-            // نتركها فارغة للتوافق
             val json = parseMessage(message) ?: return null
             val type = json.optString("type")
             Log.w("AichatApp", "⚠️ onMessage مباشر (غير متوقع): $type")
@@ -211,6 +204,7 @@ class AichatApp : Application() {
             GeckoRuntime.create(applicationContext, settings).also { rt ->
                 geckoRuntime = rt
                 loadAiCaptureExtension(rt)
+                loadContextBridgeExtension(rt)      // ← الجديدة
                 Log.d("AichatApp", "✅ GeckoRuntime created")
             }
         } catch (e: Exception) {
@@ -220,7 +214,7 @@ class AichatApp : Application() {
         }
     }
 
-    // ── Extension ─────────────────────────────────────────────────────
+    // ── تحميل aicapture extension ─────────────────────────────────────
 
     private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
         runtime.webExtensionController
@@ -241,41 +235,34 @@ class AichatApp : Application() {
                     }
                 },
                 { e ->
-                    val msg   = e?.message        ?: "null"
-                    val cause = e?.cause?.message ?: "no cause"
-                    Log.e("AichatApp", "❌ Extension error: $msg | $cause")
-                    showToast("❌ $msg | $cause")
+                    Log.e("AichatApp", "❌ Extension error: ${e?.message}")
+                    showToast("❌ ${e?.message} | ${e?.cause?.message}")
                 }
             )
     }
-    // أضف في AichatApp.kt
 
-@Volatile var contextBridgeExtension: WebExtension? = null
-    private set
+    // ── تحميل contextbridge extension ────────────────────────────────
 
-private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
-    runtime.webExtensionController
-        .ensureBuiltIn(
-            "resource://android/assets/contextbridge/",
-            "session-memory-bridge@example.local"
-        )
-        .accept(
-            { ext ->
-                if (ext != null) {
-                    contextBridgeExtension = ext
-                    Log.d("AichatApp", "✅ ContextBridge loaded")
-                    showToast("✅ Bridge جاهز")
+    private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
+        runtime.webExtensionController
+            .ensureBuiltIn(
+                "resource://android/assets/contextbridge/",
+                "session-memory-bridge@example.local"
+            )
+            .accept(
+                { ext ->
+                    if (ext != null) {
+                        contextBridgeExtension = ext
+                        Log.d("AichatApp", "✅ ContextBridge loaded")
+                        showToast("✅ Bridge جاهز")
+                    }
+                },
+                { e ->
+                    Log.e("AichatApp", "❌ Bridge: ${e?.message}")
+                    showToast("❌ Bridge: ${e?.message}")
                 }
-            },
-            { e ->
-                Log.e("AichatApp", "❌ Bridge: ${e?.message}")
-                showToast("❌ Bridge: ${e?.message}")
-            }
-        )
-}
-
-// في getOrCreateGeckoRuntime — أضف بعد loadAiCaptureExtension:
-loadContextBridgeExtension(rt)
+            )
+    }
 
     // ── معالجة الرسائل ────────────────────────────────────────────────
 
