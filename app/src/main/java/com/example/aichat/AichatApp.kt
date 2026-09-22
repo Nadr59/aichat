@@ -19,22 +19,23 @@ import org.mozilla.geckoview.WebExtension
 
 class AichatApp : Application() {
 
+    // ── المتغيرات ─────────────────────────────────────────────────────
+
     @Volatile var geckoRuntime: GeckoRuntime? = null
         private set
 
+    // المسار 1 — aicapture (التقاط → ذاكرة)
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
+    // المسار 2 — contextbridge (سياق → منصة)
     @Volatile var contextBridgeExtension: WebExtension? = null
         private set
 
     @Volatile private var captureFlag = false
-    @Volatile var contextPendingMessage = ""
     @Volatile private var pendingBridgeDelegate: WebExtension.MessageDelegate? = null
 
-    private var backgroundPort: WebExtension.Port? = null
-
-    var onAiResponseCaptured: ((domain: String, text: String) -> Unit)? = null
+    var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
 
     lateinit var webPlatformRepository: WebPlatformRepository
@@ -48,191 +49,58 @@ class AichatApp : Application() {
         }
     }
 
-    // ── triggerCapture ────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════
+    // المسار 1 — aicapture
+    // نفس النسخة القديمة تماماً — onMessage + GeckoResult
+    // ══════════════════════════════════════════════════════════════════
 
     fun triggerCapture() {
         captureFlag = true
-        Log.d("AichatApp", "📌 Capture flag set")
+        Log.d("AichatApp", "📌 captureFlag = true")
         showToast("🔍 جاري البحث في الصفحة...")
     }
 
-    // ── sendContextToPage ─────────────────────────────────────────────
-
-    fun sendContextToPage(
-        memories: List<MemoryItem>,
-        customInstruction: String = ""
-    ) {
-        if (aiChatExtension == null) {
-            showToast("❌ Extension غير جاهزة")
-            return
-        }
-        val memoryContext = MemoryContextBuilder().build(memories)
-        val systemPrompt = SystemPrompt.build(
-            memoryContext     = memoryContext,
-            customInstruction = customInstruction,
-            includeAccuracy   = true
-        )
-        contextPendingMessage = systemPrompt
-        showToast("📤 حجم السياق: ${systemPrompt.length} حرف")
-        Log.d("AichatApp", "📤 contextPendingMessage: ${systemPrompt.length} chars")
-    }
-
-    // ── registerBridgeDelegate ────────────────────────────────────────
-
-    fun registerBridgeDelegate(delegate: WebExtension.MessageDelegate) {
-        pendingBridgeDelegate = delegate
-        val ext = contextBridgeExtension
-        if (ext != null) {
-            Handler(Looper.getMainLooper()).post {
-                try {
-                    ext.setMessageDelegate(delegate, SessionContextBridge.NATIVE_APP)
-                    Log.d("AichatApp", "✅ BridgeDelegate registered immediately")
-                } catch (e: Exception) {
-                    Log.e("AichatApp", "❌ registerBridgeDelegate: ${e.message}")
-                }
-            }
-        } else {
-            Log.w("AichatApp", "⚠️ contextBridgeExtension null — delegate queued")
-        }
-    }
-
-    // ── PortDelegate ──────────────────────────────────────────────────
-
-    private val portDelegate = object : WebExtension.PortDelegate {
-
-        override fun onPortMessage(message: Any, port: WebExtension.Port) {
-            val json = parseMessage(message) ?: return
-            val type = json.optString("type")
-            Log.d("AichatApp", "📩 port: $type")
-
-            when (type) {
-                "CHECK_CAPTURE" -> {
-                    val flag = captureFlag
-                    captureFlag = false
-                    if (flag) showToast("📡 تم الاتصال — جاري الاستخراج...")
-                    try {
-                        port.postMessage(
-                            JSONObject()
-                                .put("type",    "CHECK_CAPTURE_RESULT")
-                                .put("capture", flag)
-                        )
-                    } catch (e: Exception) {
-                        Log.e("AichatApp", "❌ CHECK_CAPTURE: ${e.message}")
-                    }
-                }
-
-                "GET_CONTEXT" -> {
-                    val pending           = contextPendingMessage
-                    contextPendingMessage = ""
-                    Log.d("AichatApp", "📤 GET_CONTEXT has=${pending.isNotBlank()}")
-                    showToast("📤 GET_CONTEXT has=${pending.isNotBlank()}")
-                    try {
-                        port.postMessage(
-                            JSONObject()
-                                .put("type",       "GET_CONTEXT_RESULT")
-                                .put("hasContext", pending.isNotBlank())
-                                .put("context",    pending)
-                        )
-                    } catch (e: Exception) {
-                        Log.e("AichatApp", "❌ GET_CONTEXT: ${e.message}")
-                    }
-                }
-
-                "AI_RESPONSE"    -> handleAutoResponse(json)
-                "CAPTURE_RESULT" -> handleCaptureResult(json)
-
-                "CONTEXT_WRITTEN" -> {
-                    val len    = json.optInt("len")
-                    val domain = json.optString("domain")
-                    Log.d("AichatApp", "✅ written: $len @ $domain")
-                    showToast("✅ السياق وصل: $len حرف")
-                }
-
-                "DEBUG_INFO" -> {
-                    showToast("🔍 ${json.optString("info")}")
-                }
-
-                "DEBUG_BUTTONS" -> {
-                    val buttons = json.optJSONArray("buttons")
-                    val domain  = json.optString("domain")
-                    val sb = StringBuilder("🔍 أزرار $domain:\n")
-                    if (buttons != null) {
-                        for (i in 0 until buttons.length()) {
-                            val btn   = buttons.optJSONObject(i)
-                            val label = btn?.optString("label") ?: ""
-                            val t     = btn?.optString("type")  ?: ""
-                            if (label.isNotBlank() || t == "submit") {
-                                sb.append("• $label type=$t\n")
-                            }
-                        }
-                    }
-                    showToast(sb.toString())
-                }
-
-                else -> Log.w("AichatApp", "⚠️ unknown: $type")
-            }
-        }
-    }
-
-    // ── MessageDelegate — aicapture ───────────────────────────────────
-
     private val messageDelegateAiCapture = object : WebExtension.MessageDelegate {
-
-        override fun onConnect(port: WebExtension.Port) {
-            backgroundPort = port
-            port.setDelegate(portDelegate)
-            Log.d("AichatApp", "✅ aicapture port connected")
-            showToast("✅ aicapture port connected")
-        }
 
         override fun onMessage(
             nativeApp: String,
-            message: Any,
-            sender: WebExtension.MessageSender
+            message:   Any,
+            sender:    WebExtension.MessageSender
         ): GeckoResult<Any>? {
+
             val json = parseMessage(message) ?: return null
-            Log.w("AichatApp", "⚠️ onMessage مباشر: ${json.optString("type")}")
-            return null
-        }
-    }
+            val type = json.optString("type")
+            Log.d("AichatApp", "📩 [aicapture] type=$type")
 
-    // ── onCreate ──────────────────────────────────────────────────────
+            return when (type) {
 
-    override fun onCreate() {
-        super.onCreate()
-        try {
-            val db = ChatDatabase.getDatabase(this)
-            webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
-            Log.d("AichatApp", "✅ Database ready")
-        } catch (e: Exception) {
-            Log.e("AichatApp", "❌ Database: ${e.message}", e)
-            throw e
-        }
-    }
+                "CHECK_CAPTURE" -> {
+                    val flag    = captureFlag
+                    captureFlag = false
+                    Log.d("AichatApp", "✅ CHECK_CAPTURE flag=$flag")
+                    if (flag) showToast("📡 جاري الاستخراج...")
+                    GeckoResult.fromValue(
+                        JSONObject().put("capture", flag)
+                    )
+                }
 
-    // ── GeckoRuntime ──────────────────────────────────────────────────
+                "AI_RESPONSE" -> {
+                    handleAutoResponse(json)
+                    null
+                }
 
-    @Synchronized
-    fun getOrCreateGeckoRuntime(): GeckoRuntime? {
-        if (geckoRuntime != null) return geckoRuntime
-        return try {
-            val settings = GeckoRuntimeSettings.Builder()
-                .aboutConfigEnabled(false)
-                .build()
-            GeckoRuntime.create(applicationContext, settings).also { rt ->
-                geckoRuntime = rt
-                loadAiCaptureExtension(rt)
-                loadContextBridgeExtension(rt)
-                Log.d("AichatApp", "✅ GeckoRuntime created")
+                "CAPTURE_RESULT" -> {
+                    handleCaptureResult(json)
+                    null
+                }
+
+                else -> {
+                    Log.w("AichatApp", "⚠️ [aicapture] unknown: $type")
+                    null
+                }
             }
-        } catch (e: Exception) {
-            Log.e("AichatApp", "❌ GeckoRuntime: ${e.message}")
-            showToast("❌ فشل تهيئة GeckoRuntime")
-            null
         }
     }
-
-    // ── loadAiCaptureExtension ────────────────────────────────────────
 
     private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
         runtime.webExtensionController
@@ -244,12 +112,12 @@ class AichatApp : Application() {
                 { ext ->
                     if (ext != null) {
                         aiChatExtension = ext
+                        // ✅ نفس النسخة القديمة — onMessage فقط
                         ext.setMessageDelegate(messageDelegateAiCapture, "browser")
                         Log.d("AichatApp", "✅ aicapture loaded")
                         showToast("✅ aicapture جاهزة")
                     } else {
                         Log.e("AichatApp", "❌ aicapture = null")
-                        showToast("❌ aicapture = null")
                     }
                 },
                 { e ->
@@ -259,7 +127,27 @@ class AichatApp : Application() {
             )
     }
 
-    // ── loadContextBridgeExtension ────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════
+    // المسار 2 — contextbridge
+    // Port مستقل — لا علاقة له بـ aicapture
+    // ══════════════════════════════════════════════════════════════════
+
+    fun registerBridgeDelegate(delegate: WebExtension.MessageDelegate) {
+        pendingBridgeDelegate = delegate
+        val ext = contextBridgeExtension
+        if (ext != null) {
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    ext.setMessageDelegate(delegate, SessionContextBridge.NATIVE_APP)
+                    Log.d("AichatApp", "✅ BridgeDelegate registered")
+                } catch (e: Exception) {
+                    Log.e("AichatApp", "❌ registerBridgeDelegate: ${e.message}")
+                }
+            }
+        } else {
+            Log.w("AichatApp", "⚠️ contextBridgeExtension null — queued")
+        }
+    }
 
     private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
         runtime.webExtensionController
@@ -274,6 +162,7 @@ class AichatApp : Application() {
                         Log.d("AichatApp", "✅ contextbridge loaded")
                         showToast("✅ Bridge جاهز")
 
+                        // سجّل delegate إذا كان منتظراً
                         val delegate = pendingBridgeDelegate
                         if (delegate != null) {
                             Handler(Looper.getMainLooper()).post {
@@ -282,15 +171,14 @@ class AichatApp : Application() {
                                         delegate,
                                         SessionContextBridge.NATIVE_APP
                                     )
-                                    Log.d("AichatApp", "✅ Pending delegate registered")
+                                    Log.d("AichatApp", "✅ Queued delegate registered")
                                 } catch (e: Exception) {
-                                    Log.e("AichatApp", "❌ pending delegate: ${e.message}")
+                                    Log.e("AichatApp", "❌ queued delegate: ${e.message}")
                                 }
                             }
                         }
                     } else {
                         Log.e("AichatApp", "❌ contextbridge = null")
-                        showToast("❌ Bridge = null")
                     }
                 },
                 { e ->
@@ -300,7 +188,41 @@ class AichatApp : Application() {
             )
     }
 
-    // ── معالجة الرسائل ────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════
+    // مشترك
+    // ══════════════════════════════════════════════════════════════════
+
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            val db = ChatDatabase.getDatabase(this)
+            webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
+            Log.d("AichatApp", "✅ Database ready")
+        } catch (e: Exception) {
+            Log.e("AichatApp", "❌ Database: ${e.message}", e)
+            throw e
+        }
+    }
+
+    @Synchronized
+    fun getOrCreateGeckoRuntime(): GeckoRuntime? {
+        if (geckoRuntime != null) return geckoRuntime
+        return try {
+            val settings = GeckoRuntimeSettings.Builder()
+                .aboutConfigEnabled(false)
+                .build()
+            GeckoRuntime.create(applicationContext, settings).also { rt ->
+                geckoRuntime = rt
+                loadAiCaptureExtension(rt)      // المسار 1
+                loadContextBridgeExtension(rt)  // المسار 2
+                Log.d("AichatApp", "✅ GeckoRuntime created")
+            }
+        } catch (e: Exception) {
+            Log.e("AichatApp", "❌ GeckoRuntime: ${e.message}")
+            showToast("❌ فشل تهيئة GeckoRuntime")
+            null
+        }
+    }
 
     private fun handleAutoResponse(json: JSONObject) {
         val text   = json.optString("text")
@@ -316,7 +238,7 @@ class AichatApp : Application() {
         val debug   = json.optJSONObject("debug")
         Log.d("AichatApp",
             if (success) "🧠 OK: ${text.take(60)}…"
-            else         "⚠️ Failed: $debug"
+            else "⚠️ Failed: $debug"
         )
         Handler(Looper.getMainLooper()).post {
             onManualCaptureResult?.invoke(success, text, debug)
