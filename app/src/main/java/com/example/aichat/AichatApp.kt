@@ -39,6 +39,64 @@ class AichatApp : Application() {
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
+    // أضف هذين المتغيرين والدالة داخل class AichatApp
+
+@Volatile private var pendingBridgeDelegate: WebExtension.MessageDelegate? = null
+
+fun registerBridgeDelegate(delegate: WebExtension.MessageDelegate) {
+    pendingBridgeDelegate = delegate
+    val ext = contextBridgeExtension
+    if (ext != null) {
+        Handler(Looper.getMainLooper()).post {
+            try {
+                ext.setMessageDelegate(delegate, SessionContextBridge.NATIVE_APP)
+                Log.d("AichatApp", "✅ BridgeDelegate registered immediately")
+            } catch (e: Exception) {
+                Log.e("AichatApp", "❌ registerBridgeDelegate: ${e.message}")
+            }
+        }
+    } else {
+        Log.w("AichatApp", "⚠️ Extension not ready — delegate queued")
+    }
+}
+
+// في loadContextBridgeExtension — عدّل الـ accept:
+private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
+    runtime.webExtensionController
+        .ensureBuiltIn(
+            "resource://android/assets/contextbridge/",
+            "session-memory-bridge@example.local"
+        )
+        .accept(
+            { ext ->
+                if (ext != null) {
+                    contextBridgeExtension = ext
+                    Log.d("AichatApp", "✅ ContextBridge loaded")
+                    showToast("✅ Bridge جاهز")
+
+                    // سجّل الـ delegate إذا كان منتظراً
+                    val delegate = pendingBridgeDelegate
+                    if (delegate != null) {
+                        Handler(Looper.getMainLooper()).post {
+                            try {
+                                ext.setMessageDelegate(
+                                    delegate,
+                                    SessionContextBridge.NATIVE_APP
+                                )
+                                Log.d("AichatApp", "✅ Queued delegate registered")
+                            } catch (e: Exception) {
+                                Log.e("AichatApp", "❌ queued delegate: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            },
+            { e ->
+                Log.e("AichatApp", "❌ Bridge: ${e?.message}")
+                showToast("❌ Bridge: ${e?.message}")
+            }
+        )
+}
 
     // ── Toast ─────────────────────────────────────────────────────────
 
