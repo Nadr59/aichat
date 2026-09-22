@@ -10,15 +10,13 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
-import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.WebExtension
 import java.util.UUID
 
 class SessionContextBridge(
-    private val runtime:   GeckoRuntime,
     private val session:   GeckoSession,
-    private val extension: WebExtension
+    private val extension: WebExtension          // ← فقط extension (حذفنا runtime)
 ) {
     companion object {
         const val NATIVE_APP = "memory_context"
@@ -38,14 +36,14 @@ class SessionContextBridge(
 
     data class DeliveryResult(
         val requestId: String,
-        val stage: String,
-        val detail: String = ""
+        val stage:     String,
+        val detail:    String = ""
     )
 
     // ── الحالة ───────────────────────────────────────────────────────
 
-    private var port: WebExtension.Port? = null
-    private var ready = CompletableDeferred<Unit>()
+    private var port:    WebExtension.Port?                             = null
+    private var ready  = CompletableDeferred<Unit>()
     private var pending: Pair<String, CompletableDeferred<JSONObject>>? = null
     private var closed = false
 
@@ -55,11 +53,8 @@ class SessionContextBridge(
 
         override fun onPortMessage(message: Any, source: WebExtension.Port) {
             if (source !== port) return
-            val json = when (message) {
-                is JSONObject -> message
-                is Map<*, *>  -> runCatching { JSONObject(message as Map<*, *>) }.getOrNull()
-                else          -> null
-            } ?: return
+
+            val json = parseJson(message) ?: return
 
             when (json.optString("type")) {
                 "READY" -> {
@@ -87,31 +82,32 @@ class SessionContextBridge(
     private val messageDelegate = object : WebExtension.MessageDelegate {
 
         override fun onConnect(newPort: WebExtension.Port) {
-            // التحقق من الاسم
+
+            // 1. تحقق من الاسم
             if (newPort.name != NATIVE_APP) {
                 newPort.disconnect()
                 return
             }
 
-            // التحقق من الـ host
+            // 2. تحقق من الـ host
             val senderUrl = newPort.sender?.url ?: ""
             val host = runCatching {
                 java.net.URI(senderUrl).host ?: ""
             }.getOrDefault("")
 
             if (closed || host !in ALLOWED_HOSTS) {
-                Log.w(TAG, "Port rejected: closed=$closed host=$host")
+                Log.w(TAG, "Port rejected — closed=$closed host=$host")
                 newPort.disconnect()
                 return
             }
 
-            // إبطال Port قديم
+            // 3. إبطال Port قديم
             port?.disconnect()
             port  = newPort
             ready = CompletableDeferred()
             newPort.setDelegate(portDelegate)
 
-            // مصافحة
+            // 4. مصافحة
             try {
                 newPort.postMessage(JSONObject().put("type", "HELLO"))
                 Log.d(TAG, "✅ Port connected from $host")
@@ -124,11 +120,10 @@ class SessionContextBridge(
     // ── init ──────────────────────────────────────────────────────────
 
     init {
-        // يجب تسجيل الـ delegate على الـ runtime (ليس session)
+        // ✅ الصحيح: extension.setMessageDelegate (ليس runtime)
         Handler(Looper.getMainLooper()).post {
-            runtime.webExtensionController
-                .setMessageDelegate(extension, messageDelegate, NATIVE_APP)
-            Log.d(TAG, "✅ MessageDelegate registered")
+            extension.setMessageDelegate(messageDelegate, NATIVE_APP)
+            Log.d(TAG, "✅ MessageDelegate registered on extension")
         }
     }
 
@@ -136,9 +131,9 @@ class SessionContextBridge(
 
     suspend fun deliver(
         systemDocument: String,
-        memoryContext: String,
-        submit: Boolean = false,
-        timeoutMs: Long = 10_000L
+        memoryContext:  String,
+        submit:         Boolean = false,
+        timeoutMs:      Long    = 10_000L
     ): DeliveryResult = withContext(Dispatchers.Main) {
 
         if (closed) {
@@ -166,15 +161,15 @@ class SessionContextBridge(
         val deferred = CompletableDeferred<JSONObject>()
         pending = Pair(requestId, deferred)
 
-        // الإرسال
+        // إرسال DELIVER
         try {
             currentPort.postMessage(
                 JSONObject()
-                    .put("type", "DELIVER")
-                    .put("requestId", requestId)
+                    .put("type",           "DELIVER")
+                    .put("requestId",      requestId)
                     .put("systemDocument", systemDocument)
-                    .put("memoryContext", memoryContext)
-                    .put("submit", submit)
+                    .put("memoryContext",  memoryContext)
+                    .put("submit",         submit)
             )
         } catch (e: Exception) {
             pending = null
@@ -208,5 +203,18 @@ class SessionContextBridge(
         pending?.second?.cancel()
         pending = null
         Log.d(TAG, "Bridge closed")
+    }
+
+    // ── مساعد ────────────────────────────────────────────────────────
+
+    private fun parseJson(message: Any): JSONObject? = try {
+        when (message) {
+            is JSONObject -> message
+            is Map<*, *>  -> JSONObject(message as Map<*, *>)
+            else          -> null
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "parseJson failed: ${e.message}")
+        null
     }
 }
