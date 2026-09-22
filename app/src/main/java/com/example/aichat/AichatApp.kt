@@ -10,6 +10,7 @@ import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
+import com.example.aichat.web.SessionContextBridge
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -17,8 +18,6 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.WebExtension
 
 class AichatApp : Application() {
-
-    // ── المتغيرات العامة ──────────────────────────────────────────────
 
     @Volatile var geckoRuntime: GeckoRuntime? = null
         private set
@@ -31,6 +30,7 @@ class AichatApp : Application() {
 
     @Volatile private var captureFlag = false
     @Volatile var contextPendingMessage = ""
+    @Volatile private var pendingBridgeDelegate: WebExtension.MessageDelegate? = null
 
     private var backgroundPort: WebExtension.Port? = null
 
@@ -39,64 +39,6 @@ class AichatApp : Application() {
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
-    // أضف هذين المتغيرين والدالة داخل class AichatApp
-
-@Volatile private var pendingBridgeDelegate: WebExtension.MessageDelegate? = null
-
-fun registerBridgeDelegate(delegate: WebExtension.MessageDelegate) {
-    pendingBridgeDelegate = delegate
-    val ext = contextBridgeExtension
-    if (ext != null) {
-        Handler(Looper.getMainLooper()).post {
-            try {
-                ext.setMessageDelegate(delegate, SessionContextBridge.NATIVE_APP)
-                Log.d("AichatApp", "✅ BridgeDelegate registered immediately")
-            } catch (e: Exception) {
-                Log.e("AichatApp", "❌ registerBridgeDelegate: ${e.message}")
-            }
-        }
-    } else {
-        Log.w("AichatApp", "⚠️ Extension not ready — delegate queued")
-    }
-}
-
-// في loadContextBridgeExtension — عدّل الـ accept:
-private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
-    runtime.webExtensionController
-        .ensureBuiltIn(
-            "resource://android/assets/contextbridge/",
-            "session-memory-bridge@example.local"
-        )
-        .accept(
-            { ext ->
-                if (ext != null) {
-                    contextBridgeExtension = ext
-                    Log.d("AichatApp", "✅ ContextBridge loaded")
-                    showToast("✅ Bridge جاهز")
-
-                    // سجّل الـ delegate إذا كان منتظراً
-                    val delegate = pendingBridgeDelegate
-                    if (delegate != null) {
-                        Handler(Looper.getMainLooper()).post {
-                            try {
-                                ext.setMessageDelegate(
-                                    delegate,
-                                    SessionContextBridge.NATIVE_APP
-                                )
-                                Log.d("AichatApp", "✅ Queued delegate registered")
-                            } catch (e: Exception) {
-                                Log.e("AichatApp", "❌ queued delegate: ${e.message}")
-                            }
-                        }
-                    }
-                }
-            },
-            { e ->
-                Log.e("AichatApp", "❌ Bridge: ${e?.message}")
-                showToast("❌ Bridge: ${e?.message}")
-            }
-        )
-}
 
     // ── Toast ─────────────────────────────────────────────────────────
 
@@ -126,13 +68,32 @@ private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
         }
         val memoryContext = MemoryContextBuilder().build(memories)
         val systemPrompt = SystemPrompt.build(
-            memoryContext = memoryContext,
+            memoryContext     = memoryContext,
             customInstruction = customInstruction,
-            includeAccuracy = true
+            includeAccuracy   = true
         )
         contextPendingMessage = systemPrompt
         showToast("📤 حجم السياق: ${systemPrompt.length} حرف")
         Log.d("AichatApp", "📤 contextPendingMessage: ${systemPrompt.length} chars")
+    }
+
+    // ── registerBridgeDelegate ────────────────────────────────────────
+
+    fun registerBridgeDelegate(delegate: WebExtension.MessageDelegate) {
+        pendingBridgeDelegate = delegate
+        val ext = contextBridgeExtension
+        if (ext != null) {
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    ext.setMessageDelegate(delegate, SessionContextBridge.NATIVE_APP)
+                    Log.d("AichatApp", "✅ BridgeDelegate registered immediately")
+                } catch (e: Exception) {
+                    Log.e("AichatApp", "❌ registerBridgeDelegate: ${e.message}")
+                }
+            }
+        } else {
+            Log.w("AichatApp", "⚠️ contextBridgeExtension null — delegate queued")
+        }
     }
 
     // ── PortDelegate ──────────────────────────────────────────────────
@@ -152,28 +113,28 @@ private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
                     try {
                         port.postMessage(
                             JSONObject()
-                                .put("type", "CHECK_CAPTURE_RESULT")
+                                .put("type",    "CHECK_CAPTURE_RESULT")
                                 .put("capture", flag)
                         )
                     } catch (e: Exception) {
-                        Log.e("AichatApp", "❌ port.postMessage: ${e.message}")
+                        Log.e("AichatApp", "❌ CHECK_CAPTURE: ${e.message}")
                     }
                 }
 
                 "GET_CONTEXT" -> {
-                    val pending = contextPendingMessage
+                    val pending           = contextPendingMessage
                     contextPendingMessage = ""
                     Log.d("AichatApp", "📤 GET_CONTEXT has=${pending.isNotBlank()}")
                     showToast("📤 GET_CONTEXT has=${pending.isNotBlank()}")
                     try {
                         port.postMessage(
                             JSONObject()
-                                .put("type", "GET_CONTEXT_RESULT")
+                                .put("type",       "GET_CONTEXT_RESULT")
                                 .put("hasContext", pending.isNotBlank())
-                                .put("context", pending)
+                                .put("context",    pending)
                         )
                     } catch (e: Exception) {
-                        Log.e("AichatApp", "❌ port.postMessage GET_CONTEXT: ${e.message}")
+                        Log.e("AichatApp", "❌ GET_CONTEXT: ${e.message}")
                     }
                 }
 
@@ -208,20 +169,20 @@ private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
                     showToast(sb.toString())
                 }
 
-                else -> Log.w("AichatApp", "⚠️ unknown port type: $type")
+                else -> Log.w("AichatApp", "⚠️ unknown: $type")
             }
         }
     }
 
     // ── MessageDelegate — aicapture ───────────────────────────────────
 
-    private val messageDelegate = object : WebExtension.MessageDelegate {
+    private val messageDelegateAiCapture = object : WebExtension.MessageDelegate {
 
         override fun onConnect(port: WebExtension.Port) {
             backgroundPort = port
             port.setDelegate(portDelegate)
-            Log.d("AichatApp", "✅ background port connected")
-            showToast("✅ background port connected")
+            Log.d("AichatApp", "✅ aicapture port connected")
+            showToast("✅ aicapture port connected")
         }
 
         override fun onMessage(
@@ -230,8 +191,7 @@ private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
             sender: WebExtension.MessageSender
         ): GeckoResult<Any>? {
             val json = parseMessage(message) ?: return null
-            val type = json.optString("type")
-            Log.w("AichatApp", "⚠️ onMessage مباشر (غير متوقع): $type")
+            Log.w("AichatApp", "⚠️ onMessage مباشر: ${json.optString("type")}")
             return null
         }
     }
@@ -262,7 +222,7 @@ private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
             GeckoRuntime.create(applicationContext, settings).also { rt ->
                 geckoRuntime = rt
                 loadAiCaptureExtension(rt)
-                loadContextBridgeExtension(rt)      // ← الجديدة
+                loadContextBridgeExtension(rt)
                 Log.d("AichatApp", "✅ GeckoRuntime created")
             }
         } catch (e: Exception) {
@@ -272,7 +232,7 @@ private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
         }
     }
 
-    // ── تحميل aicapture extension ─────────────────────────────────────
+    // ── loadAiCaptureExtension ────────────────────────────────────────
 
     private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
         runtime.webExtensionController
@@ -284,22 +244,22 @@ private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
                 { ext ->
                     if (ext != null) {
                         aiChatExtension = ext
-                        ext.setMessageDelegate(messageDelegate, "browser")
-                        Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
-                        showToast("✅ Extension جاهزة")
+                        ext.setMessageDelegate(messageDelegateAiCapture, "browser")
+                        Log.d("AichatApp", "✅ aicapture loaded")
+                        showToast("✅ aicapture جاهزة")
                     } else {
-                        Log.e("AichatApp", "❌ Extension is null")
-                        showToast("❌ Extension = null")
+                        Log.e("AichatApp", "❌ aicapture = null")
+                        showToast("❌ aicapture = null")
                     }
                 },
                 { e ->
-                    Log.e("AichatApp", "❌ Extension error: ${e?.message}")
-                    showToast("❌ ${e?.message} | ${e?.cause?.message}")
+                    Log.e("AichatApp", "❌ aicapture: ${e?.message}")
+                    showToast("❌ aicapture: ${e?.message}")
                 }
             )
     }
 
-    // ── تحميل contextbridge extension ────────────────────────────────
+    // ── loadContextBridgeExtension ────────────────────────────────────
 
     private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
         runtime.webExtensionController
@@ -311,12 +271,30 @@ private fun loadContextBridgeExtension(runtime: GeckoRuntime) {
                 { ext ->
                     if (ext != null) {
                         contextBridgeExtension = ext
-                        Log.d("AichatApp", "✅ ContextBridge loaded")
+                        Log.d("AichatApp", "✅ contextbridge loaded")
                         showToast("✅ Bridge جاهز")
+
+                        val delegate = pendingBridgeDelegate
+                        if (delegate != null) {
+                            Handler(Looper.getMainLooper()).post {
+                                try {
+                                    ext.setMessageDelegate(
+                                        delegate,
+                                        SessionContextBridge.NATIVE_APP
+                                    )
+                                    Log.d("AichatApp", "✅ Pending delegate registered")
+                                } catch (e: Exception) {
+                                    Log.e("AichatApp", "❌ pending delegate: ${e.message}")
+                                }
+                            }
+                        }
+                    } else {
+                        Log.e("AichatApp", "❌ contextbridge = null")
+                        showToast("❌ Bridge = null")
                     }
                 },
                 { e ->
-                    Log.e("AichatApp", "❌ Bridge: ${e?.message}")
+                    Log.e("AichatApp", "❌ contextbridge: ${e?.message}")
                     showToast("❌ Bridge: ${e?.message}")
                 }
             )
