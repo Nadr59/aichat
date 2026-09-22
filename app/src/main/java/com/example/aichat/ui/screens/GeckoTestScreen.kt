@@ -85,21 +85,67 @@ fun GeckoTestScreen(
 
     // ── تهيئة Bridge ─────────────────────────────────────────────────
     DisposableEffect(runtime, session) {
-        val ext = app.contextBridgeExtension
-        if (ext != null) {
-bridge = SessionContextBridge(
-    session   = session,
-    extension = ext
-)
-            Log.d("GeckoTestScreen", "✅ Bridge created")
-        } else {
-            Log.w("GeckoTestScreen", "⚠️ contextBridgeExtension = null")
-        }
-        onDispose {
-            bridge?.close()
-            bridge = null
+    // في GeckoTestScreen — استبدل DisposableEffect الخاص بالـ Bridge
+
+// ── تهيئة Bridge (مرة واحدة فقط) ────────────────────────────────
+val bridge = remember { SessionContextBridge(app) }
+
+DisposableEffect(Unit) {
+    onDispose {
+        bridge.close()
+    }
+}
+
+// ── زر إرسال السياق 📤 ───────────────────────────────────────────
+val sendContext: () -> Unit = ctx@{
+    if (platform == null || !platform.memoryEnabled) return@ctx
+    if (chatViewModel == null) return@ctx
+
+    // تشخيص مفيد
+    Log.d("GeckoTestScreen", "Bridge connected=${bridge.isConnected} ready=${bridge.isPageReady}")
+
+    if (!bridge.isConnected) {
+        Toast.makeText(context, "❌ Bridge غير متصل\nانتظر تحميل الصفحة", Toast.LENGTH_SHORT).show()
+        return@ctx
+    }
+
+    Toast.makeText(context, "📤 جاري إرسال السياق...", Toast.LENGTH_SHORT).show()
+
+    CoroutineScope(Dispatchers.IO).launch {
+        try {
+            val memories      = chatViewModel.getSharedMemories()
+            val memoryContext = MemoryContextBuilder().build(memories)
+            val systemDoc     = SystemPrompt.ACCURACY_PROMPT
+
+            val result = bridge.deliver(
+                systemDocument = systemDoc,
+                memoryContext  = memoryContext,
+                submit         = true,
+                timeoutMs      = 10_000L
+            )
+
+            mainHandler.post {
+                val msg = when (result.stage) {
+                    "clicked"        -> "✅ تم الإرسال — انتظر رد المنصة"
+                    "filled"         -> "✅ السياق في الصندوق — اضغط إرسال"
+                    "write_failed"   -> "❌ فشل الكتابة: ${result.detail}"
+                    "no_port"        -> "❌ الجسر غير متصل"
+                    "page_not_ready" -> "❌ الصفحة لم تُحمَّل بعد"
+                    "timeout"        -> "❌ انتهت المهلة — حاول مرة أخرى"
+                    "busy"           -> "⏳ جاري تنفيذ عملية أخرى"
+                    "bridge_closed"  -> "❌ الجسر مغلق"
+                    else             -> "⚠️ ${result.stage}: ${result.detail}"
+                }
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            }
+
+        } catch (e: Exception) {
+            mainHandler.post {
+                Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
+}
 
     // ── delegates الـ Session ─────────────────────────────────────────
     remember(session) {
