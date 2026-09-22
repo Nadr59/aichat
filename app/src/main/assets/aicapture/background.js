@@ -1,46 +1,16 @@
 "use strict";
 
 var NATIVE_APP = "browser";
-var port       = null;
 
-// ── اتصال Port مع Kotlin ──────────────────────────────────────────
-
-function connect() {
-    try {
-        port = browser.runtime.connectNative(NATIVE_APP);
-    } catch(e) {
-        console.log("[bg] connectNative failed:", e);
-        setTimeout(connect, 2000);
-        return;
-    }
-
-    port.onMessage.addListener(function (msg) {
-        console.log("[bg] from Kotlin port:", JSON.stringify(msg));
-    });
-
-    port.onDisconnect.addListener(function () {
-        console.log("[bg] port disconnected");
-        port = null;
-        setTimeout(connect, 2000);
-    });
-
-    console.log("[bg] port connected ✅");
-}
-
-connect();
-
-// ── استقبال من content.js ─────────────────────────────────────────
-
-browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+browser.runtime.onMessage.addListener(function (message, sender) {
     if (!message || !message.type) return;
 
     var type = message.type;
-    console.log("[bg] from content:", type);
 
-    // ── رسائل بدون رد — عبر Port ──────────────────────────────────
+    // ── التقاط تلقائي ─────────────────────────────────────────────────
 
     if (type === "AI_RESPONSE") {
-        if (port) port.postMessage({
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "AI_RESPONSE",
             text:   message.text   || "",
             domain: message.domain || ""
@@ -48,8 +18,21 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         return;
     }
 
+    // ── التقاط يدوي — CHECK_CAPTURE ───────────────────────────────────
+
+    if (type === "CHECK_CAPTURE") {
+        return browser.runtime.sendNativeMessage(NATIVE_APP, {
+            type:   "CHECK_CAPTURE",
+            domain: message.domain || ""
+        }).then(function (response) {
+            return response;
+        }).catch(function () {
+            return { capture: false };
+        });
+    }
+
     if (type === "CAPTURE_RESULT") {
-        if (port) port.postMessage({
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:    "CAPTURE_RESULT",
             success: message.success || false,
             text:    message.text    || "",
@@ -59,103 +42,47 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         return;
     }
 
+    // ── إرسال السياق — GET_CONTEXT ────────────────────────────────────
+
+    if (type === "GET_CONTEXT") {
+        return browser.runtime.sendNativeMessage(NATIVE_APP, {
+            type: "GET_CONTEXT"
+        }).then(function (response) {
+            return response;
+        }).catch(function () {
+            return { hasContext: false, context: "" };
+        });
+    }
+
+    // ── نتيجة الكتابة ─────────────────────────────────────────────────
+
     if (type === "CONTEXT_WRITTEN") {
-        if (port) port.postMessage({
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "CONTEXT_WRITTEN",
+            stage:  message.stage  || "",
+            detail: message.detail || "",
             len:    message.len    || 0,
             domain: message.domain || ""
         });
         return;
     }
 
+    // ── معلومات تشخيصية ───────────────────────────────────────────────
+
     if (type === "DEBUG_INFO") {
-        if (port) port.postMessage({
-            type:   "DEBUG_INFO",
-            info:   message.info   || "",
-            domain: message.domain || ""
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
+            type: "DEBUG_INFO",
+            info: message.info || ""
         });
         return;
     }
 
     if (type === "DEBUG_BUTTONS") {
-        if (port) port.postMessage({
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:    "DEBUG_BUTTONS",
             buttons: message.buttons || [],
             domain:  message.domain  || ""
         });
         return;
-    }
-
-    // ── رسائل تحتاج رد — عبر Port أيضاً ─────────────────────────
-
-    if (type === "CHECK_CAPTURE") {
-        if (!port) {
-            sendResponse({ capture: false });
-            return;
-        }
-
-        // ✅ أرسل عبر Port وانتظر الرد
-        var done = false;
-
-        var listener = function (msg) {
-            if (done) return;
-            if (!msg || msg.type !== "CHECK_CAPTURE_RESULT") return;
-            done = true;
-            port.onMessage.removeListener(listener);
-            sendResponse({ capture: msg.capture || false });
-        };
-
-        port.onMessage.addListener(listener);
-        port.postMessage({
-            type:   "CHECK_CAPTURE",
-            domain: message.domain || ""
-        });
-
-        // timeout
-        setTimeout(function () {
-            if (done) return;
-            done = true;
-            port.onMessage.removeListener(listener);
-            sendResponse({ capture: false });
-        }, 3000);
-
-        return true; // ← يبقي القناة مفتوحة
-    }
-
-    if (type === "GET_CONTEXT") {
-        if (!port) {
-            sendResponse({ hasContext: false, context: "" });
-            return;
-        }
-
-        // ✅ أرسل عبر Port وانتظر الرد
-        var done = false;
-
-        var listener = function (msg) {
-            if (done) return;
-            if (!msg || msg.type !== "GET_CONTEXT_RESULT") return;
-            done = true;
-            port.onMessage.removeListener(listener);
-            sendResponse({
-                hasContext: msg.hasContext || false,
-                context:    msg.context    || ""
-            });
-        };
-
-        port.onMessage.addListener(listener);
-        port.postMessage({
-            type:   "GET_CONTEXT",
-            domain: message.domain || ""
-        });
-
-        // timeout
-        setTimeout(function () {
-            if (done) return;
-            done = true;
-            port.onMessage.removeListener(listener);
-            sendResponse({ hasContext: false, context: "" });
-        }, 3000);
-
-        return true; // ← يبقي القناة مفتوحة
     }
 });
