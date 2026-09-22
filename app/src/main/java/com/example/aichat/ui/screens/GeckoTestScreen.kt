@@ -1,4 +1,4 @@
-٨package com.example.aichat.ui.screens
+package com.example.aichat.ui.screens
 
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -52,10 +52,9 @@ fun GeckoTestScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val app            = context.applicationContext as AichatApp
     val mainHandler    = remember { Handler(Looper.getMainLooper()) }
+    val runtime        = remember { app.getOrCreateGeckoRuntime() }
 
-    val runtime: GeckoRuntime? = remember { app.getOrCreateGeckoRuntime() }
-
-    // ── GeckoView غير متاح ────────────────────────────────────────────
+    // ── GeckoView غير متاح ───────────────────────────────────────────
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
@@ -67,87 +66,26 @@ fun GeckoTestScreen(
     }
 
     // ── الحالة ───────────────────────────────────────────────────────
-    var isLoading      by remember { mutableStateOf(true) }
-    var progress       by remember { mutableIntStateOf(0) }
-    var canGoBack      by remember { mutableStateOf(false) }
-    var currentUrl     by remember { mutableStateOf(url) }
-    var currentTitle   by remember { mutableStateOf(title) }
-    var loadError      by remember { mutableStateOf<String?>(null) }
-    var geckoViewRef   by remember { mutableStateOf<GeckoView?>(null) }
-    var isSavingMemory by remember { mutableStateOf(false) }
+    var isLoading       by remember { mutableStateOf(true) }
+    var progress        by remember { mutableIntStateOf(0) }
+    var canGoBack       by remember { mutableStateOf(false) }
+    var currentUrl      by remember { mutableStateOf(url) }
+    var currentTitle    by remember { mutableStateOf(title) }
+    var loadError       by remember { mutableStateOf<String?>(null) }
+    var geckoViewRef    by remember { mutableStateOf<GeckoView?>(null) }
+    var isSavingMemory  by remember { mutableStateOf(false) }
     var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
 
-    // ── Bridge ───────────────────────────────────────────────────────
-    var bridge by remember { mutableStateOf<SessionContextBridge?>(null) }
+    // ── Bridge (مرة واحدة فقط) ───────────────────────────────────────
+    val bridge = remember { SessionContextBridge(app) }
+
+    DisposableEffect(Unit) {
+        onDispose { bridge.close() }
+    }
 
     // ── Session ──────────────────────────────────────────────────────
     val session = remember { GeckoSession() }
 
-    // ── تهيئة Bridge ─────────────────────────────────────────────────
-    
-    // في GeckoTestScreen — استبدل DisposableEffect الخاص بالـ Bridge
-
-// ── تهيئة Bridge (مرة واحدة فقط) ────────────────────────────────
-val bridge = remember { SessionContextBridge(app) }
-
-DisposableEffect(Unit) {
-    onDispose {
-        bridge.close()
-    }
-}
-
-// ── زر إرسال السياق 📤 ───────────────────────────────────────────
-val sendContext: () -> Unit = ctx@{
-    if (platform == null || !platform.memoryEnabled) return@ctx
-    if (chatViewModel == null) return@ctx
-
-    // تشخيص مفيد
-    Log.d("GeckoTestScreen", "Bridge connected=${bridge.isConnected} ready=${bridge.isPageReady}")
-
-    if (!bridge.isConnected) {
-        Toast.makeText(context, "❌ Bridge غير متصل\nانتظر تحميل الصفحة", Toast.LENGTH_SHORT).show()
-        return@ctx
-    }
-
-    Toast.makeText(context, "📤 جاري إرسال السياق...", Toast.LENGTH_SHORT).show()
-
-    CoroutineScope(Dispatchers.IO).launch {
-        try {
-            val memories      = chatViewModel.getSharedMemories()
-            val memoryContext = MemoryContextBuilder().build(memories)
-            val systemDoc     = SystemPrompt.ACCURACY_PROMPT
-
-            val result = bridge.deliver(
-                systemDocument = systemDoc,
-                memoryContext  = memoryContext,
-                submit         = true,
-                timeoutMs      = 10_000L
-            )
-
-            mainHandler.post {
-                val msg = when (result.stage) {
-                    "clicked"        -> "✅ تم الإرسال — انتظر رد المنصة"
-                    "filled"         -> "✅ السياق في الصندوق — اضغط إرسال"
-                    "write_failed"   -> "❌ فشل الكتابة: ${result.detail}"
-                    "no_port"        -> "❌ الجسر غير متصل"
-                    "page_not_ready" -> "❌ الصفحة لم تُحمَّل بعد"
-                    "timeout"        -> "❌ انتهت المهلة — حاول مرة أخرى"
-                    "busy"           -> "⏳ جاري تنفيذ عملية أخرى"
-                    "bridge_closed"  -> "❌ الجسر مغلق"
-                    else             -> "⚠️ ${result.stage}: ${result.detail}"
-                }
-                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-            }
-
-        } catch (e: Exception) {
-            mainHandler.post {
-                Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-}
-
-    // ── delegates الـ Session ─────────────────────────────────────────
     remember(session) {
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
@@ -180,11 +118,12 @@ val sendContext: () -> Unit = ctx@{
             ): GeckoResult<AllowOrDeny>? {
                 val uri    = Uri.parse(request.uri)
                 val scheme = uri.scheme?.lowercase()
-                if (scheme in listOf("http", "https", "about", "blob", "data")) {
-                    return GeckoResult.allow()
+                return if (scheme in listOf("http", "https", "about", "blob", "data")) {
+                    GeckoResult.allow()
+                } else {
+                    openExternal(context, request.uri)
+                    GeckoResult.deny()
                 }
-                openExternal(context, request.uri)
-                return GeckoResult.deny()
             }
             override fun onLoadError(
                 session: GeckoSession,
@@ -216,6 +155,7 @@ val sendContext: () -> Unit = ctx@{
                     platformName = p.name,
                     text         = text
                 )
+                Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
             }
             app.onManualCaptureResult = { success, text, debug ->
                 timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -229,7 +169,9 @@ val sendContext: () -> Unit = ctx@{
                         text         = text
                     )
                     Toast.makeText(
-                        context, "✅ تم الحفظ\n${text.take(50)}", Toast.LENGTH_LONG
+                        context,
+                        "✅ تم الحفظ\n${text.take(50)}",
+                        Toast.LENGTH_LONG
                     ).show()
                 } else {
                     val info = debug?.let {
@@ -238,7 +180,9 @@ val sendContext: () -> Unit = ctx@{
                         "body=${it.optInt("bodyLen")}"
                     } ?: "no response"
                     Toast.makeText(
-                        context, "⚠️ فشل الاستخراج\n$info", Toast.LENGTH_LONG
+                        context,
+                        "⚠️ فشل الاستخراج\n$info",
+                        Toast.LENGTH_LONG
                     ).show()
                 }
             }
@@ -246,7 +190,7 @@ val sendContext: () -> Unit = ctx@{
 
         onDispose {
             timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-            timeoutRunnable  = null
+            timeoutRunnable           = null
             app.onAiResponseCaptured  = null
             app.onManualCaptureResult = null
         }
@@ -283,9 +227,15 @@ val sendContext: () -> Unit = ctx@{
         if (platform == null || !platform.memoryEnabled) return@ctx
         if (chatViewModel == null) return@ctx
 
-        val currentBridge = bridge
-        if (currentBridge == null) {
-            Toast.makeText(context, "❌ Bridge غير متصل", Toast.LENGTH_SHORT).show()
+        Log.d("GeckoTestScreen",
+            "📤 Bridge connected=${bridge.isConnected} ready=${bridge.isPageReady}")
+
+        if (!bridge.isConnected) {
+            Toast.makeText(
+                context,
+                "❌ Bridge غير متصل\nانتظر تحميل الصفحة",
+                Toast.LENGTH_SHORT
+            ).show()
             return@ctx
         }
 
@@ -297,7 +247,7 @@ val sendContext: () -> Unit = ctx@{
                 val memoryContext = MemoryContextBuilder().build(memories)
                 val systemDoc     = SystemPrompt.ACCURACY_PROMPT
 
-                val result = currentBridge.deliver(
+                val result = bridge.deliver(
                     systemDocument = systemDoc,
                     memoryContext  = memoryContext,
                     submit         = true,
@@ -306,14 +256,15 @@ val sendContext: () -> Unit = ctx@{
 
                 mainHandler.post {
                     val msg = when (result.stage) {
-                        "clicked"      -> "✅ تم الإرسال — انتظر رد المنصة"
-                        "filled"       -> "✅ السياق في الصندوق — اضغط إرسال"
-                        "write_failed" -> "❌ فشل الكتابة: ${result.detail}"
-                        "no_port"      -> "❌ الجسر غير متصل"
+                        "clicked"        -> "✅ تم الإرسال — انتظر رد المنصة"
+                        "filled"         -> "✅ السياق في الصندوق — اضغط إرسال"
+                        "write_failed"   -> "❌ فشل الكتابة: ${result.detail}"
+                        "no_port"        -> "❌ الجسر غير متصل"
                         "page_not_ready" -> "❌ الصفحة لم تُحمَّل بعد"
-                        "timeout"      -> "❌ انتهت المهلة"
-                        "busy"         -> "⏳ عملية أخرى قيد التنفيذ"
-                        else           -> "⚠️ ${result.stage}: ${result.detail}"
+                        "timeout"        -> "❌ انتهت المهلة — حاول مرة أخرى"
+                        "busy"           -> "⏳ جاري تنفيذ عملية أخرى"
+                        "bridge_closed"  -> "❌ الجسر مغلق"
+                        else             -> "⚠️ ${result.stage}: ${result.detail}"
                     }
                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                 }
@@ -463,7 +414,7 @@ val sendContext: () -> Unit = ctx@{
             }
         }
     }
-}
+} // ← نهاية GeckoTestScreen
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -480,12 +431,14 @@ private fun openExternal(context: Context, url: String) {
 
 @Composable
 private fun LoadErrorView(
-    message: String,
-    onRetry: () -> Unit,
+    message:       String,
+    onRetry:       () -> Unit,
     onOpenBrowser: () -> Unit
 ) {
     Box(
-        modifier         = Modifier.fillMaxSize().padding(24.dp),
+        modifier         = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
