@@ -1,4 +1,4 @@
-package com.example.aichat.ui.screens
+٨package com.example.aichat.ui.screens
 
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -84,7 +84,7 @@ fun GeckoTestScreen(
     val session = remember { GeckoSession() }
 
     // ── تهيئة Bridge ─────────────────────────────────────────────────
-    DisposableEffect(runtime, session) {
+    
     // في GeckoTestScreen — استبدل DisposableEffect الخاص بالـ Bridge
 
 // ── تهيئة Bridge (مرة واحدة فقط) ────────────────────────────────
