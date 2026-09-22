@@ -54,7 +54,6 @@ fun GeckoTestScreen(
     val mainHandler    = remember { Handler(Looper.getMainLooper()) }
     val runtime        = remember { app.getOrCreateGeckoRuntime() }
 
-    // ── GeckoView غير متاح ───────────────────────────────────────────
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
@@ -74,11 +73,11 @@ fun GeckoTestScreen(
     var loadError       by remember { mutableStateOf<String?>(null) }
     var geckoViewRef    by remember { mutableStateOf<GeckoView?>(null) }
     var isSavingMemory  by remember { mutableStateOf(false) }
+    var isSendingCtx    by remember { mutableStateOf(false) }
     var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
 
-    // ── Bridge (مرة واحدة فقط) ───────────────────────────────────────
+    // ── المسار 2: Bridge ─────────────────────────────────────────────
     val bridge = remember { SessionContextBridge(app) }
-
     DisposableEffect(Unit) {
         onDispose { bridge.close() }
     }
@@ -101,13 +100,11 @@ fun GeckoTestScreen(
                 isLoading = false
             }
         }
-
         session.contentDelegate = object : GeckoSession.ContentDelegate {
             override fun onTitleChange(session: GeckoSession, title: String?) {
                 if (!title.isNullOrBlank()) currentTitle = title.take(50)
             }
         }
-
         session.navigationDelegate = object : GeckoSession.NavigationDelegate {
             override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
                 canGoBack = canGoBack_
@@ -118,7 +115,12 @@ fun GeckoTestScreen(
             ): GeckoResult<AllowOrDeny>? {
                 val uri    = Uri.parse(request.uri)
                 val scheme = uri.scheme?.lowercase()
-                return if (scheme in listOf("http", "https", "about", "blob", "data")) {
+                if (scheme == "https" || scheme == "http") {
+                    if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
+                        return GeckoResult.deny()
+                    }
+                }
+                return if (scheme in listOf("http","https","about","blob","data")) {
                     GeckoResult.allow()
                 } else {
                     openExternal(context, request.uri)
@@ -143,7 +145,7 @@ fun GeckoTestScreen(
         Unit
     }
 
-    // ── callbacks الذاكرة ────────────────────────────────────────────
+    // ── المسار 1: callbacks الذاكرة ──────────────────────────────────
     DisposableEffect(platform?.id) {
         val p  = platform
         val vm = chatViewModel
@@ -196,7 +198,7 @@ fun GeckoTestScreen(
         }
     }
 
-    // ── زر الحفظ 🧠 ──────────────────────────────────────────────────
+    // ── المسار 1: زر 🧠 ──────────────────────────────────────────────
     val saveToMemory: () -> Unit = save@{
         if (isSavingMemory || isLoading) return@save
         if (platform == null || !platform.memoryEnabled) return@save
@@ -204,7 +206,6 @@ fun GeckoTestScreen(
 
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
         isSavingMemory = true
-
         Toast.makeText(context, "🧠 جاري البحث في الصفحة...", Toast.LENGTH_SHORT).show()
         app.triggerCapture()
 
@@ -222,23 +223,25 @@ fun GeckoTestScreen(
         mainHandler.postDelayed(r, 5000L)
     }
 
-    // ── زر إرسال السياق 📤 ───────────────────────────────────────────
+    // ── المسار 2: زر 📤 ──────────────────────────────────────────────
     val sendContext: () -> Unit = ctx@{
+        if (isSendingCtx || isLoading) return@ctx
         if (platform == null || !platform.memoryEnabled) return@ctx
         if (chatViewModel == null) return@ctx
 
         Log.d("GeckoTestScreen",
-            "📤 Bridge connected=${bridge.isConnected} ready=${bridge.isPageReady}")
+            "📤 connected=${bridge.isConnected} ready=${bridge.isPageReady}")
 
         if (!bridge.isConnected) {
             Toast.makeText(
                 context,
-                "❌ Bridge غير متصل\nانتظر تحميل الصفحة",
+                "❌ Bridge غير متصل — انتظر تحميل الصفحة",
                 Toast.LENGTH_SHORT
             ).show()
             return@ctx
         }
 
+        isSendingCtx = true
         Toast.makeText(context, "📤 جاري إرسال السياق...", Toast.LENGTH_SHORT).show()
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -255,6 +258,7 @@ fun GeckoTestScreen(
                 )
 
                 mainHandler.post {
+                    isSendingCtx = false
                     val msg = when (result.stage) {
                         "clicked"        -> "✅ تم الإرسال — انتظر رد المنصة"
                         "filled"         -> "✅ السياق في الصندوق — اضغط إرسال"
@@ -268,9 +272,9 @@ fun GeckoTestScreen(
                     }
                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                 }
-
             } catch (e: Exception) {
                 mainHandler.post {
+                    isSendingCtx = false
                     Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
@@ -311,7 +315,6 @@ fun GeckoTestScreen(
 
     // ── الواجهة ──────────────────────────────────────────────────────
     Column(modifier = Modifier.fillMaxSize()) {
-
         TopAppBar(
             title = {
                 Column {
@@ -341,7 +344,7 @@ fun GeckoTestScreen(
             actions = {
                 if (platform != null && platform.memoryEnabled && chatViewModel != null) {
 
-                    // زر الحفظ 🧠
+                    // المسار 1 — زر 🧠
                     IconButton(
                         onClick = saveToMemory,
                         enabled = !isSavingMemory && !isLoading
@@ -352,13 +355,13 @@ fun GeckoTestScreen(
                         )
                     }
 
-                    // زر إرسال السياق 📤
+                    // المسار 2 — زر 📤
                     IconButton(
                         onClick = sendContext,
-                        enabled = !isLoading
+                        enabled = !isSendingCtx && !isLoading
                     ) {
                         Text(
-                            text  = "📤",
+                            text  = if (isSendingCtx) "⏳" else "📤",
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
@@ -377,7 +380,6 @@ fun GeckoTestScreen(
         )
 
         Box(modifier = Modifier.fillMaxSize()) {
-
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory  = { ctx ->
@@ -414,7 +416,7 @@ fun GeckoTestScreen(
             }
         }
     }
-} // ← نهاية GeckoTestScreen
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -436,9 +438,7 @@ private fun LoadErrorView(
     onOpenBrowser: () -> Unit
 ) {
     Box(
-        modifier         = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
+        modifier         = Modifier.fillMaxSize().padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
