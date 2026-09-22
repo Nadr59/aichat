@@ -87,11 +87,10 @@ fun GeckoTestScreen(
     DisposableEffect(runtime, session) {
         val ext = app.contextBridgeExtension
         if (ext != null) {
-            bridge = SessionContextBridge(
-                runtime   = runtime,
-                session   = session,
-                extension = ext
-            )
+bridge = SessionContextBridge(
+    session   = session,
+    extension = ext
+)
             Log.d("GeckoTestScreen", "✅ Bridge created")
         } else {
             Log.w("GeckoTestScreen", "⚠️ contextBridgeExtension = null")
