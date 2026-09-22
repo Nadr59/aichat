@@ -10,36 +10,13 @@ import android.util.Log
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -52,17 +29,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.AichatApp
+import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import com.example.aichat.web.SessionContextBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import org.mozilla.geckoview.AllowOrDeny
-import org.mozilla.geckoview.GeckoResult
-import org.mozilla.geckoview.GeckoRuntime
-import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoView
-import org.mozilla.geckoview.WebRequestError
+import org.mozilla.geckoview.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,6 +55,7 @@ fun GeckoTestScreen(
 
     val runtime: GeckoRuntime? = remember { app.getOrCreateGeckoRuntime() }
 
+    // ── GeckoView غير متاح ────────────────────────────────────────────
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
@@ -91,19 +67,42 @@ fun GeckoTestScreen(
     }
 
     // ── الحالة ───────────────────────────────────────────────────────
-    var isLoading       by remember { mutableStateOf(true) }
-    var progress        by remember { mutableIntStateOf(0) }
-    var canGoBack       by remember { mutableStateOf(false) }
-    var currentUrl      by remember { mutableStateOf(url) }
-    var currentTitle    by remember { mutableStateOf(title) }
-    var loadError       by remember { mutableStateOf<String?>(null) }
-    var geckoViewRef    by remember { mutableStateOf<GeckoView?>(null) }
-    var isSavingMemory  by remember { mutableStateOf(false) }
+    var isLoading      by remember { mutableStateOf(true) }
+    var progress       by remember { mutableIntStateOf(0) }
+    var canGoBack      by remember { mutableStateOf(false) }
+    var currentUrl     by remember { mutableStateOf(url) }
+    var currentTitle   by remember { mutableStateOf(title) }
+    var loadError      by remember { mutableStateOf<String?>(null) }
+    var geckoViewRef   by remember { mutableStateOf<GeckoView?>(null) }
+    var isSavingMemory by remember { mutableStateOf(false) }
     var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
+
+    // ── Bridge ───────────────────────────────────────────────────────
+    var bridge by remember { mutableStateOf<SessionContextBridge?>(null) }
 
     // ── Session ──────────────────────────────────────────────────────
     val session = remember { GeckoSession() }
 
+    // ── تهيئة Bridge ─────────────────────────────────────────────────
+    DisposableEffect(runtime, session) {
+        val ext = app.contextBridgeExtension
+        if (ext != null) {
+            bridge = SessionContextBridge(
+                runtime   = runtime,
+                session   = session,
+                extension = ext
+            )
+            Log.d("GeckoTestScreen", "✅ Bridge created")
+        } else {
+            Log.w("GeckoTestScreen", "⚠️ contextBridgeExtension = null")
+        }
+        onDispose {
+            bridge?.close()
+            bridge = null
+        }
+    }
+
+    // ── delegates الـ Session ─────────────────────────────────────────
     remember(session) {
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
@@ -136,27 +135,16 @@ fun GeckoTestScreen(
             ): GeckoResult<AllowOrDeny>? {
                 val uri    = Uri.parse(request.uri)
                 val scheme = uri.scheme?.lowercase()
-
-                if (scheme == "https" || scheme == "http") {
-                    if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
-                        return GeckoResult.deny()
-                    }
+                if (scheme in listOf("http", "https", "about", "blob", "data")) {
+                    return GeckoResult.allow()
                 }
-
-                return if (scheme in listOf(
-                        "http", "https", "about", "blob", "data"
-                    )
-                ) {
-                    GeckoResult.allow()
-                } else {
-                    openExternal(context, request.uri)
-                    GeckoResult.deny()
-                }
+                openExternal(context, request.uri)
+                return GeckoResult.deny()
             }
             override fun onLoadError(
                 session: GeckoSession,
-                uri:     String?,
-                error:   WebRequestError
+                uri: String?,
+                error: WebRequestError
             ): GeckoResult<String>? {
                 isLoading = false
                 loadError = when (error.category) {
@@ -171,22 +159,19 @@ fun GeckoTestScreen(
         Unit
     }
 
-    // ── ربط callbacks الذاكرة ────────────────────────────────────────
+    // ── callbacks الذاكرة ────────────────────────────────────────────
     DisposableEffect(platform?.id) {
         val p  = platform
         val vm = chatViewModel
 
         if (p != null && vm != null && p.memoryEnabled) {
-
             app.onAiResponseCaptured = { domain, text ->
                 vm.onWebAiResponse(
                     platformId   = p.id,
                     platformName = p.name,
                     text         = text
                 )
-                Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
             }
-
             app.onManualCaptureResult = { success, text, debug ->
                 timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
                 timeoutRunnable = null
@@ -199,9 +184,7 @@ fun GeckoTestScreen(
                         text         = text
                     )
                     Toast.makeText(
-                        context,
-                        "✅ تم الحفظ\n${text.take(50)}",
-                        Toast.LENGTH_LONG
+                        context, "✅ تم الحفظ\n${text.take(50)}", Toast.LENGTH_LONG
                     ).show()
                 } else {
                     val info = debug?.let {
@@ -210,9 +193,7 @@ fun GeckoTestScreen(
                         "body=${it.optInt("bodyLen")}"
                     } ?: "no response"
                     Toast.makeText(
-                        context,
-                        "⚠️ فشل الاستخراج\n$info",
-                        Toast.LENGTH_LONG
+                        context, "⚠️ فشل الاستخراج\n$info", Toast.LENGTH_LONG
                     ).show()
                 }
             }
@@ -220,27 +201,22 @@ fun GeckoTestScreen(
 
         onDispose {
             timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-            timeoutRunnable = null
+            timeoutRunnable  = null
             app.onAiResponseCaptured  = null
             app.onManualCaptureResult = null
         }
     }
 
-    // ── دالة الحفظ اليدوي 🧠 ─────────────────────────────────────────
+    // ── زر الحفظ 🧠 ──────────────────────────────────────────────────
     val saveToMemory: () -> Unit = save@{
         if (isSavingMemory || isLoading) return@save
-        if (platform == null)            return@save
-        if (!platform.memoryEnabled)     return@save
-        if (chatViewModel == null)       return@save
+        if (platform == null || !platform.memoryEnabled) return@save
+        if (chatViewModel == null) return@save
 
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
         isSavingMemory = true
 
-        Toast.makeText(
-            context,
-            "🧠 جاري البحث في الصفحة...",
-            Toast.LENGTH_SHORT
-        ).show()
+        Toast.makeText(context, "🧠 جاري البحث في الصفحة...", Toast.LENGTH_SHORT).show()
         app.triggerCapture()
 
         val r = Runnable {
@@ -257,34 +233,49 @@ fun GeckoTestScreen(
         mainHandler.postDelayed(r, 5000L)
     }
 
-    // ── دالة إرسال السياق 📤 ─────────────────────────────────────────
+    // ── زر إرسال السياق 📤 ───────────────────────────────────────────
     val sendContext: () -> Unit = ctx@{
-        if (platform == null)        return@ctx
-        if (!platform.memoryEnabled) return@ctx
-        if (chatViewModel == null)   return@ctx
+        if (platform == null || !platform.memoryEnabled) return@ctx
+        if (chatViewModel == null) return@ctx
 
-        Toast.makeText(
-            context,
-            "📤 جاري تحضير السياق...",
-            Toast.LENGTH_SHORT
-        ).show()
+        val currentBridge = bridge
+        if (currentBridge == null) {
+            Toast.makeText(context, "❌ Bridge غير متصل", Toast.LENGTH_SHORT).show()
+            return@ctx
+        }
+
+        Toast.makeText(context, "📤 جاري إرسال السياق...", Toast.LENGTH_SHORT).show()
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val memories = chatViewModel.getSharedMemories()
+                val memories      = chatViewModel.getSharedMemories()
+                val memoryContext = MemoryContextBuilder().build(memories)
+                val systemDoc     = SystemPrompt.ACCURACY_PROMPT
+
+                val result = currentBridge.deliver(
+                    systemDocument = systemDoc,
+                    memoryContext  = memoryContext,
+                    submit         = true,
+                    timeoutMs      = 10_000L
+                )
+
                 mainHandler.post {
-                    app.sendContextToPage(
-                        memories          = memories,
-                        customInstruction = ""
-                    )
+                    val msg = when (result.stage) {
+                        "clicked"      -> "✅ تم الإرسال — انتظر رد المنصة"
+                        "filled"       -> "✅ السياق في الصندوق — اضغط إرسال"
+                        "write_failed" -> "❌ فشل الكتابة: ${result.detail}"
+                        "no_port"      -> "❌ الجسر غير متصل"
+                        "page_not_ready" -> "❌ الصفحة لم تُحمَّل بعد"
+                        "timeout"      -> "❌ انتهت المهلة"
+                        "busy"         -> "⏳ عملية أخرى قيد التنفيذ"
+                        else           -> "⚠️ ${result.stage}: ${result.detail}"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                 }
+
             } catch (e: Exception) {
                 mainHandler.post {
-                    Toast.makeText(
-                        context,
-                        "❌ فشل جلب الذاكرة: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -296,7 +287,7 @@ fun GeckoTestScreen(
     }
     BackHandler(onBack = handleBack)
 
-    // ── دورة حياة ────────────────────────────────────────────────────
+    // ── دورة الحياة ──────────────────────────────────────────────────
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -354,7 +345,7 @@ fun GeckoTestScreen(
             actions = {
                 if (platform != null && platform.memoryEnabled && chatViewModel != null) {
 
-                    // ── زر الحفظ 🧠 ──
+                    // زر الحفظ 🧠
                     IconButton(
                         onClick = saveToMemory,
                         enabled = !isSavingMemory && !isLoading
@@ -365,7 +356,7 @@ fun GeckoTestScreen(
                         )
                     }
 
-                    // ── زر إرسال السياق 📤 ──
+                    // زر إرسال السياق 📤
                     IconButton(
                         onClick = sendContext,
                         enabled = !isLoading
@@ -429,79 +420,6 @@ fun GeckoTestScreen(
     }
 }
 
-// أضف في GeckoTestScreen
-
-var bridge by remember { mutableStateOf<SessionContextBridge?>(null) }
-
-// أنشئ الجسر عند فتح الصفحة
-DisposableEffect(session, app.aiChatExtension) {
-    val ext = app.aiChatExtension
-    if (ext != null) {
-        bridge = SessionContextBridge(session, ext)
-    }
-    onDispose {
-        bridge?.close()
-        bridge = null
-    }
-}
-
-// ── زر 📤 ──
-val sendContext: () -> Unit = ctx@{
-    if (platform == null)        return@ctx
-    if (!platform.memoryEnabled) return@ctx
-    if (chatViewModel == null)   return@ctx
-
-    Toast.makeText(context, "📤 جاري إرسال السياق...", Toast.LENGTH_SHORT).show()
-
-    CoroutineScope(Dispatchers.IO).launch {
-        try {
-            val memories      = chatViewModel.getSharedMemories()
-            val memoryContext = com.example.aichat.repository
-                                    .MemoryContextBuilder().build(memories)
-            val systemDoc     = com.example.aichat.data.local
-                                    .SystemPrompt.ACCURACY_PROMPT
-
-            val result = bridge?.deliver(
-                systemDocument = systemDoc,
-                memoryContext  = memoryContext,
-                submit         = true,
-                timeoutMs      = 10_000L
-            )
-
-            mainHandler.post {
-                when (result?.stage) {
-                    "clicked"     ->
-                        Toast.makeText(context,
-                            "✅ تم الإرسال — انتظر رد المنصة",
-                            Toast.LENGTH_LONG).show()
-                    "filled"      ->
-                        Toast.makeText(context,
-                            "✅ السياق في الصندوق — اضغط إرسال",
-                            Toast.LENGTH_LONG).show()
-                    "write_failed" ->
-                        Toast.makeText(context,
-                            "❌ فشل الكتابة: ${result.detail}",
-                            Toast.LENGTH_LONG).show()
-                    null          ->
-                        Toast.makeText(context,
-                            "❌ الجسر غير متصل",
-                            Toast.LENGTH_SHORT).show()
-                    else          ->
-                        Toast.makeText(context,
-                            "⚠️ ${result.stage}: ${result.detail}",
-                            Toast.LENGTH_LONG).show()
-                }
-            }
-
-        } catch (e: Exception) {
-            mainHandler.post {
-                Toast.makeText(context,
-                    "❌ ${e.message}",
-                    Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-}
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 private fun openExternal(context: Context, url: String) {
@@ -511,24 +429,18 @@ private fun openExternal(context: Context, url: String) {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     } catch (e: ActivityNotFoundException) {
-        Toast.makeText(
-            context,
-            "لا يوجد تطبيق لفتح هذا الرابط",
-            Toast.LENGTH_SHORT
-        ).show()
+        Toast.makeText(context, "لا يوجد تطبيق لفتح هذا الرابط", Toast.LENGTH_SHORT).show()
     }
 }
 
 @Composable
 private fun LoadErrorView(
-    message:       String,
-    onRetry:       () -> Unit,
+    message: String,
+    onRetry: () -> Unit,
     onOpenBrowser: () -> Unit
 ) {
     Box(
-        modifier         = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
+        modifier         = Modifier.fillMaxSize().padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
