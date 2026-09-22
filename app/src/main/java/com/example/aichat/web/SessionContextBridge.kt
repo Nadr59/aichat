@@ -1,8 +1,7 @@
 package com.example.aichat.web
 
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
+import com.example.aichat.AichatApp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -10,13 +9,11 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
-import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.WebExtension
 import java.util.UUID
 
 class SessionContextBridge(
-    private val session:   GeckoSession,
-    private val extension: WebExtension          // ← فقط extension (حذفنا runtime)
+    private val app: AichatApp
 ) {
     companion object {
         const val NATIVE_APP = "memory_context"
@@ -42,10 +39,10 @@ class SessionContextBridge(
 
     // ── الحالة ───────────────────────────────────────────────────────
 
-    private var port:    WebExtension.Port?                             = null
+    @Volatile private var port:    WebExtension.Port?                             = null
+    @Volatile private var closed = false
     private var ready  = CompletableDeferred<Unit>()
     private var pending: Pair<String, CompletableDeferred<JSONObject>>? = null
-    private var closed = false
 
     // ── PortDelegate ─────────────────────────────────────────────────
 
@@ -53,8 +50,9 @@ class SessionContextBridge(
 
         override fun onPortMessage(message: Any, source: WebExtension.Port) {
             if (source !== port) return
-
             val json = parseJson(message) ?: return
+
+            Log.d(TAG, "📩 from content.js: ${json.optString("type")}")
 
             when (json.optString("type")) {
                 "READY" -> {
@@ -72,28 +70,34 @@ class SessionContextBridge(
         }
 
         override fun onDisconnect(port: WebExtension.Port) {
-            Log.w(TAG, "Port disconnected")
+            Log.w(TAG, "⚠️ Port disconnected")
             this@SessionContextBridge.port = null
+            // إعادة تعيين ready للصفحة التالية
+            ready = CompletableDeferred()
         }
     }
 
     // ── MessageDelegate ───────────────────────────────────────────────
 
-    private val messageDelegate = object : WebExtension.MessageDelegate {
+    val messageDelegate = object : WebExtension.MessageDelegate {
 
         override fun onConnect(newPort: WebExtension.Port) {
+            Log.d(TAG, "🔌 onConnect: name=${newPort.name} url=${newPort.sender?.url}")
 
-            // 1. تحقق من الاسم
+            // تحقق من الاسم
             if (newPort.name != NATIVE_APP) {
+                Log.w(TAG, "Wrong port name: ${newPort.name}")
                 newPort.disconnect()
                 return
             }
 
-            // 2. تحقق من الـ host
+            // تحقق من الـ host
             val senderUrl = newPort.sender?.url ?: ""
             val host = runCatching {
                 java.net.URI(senderUrl).host ?: ""
             }.getOrDefault("")
+
+            Log.d(TAG, "🔌 host=$host allowed=${host in ALLOWED_HOSTS}")
 
             if (closed || host !in ALLOWED_HOSTS) {
                 Log.w(TAG, "Port rejected — closed=$closed host=$host")
@@ -101,16 +105,17 @@ class SessionContextBridge(
                 return
             }
 
-            // 3. إبطال Port قديم
+            // إبطال Port قديم
             port?.disconnect()
             port  = newPort
             ready = CompletableDeferred()
             newPort.setDelegate(portDelegate)
 
-            // 4. مصافحة
+            // مصافحة
             try {
                 newPort.postMessage(JSONObject().put("type", "HELLO"))
-                Log.d(TAG, "✅ Port connected from $host")
+                Log.d(TAG, "✅ Port accepted from $host — HELLO sent")
+                app.showToast("✅ Bridge: $host")
             } catch (e: Exception) {
                 Log.e(TAG, "HELLO failed: ${e.message}")
             }
@@ -120,12 +125,16 @@ class SessionContextBridge(
     // ── init ──────────────────────────────────────────────────────────
 
     init {
-        // ✅ الصحيح: extension.setMessageDelegate (ليس runtime)
-        Handler(Looper.getMainLooper()).post {
-            extension.setMessageDelegate(messageDelegate, NATIVE_APP)
-            Log.d(TAG, "✅ MessageDelegate registered on extension")
-        }
+        // تسجيل عبر AichatApp (يضمن التزامن الصحيح)
+        app.registerBridgeDelegate(messageDelegate)
+        Log.d(TAG, "✅ Bridge initialized")
     }
+
+    // ── isConnected ───────────────────────────────────────────────────
+
+    val isConnected: Boolean get() = port != null && !closed
+
+    val isPageReady: Boolean get() = ready.isCompleted
 
     // ── deliver ───────────────────────────────────────────────────────
 
@@ -136,20 +145,29 @@ class SessionContextBridge(
         timeoutMs:      Long    = 10_000L
     ): DeliveryResult = withContext(Dispatchers.Main) {
 
+        Log.d(TAG, "deliver: closed=$closed port=${port != null} ready=${ready.isCompleted}")
+
         if (closed) {
             return@withContext DeliveryResult("", "bridge_closed")
         }
         if (pending != null) {
             return@withContext DeliveryResult("", "busy")
         }
+        if (port == null) {
+            return@withContext DeliveryResult("", "no_port")
+        }
 
         val requestId = UUID.randomUUID().toString()
 
         // انتظار جاهزية الصفحة
-        try {
-            withTimeout(timeoutMs) { ready.await() }
-        } catch (e: TimeoutCancellationException) {
-            return@withContext DeliveryResult(requestId, "page_not_ready")
+        if (!ready.isCompleted) {
+            Log.d(TAG, "⏳ Waiting for page ready...")
+            try {
+                withTimeout(timeoutMs) { ready.await() }
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "❌ Page not ready after ${timeoutMs}ms")
+                return@withContext DeliveryResult(requestId, "page_not_ready")
+            }
         }
 
         val currentPort = port
@@ -171,6 +189,7 @@ class SessionContextBridge(
                     .put("memoryContext",  memoryContext)
                     .put("submit",         submit)
             )
+            Log.d(TAG, "📤 DELIVER sent: $requestId")
         } catch (e: Exception) {
             pending = null
             Log.e(TAG, "postMessage failed: ${e.message}")
@@ -180,6 +199,7 @@ class SessionContextBridge(
         // انتظار النتيجة
         return@withContext try {
             val result = withTimeout(timeoutMs) { deferred.await() }
+            Log.d(TAG, "✅ RESULT: ${result.optString("stage")}")
             DeliveryResult(
                 requestId = requestId,
                 stage     = result.optString("stage", "unknown"),
@@ -187,6 +207,7 @@ class SessionContextBridge(
             )
         } catch (e: TimeoutCancellationException) {
             pending = null
+            Log.e(TAG, "❌ Timeout waiting for RESULT")
             DeliveryResult(requestId, "timeout")
         } catch (e: CancellationException) {
             pending = null
@@ -214,7 +235,7 @@ class SessionContextBridge(
             else          -> null
         }
     } catch (e: Exception) {
-        Log.e(TAG, "parseJson failed: ${e.message}")
+        Log.e(TAG, "parseJson: ${e.message}")
         null
     }
 }
