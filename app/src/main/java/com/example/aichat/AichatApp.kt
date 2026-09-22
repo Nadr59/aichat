@@ -6,9 +6,6 @@ import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import com.example.aichat.data.local.ChatDatabase
-import com.example.aichat.data.local.SystemPrompt
-import com.example.aichat.data.model.MemoryItem
-import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
 import com.example.aichat.web.SessionContextBridge
 import org.json.JSONObject
@@ -19,21 +16,19 @@ import org.mozilla.geckoview.WebExtension
 
 class AichatApp : Application() {
 
-    // ── المتغيرات ─────────────────────────────────────────────────────
-
     @Volatile var geckoRuntime: GeckoRuntime? = null
         private set
 
-    // المسار 1 — aicapture (التقاط → ذاكرة)
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
-    // المسار 2 — contextbridge (سياق → منصة)
     @Volatile var contextBridgeExtension: WebExtension? = null
         private set
 
+    // Bridge النشط حالياً
+    @Volatile var activeBridge: Any? = null
+
     @Volatile private var captureFlag = false
-    @Volatile private var pendingBridgeDelegate: WebExtension.MessageDelegate? = null
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
@@ -41,18 +36,15 @@ class AichatApp : Application() {
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
-    // ── Toast ─────────────────────────────────────────────────────────
-
     fun showToast(msg: String) {
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // المسار 1 — aicapture
-    // نفس النسخة القديمة تماماً — onMessage + GeckoResult
-    // ══════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════
+    // المسار 1 — aicapture — onMessage + GeckoResult
+    // ══════════════════════════════════════════════════════
 
     fun triggerCapture() {
         captureFlag = true
@@ -67,37 +59,26 @@ class AichatApp : Application() {
             message:   Any,
             sender:    WebExtension.MessageSender
         ): GeckoResult<Any>? {
-
             val json = parseMessage(message) ?: return null
             val type = json.optString("type")
-            Log.d("AichatApp", "📩 [aicapture] type=$type")
+            Log.d("AichatApp", "📩 [aicapture] $type")
 
             return when (type) {
-
                 "CHECK_CAPTURE" -> {
                     val flag    = captureFlag
                     captureFlag = false
-                    Log.d("AichatApp", "✅ CHECK_CAPTURE flag=$flag")
                     if (flag) showToast("📡 جاري الاستخراج...")
-                    GeckoResult.fromValue(
-                        JSONObject().put("capture", flag)
-                    )
+                    GeckoResult.fromValue(JSONObject().put("capture", flag))
                 }
-
                 "AI_RESPONSE" -> {
                     handleAutoResponse(json)
                     null
                 }
-
                 "CAPTURE_RESULT" -> {
                     handleCaptureResult(json)
                     null
                 }
-
-                else -> {
-                    Log.w("AichatApp", "⚠️ [aicapture] unknown: $type")
-                    null
-                }
+                else -> null
             }
         }
     }
@@ -112,40 +93,43 @@ class AichatApp : Application() {
                 { ext ->
                     if (ext != null) {
                         aiChatExtension = ext
-                        // ✅ نفس النسخة القديمة — onMessage فقط
                         ext.setMessageDelegate(messageDelegateAiCapture, "browser")
                         Log.d("AichatApp", "✅ aicapture loaded")
                         showToast("✅ aicapture جاهزة")
-                    } else {
-                        Log.e("AichatApp", "❌ aicapture = null")
                     }
                 },
-                { e ->
-                    Log.e("AichatApp", "❌ aicapture: ${e?.message}")
-                    showToast("❌ aicapture: ${e?.message}")
-                }
+                { e -> Log.e("AichatApp", "❌ aicapture: ${e?.message}") }
             )
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // المسار 2 — contextbridge
-    // Port مستقل — لا علاقة له بـ aicapture
-    // ══════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════
+    // المسار 2 — contextbridge — Port مباشر
+    // ══════════════════════════════════════════════════════
 
-    fun registerBridgeDelegate(delegate: WebExtension.MessageDelegate) {
-        pendingBridgeDelegate = delegate
-        val ext = contextBridgeExtension
-        if (ext != null) {
-            Handler(Looper.getMainLooper()).post {
-                try {
-                    ext.setMessageDelegate(delegate, SessionContextBridge.NATIVE_APP)
-                    Log.d("AichatApp", "✅ BridgeDelegate registered")
-                } catch (e: Exception) {
-                    Log.e("AichatApp", "❌ registerBridgeDelegate: ${e.message}")
-                }
+    // delegate ثابت — مسجل مبكراً — يوجّه للـ bridge النشط
+    private val bridgeMessageDelegate = object : WebExtension.MessageDelegate {
+
+        override fun onConnect(newPort: WebExtension.Port) {
+            Log.d("AichatApp", "🔌 Bridge onConnect: ${newPort.name} — ${newPort.sender?.url}")
+
+            if (newPort.name != SessionContextBridge.NATIVE_APP) {
+                newPort.disconnect()
+                return
             }
-        } else {
-            Log.w("AichatApp", "⚠️ contextBridgeExtension null — queued")
+
+            val host = runCatching {
+                java.net.URI(newPort.sender?.url ?: "").host ?: ""
+            }.getOrDefault("")
+
+            Log.d("AichatApp", "🔌 host=$host")
+
+            val bridge = activeBridge as? SessionContextBridge
+            if (bridge != null) {
+                bridge.acceptPort(newPort, host)
+            } else {
+                Log.w("AichatApp", "⚠️ No active bridge")
+                newPort.disconnect()
+            }
         }
     }
 
@@ -159,26 +143,15 @@ class AichatApp : Application() {
                 { ext ->
                     if (ext != null) {
                         contextBridgeExtension = ext
-                        Log.d("AichatApp", "✅ contextbridge loaded")
-                        showToast("✅ Bridge جاهز")
-
-                        // سجّل delegate إذا كان منتظراً
-                        val delegate = pendingBridgeDelegate
-                        if (delegate != null) {
-                            Handler(Looper.getMainLooper()).post {
-                                try {
-                                    ext.setMessageDelegate(
-                                        delegate,
-                                        SessionContextBridge.NATIVE_APP
-                                    )
-                                    Log.d("AichatApp", "✅ Queued delegate registered")
-                                } catch (e: Exception) {
-                                    Log.e("AichatApp", "❌ queued delegate: ${e.message}")
-                                }
-                            }
+                        // ✅ تسجيل فوري قبل أي شيء
+                        Handler(Looper.getMainLooper()).post {
+                            ext.setMessageDelegate(
+                                bridgeMessageDelegate,
+                                SessionContextBridge.NATIVE_APP
+                            )
+                            Log.d("AichatApp", "✅ bridgeMessageDelegate registered")
+                            showToast("✅ Bridge جاهز")
                         }
-                    } else {
-                        Log.e("AichatApp", "❌ contextbridge = null")
                     }
                 },
                 { e ->
@@ -188,16 +161,15 @@ class AichatApp : Application() {
             )
     }
 
-    // ══════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════
     // مشترك
-    // ══════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════
 
     override fun onCreate() {
         super.onCreate()
         try {
             val db = ChatDatabase.getDatabase(this)
             webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
-            Log.d("AichatApp", "✅ Database ready")
         } catch (e: Exception) {
             Log.e("AichatApp", "❌ Database: ${e.message}", e)
             throw e
@@ -213,8 +185,8 @@ class AichatApp : Application() {
                 .build()
             GeckoRuntime.create(applicationContext, settings).also { rt ->
                 geckoRuntime = rt
-                loadAiCaptureExtension(rt)      // المسار 1
-                loadContextBridgeExtension(rt)  // المسار 2
+                loadAiCaptureExtension(rt)
+                loadContextBridgeExtension(rt)
                 Log.d("AichatApp", "✅ GeckoRuntime created")
             }
         } catch (e: Exception) {
@@ -228,7 +200,6 @@ class AichatApp : Application() {
         val text   = json.optString("text")
         val domain = json.optString("domain", "unknown")
         if (text.length < 80) return
-        Log.d("AichatApp", "📨 Auto: ${text.take(60)}…")
         onAiResponseCaptured?.invoke(domain, text)
     }
 
@@ -236,10 +207,6 @@ class AichatApp : Application() {
         val success = json.optBoolean("success", false)
         val text    = json.optString("text")
         val debug   = json.optJSONObject("debug")
-        Log.d("AichatApp",
-            if (success) "🧠 OK: ${text.take(60)}…"
-            else "⚠️ Failed: $debug"
-        )
         Handler(Looper.getMainLooper()).post {
             onManualCaptureResult?.invoke(success, text, debug)
         }
@@ -251,8 +218,5 @@ class AichatApp : Application() {
             is Map<*, *>  -> JSONObject(message as Map<*, *>)
             else          -> null
         }
-    } catch (e: Exception) {
-        Log.e("AichatApp", "❌ parseMessage: ${e.message}")
-        null
-    }
+    } catch (e: Exception) { null }
 }
