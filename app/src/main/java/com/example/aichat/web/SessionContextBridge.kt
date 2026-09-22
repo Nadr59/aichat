@@ -37,11 +37,9 @@ class SessionContextBridge(
         val detail:    String = ""
     )
 
-    // ── الحالة ───────────────────────────────────────────────────────
-
-    @Volatile private var port:    WebExtension.Port?                             = null
+    @Volatile private var port:   WebExtension.Port? = null
     @Volatile private var closed = false
-    private var ready  = CompletableDeferred<Unit>()
+    private var ready   = CompletableDeferred<Unit>()
     private var pending: Pair<String, CompletableDeferred<JSONObject>>? = null
 
     // ── PortDelegate ─────────────────────────────────────────────────
@@ -51,13 +49,13 @@ class SessionContextBridge(
         override fun onPortMessage(message: Any, source: WebExtension.Port) {
             if (source !== port) return
             val json = parseJson(message) ?: return
-
-            Log.d(TAG, "📩 from content.js: ${json.optString("type")}")
+            Log.d(TAG, "📩 ${json.optString("type")}")
 
             when (json.optString("type")) {
                 "READY" -> {
-                    Log.d(TAG, "✅ Page ready: ${json.optString("url")}")
+                    Log.d(TAG, "✅ READY: ${json.optString("url")}")
                     if (!ready.isCompleted) ready.complete(Unit)
+                    app.showToast("✅ Bridge متصل")
                 }
                 "RESULT" -> {
                     val p = pending ?: return
@@ -72,68 +70,51 @@ class SessionContextBridge(
         override fun onDisconnect(port: WebExtension.Port) {
             Log.w(TAG, "⚠️ Port disconnected")
             this@SessionContextBridge.port = null
-            // إعادة تعيين ready للصفحة التالية
             ready = CompletableDeferred()
         }
     }
 
-    // ── MessageDelegate ───────────────────────────────────────────────
+    // ── acceptPort — يُستدعى من AichatApp ────────────────────────────
 
-    val messageDelegate = object : WebExtension.MessageDelegate {
+    fun acceptPort(newPort: WebExtension.Port, host: String) {
+        if (closed) {
+            Log.w(TAG, "Bridge closed — rejecting port")
+            newPort.disconnect()
+            return
+        }
 
-        override fun onConnect(newPort: WebExtension.Port) {
-            Log.d(TAG, "🔌 onConnect: name=${newPort.name} url=${newPort.sender?.url}")
+        if (host !in ALLOWED_HOSTS) {
+            Log.w(TAG, "Host not allowed: $host")
+            newPort.disconnect()
+            return
+        }
 
-            // تحقق من الاسم
-            if (newPort.name != NATIVE_APP) {
-                Log.w(TAG, "Wrong port name: ${newPort.name}")
-                newPort.disconnect()
-                return
-            }
+        // إبطال Port قديم
+        port?.disconnect()
+        port  = newPort
+        ready = CompletableDeferred()
+        newPort.setDelegate(portDelegate)
 
-            // تحقق من الـ host
-            val senderUrl = newPort.sender?.url ?: ""
-            val host = runCatching {
-                java.net.URI(senderUrl).host ?: ""
-            }.getOrDefault("")
-
-            Log.d(TAG, "🔌 host=$host allowed=${host in ALLOWED_HOSTS}")
-
-            if (closed || host !in ALLOWED_HOSTS) {
-                Log.w(TAG, "Port rejected — closed=$closed host=$host")
-                newPort.disconnect()
-                return
-            }
-
-            // إبطال Port قديم
-            port?.disconnect()
-            port  = newPort
-            ready = CompletableDeferred()
-            newPort.setDelegate(portDelegate)
-
-            // مصافحة
-            try {
-                newPort.postMessage(JSONObject().put("type", "HELLO"))
-                Log.d(TAG, "✅ Port accepted from $host — HELLO sent")
-                app.showToast("✅ Bridge: $host")
-            } catch (e: Exception) {
-                Log.e(TAG, "HELLO failed: ${e.message}")
-            }
+        // مصافحة
+        try {
+            newPort.postMessage(JSONObject().put("type", "HELLO"))
+            Log.d(TAG, "✅ Port accepted from $host — HELLO sent")
+        } catch (e: Exception) {
+            Log.e(TAG, "HELLO failed: ${e.message}")
         }
     }
 
     // ── init ──────────────────────────────────────────────────────────
 
     init {
-        // تسجيل عبر AichatApp (يضمن التزامن الصحيح)
-        app.registerBridgeDelegate(messageDelegate)
-        Log.d(TAG, "✅ Bridge initialized")
+        // تسجيل نفسه كـ bridge نشط
+        app.activeBridge = this
+        Log.d(TAG, "✅ Bridge initialized — registered as active")
     }
 
     // ── isConnected ───────────────────────────────────────────────────
 
     val isConnected: Boolean get() = port != null && !closed
-
     val isPageReady: Boolean get() = ready.isCompleted
 
     // ── deliver ───────────────────────────────────────────────────────
@@ -147,39 +128,26 @@ class SessionContextBridge(
 
         Log.d(TAG, "deliver: closed=$closed port=${port != null} ready=${ready.isCompleted}")
 
-        if (closed) {
-            return@withContext DeliveryResult("", "bridge_closed")
-        }
-        if (pending != null) {
-            return@withContext DeliveryResult("", "busy")
-        }
-        if (port == null) {
-            return@withContext DeliveryResult("", "no_port")
-        }
+        if (closed)       return@withContext DeliveryResult("", "bridge_closed")
+        if (pending != null) return@withContext DeliveryResult("", "busy")
+        if (port == null) return@withContext DeliveryResult("", "no_port")
 
         val requestId = UUID.randomUUID().toString()
 
-        // انتظار جاهزية الصفحة
         if (!ready.isCompleted) {
-            Log.d(TAG, "⏳ Waiting for page ready...")
+            Log.d(TAG, "⏳ Waiting for READY...")
             try {
                 withTimeout(timeoutMs) { ready.await() }
             } catch (e: TimeoutCancellationException) {
-                Log.e(TAG, "❌ Page not ready after ${timeoutMs}ms")
                 return@withContext DeliveryResult(requestId, "page_not_ready")
             }
         }
 
-        val currentPort = port
-        if (currentPort == null) {
-            return@withContext DeliveryResult(requestId, "no_port")
-        }
+        val currentPort = port ?: return@withContext DeliveryResult(requestId, "no_port")
 
-        // إعداد الانتظار
         val deferred = CompletableDeferred<JSONObject>()
         pending = Pair(requestId, deferred)
 
-        // إرسال DELIVER
         try {
             currentPort.postMessage(
                 JSONObject()
@@ -189,17 +157,14 @@ class SessionContextBridge(
                     .put("memoryContext",  memoryContext)
                     .put("submit",         submit)
             )
-            Log.d(TAG, "📤 DELIVER sent: $requestId")
+            Log.d(TAG, "📤 DELIVER sent")
         } catch (e: Exception) {
             pending = null
-            Log.e(TAG, "postMessage failed: ${e.message}")
             return@withContext DeliveryResult(requestId, "send_failed", e.message ?: "")
         }
 
-        // انتظار النتيجة
         return@withContext try {
             val result = withTimeout(timeoutMs) { deferred.await() }
-            Log.d(TAG, "✅ RESULT: ${result.optString("stage")}")
             DeliveryResult(
                 requestId = requestId,
                 stage     = result.optString("stage", "unknown"),
@@ -207,7 +172,6 @@ class SessionContextBridge(
             )
         } catch (e: TimeoutCancellationException) {
             pending = null
-            Log.e(TAG, "❌ Timeout waiting for RESULT")
             DeliveryResult(requestId, "timeout")
         } catch (e: CancellationException) {
             pending = null
@@ -219,6 +183,7 @@ class SessionContextBridge(
 
     fun close() {
         closed = true
+        if (app.activeBridge === this) app.activeBridge = null
         try { port?.disconnect() } catch (_: Exception) {}
         port = null
         pending?.second?.cancel()
@@ -226,16 +191,11 @@ class SessionContextBridge(
         Log.d(TAG, "Bridge closed")
     }
 
-    // ── مساعد ────────────────────────────────────────────────────────
-
     private fun parseJson(message: Any): JSONObject? = try {
         when (message) {
             is JSONObject -> message
             is Map<*, *>  -> JSONObject(message as Map<*, *>)
             else          -> null
         }
-    } catch (e: Exception) {
-        Log.e(TAG, "parseJson: ${e.message}")
-        null
-    }
+    } catch (e: Exception) { null }
 }
