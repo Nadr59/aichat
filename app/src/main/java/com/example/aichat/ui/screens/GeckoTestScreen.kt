@@ -76,8 +76,9 @@ fun GeckoTestScreen(
     var isSendingCtx    by remember { mutableStateOf(false) }
     var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
 
-    // ── المسار 2: Bridge ─────────────────────────────────────────────
-   // val bridge = remember { SessionContextBridge(app) }
+    // ── المسار 2: Bridge — يجب أن يكون هنا قبل أي استخدام ───────────
+    val bridge = remember { SessionContextBridge(app) }
+
     DisposableEffect(Unit) {
         onDispose { bridge.close() }
     }
@@ -315,6 +316,7 @@ fun GeckoTestScreen(
 
     // ── الواجهة ──────────────────────────────────────────────────────
     Column(modifier = Modifier.fillMaxSize()) {
+
         TopAppBar(
             title = {
                 Column {
@@ -380,6 +382,7 @@ fun GeckoTestScreen(
         )
 
         Box(modifier = Modifier.fillMaxSize()) {
+
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory  = { ctx ->
