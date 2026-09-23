@@ -9,6 +9,7 @@
     var DEBOUNCE_MS   = 1800;
     var MIN_LEN       = 30;
     var MAX_LEN       = 3000;
+    var contextBusy   = false;  // منع تكرار writeAndSend
 
     // ── Helpers ───────────────────────────────────────────────────────
 
@@ -191,23 +192,25 @@
     setInterval(function () {
 
         if (document.visibilityState !== 'visible') return;
+        if (contextBusy) return;  // لا تسأل أثناء الكتابة
 
         browser.runtime.sendMessage({
-            type: 'GET_CONTEXT'
+            type:   'GET_CONTEXT',
+            domain: location.hostname
         }).then(function (response) {
 
             if (!response || !response.hasContext) return;
-
             var context = response.context || '';
             if (!context) return;
 
+            contextBusy = true;
             writeAndSend(context);
 
         }).catch(function () {});
 
     }, 1000);
 
-    // ── الكتابة في صندوق الإدخال ─────────────────────────────────────
+    // ── إيجاد صندوق الإدخال ──────────────────────────────────────────
 
     function findInputBox() {
         var host = location.hostname;
@@ -227,6 +230,8 @@
         return document.querySelector('textarea')
             || document.querySelector('[contenteditable="true"]');
     }
+
+    // ── الكتابة في صندوق الإدخال ─────────────────────────────────────
 
     function writeToInputBox(text) {
         var input = findInputBox();
@@ -277,7 +282,7 @@
         return { ok: true, stage: 'contenteditable' };
     }
 
-    // ── إيجاد وضغط زر الإرسال ────────────────────────────────────────
+    // ── إيجاد زر الإرسال ─────────────────────────────────────────────
 
     function findSendButton() {
         var host = location.hostname;
@@ -302,8 +307,9 @@
             || document.querySelector('button[aria-label*="send" i]');
     }
 
+    // ── ضغط زر الإرسال ───────────────────────────────────────────────
+
     function clickSendButton() {
-        // انتظار حتى 3 ثوانٍ للزر
         var attempts = 0;
         var interval = setInterval(function () {
             attempts++;
@@ -312,11 +318,12 @@
                 clearInterval(interval);
                 btn.click();
                 browser.runtime.sendMessage({
-                    type:  'CONTEXT_WRITTEN',
-                    stage: 'clicked',
-                    len:   0,
+                    type:   'CONTEXT_WRITTEN',
+                    stage:  'clicked',
+                    detail: '',
                     domain: location.hostname
                 }).catch(function () {});
+                contextBusy = false;
             } else if (attempts >= 15) {
                 clearInterval(interval);
                 // محاولة Enter
@@ -327,6 +334,13 @@
                         bubbles: true, composed: true
                     }));
                 }
+                browser.runtime.sendMessage({
+                    type:   'CONTEXT_WRITTEN',
+                    stage:  'enter_pressed',
+                    detail: '',
+                    domain: location.hostname
+                }).catch(function () {});
+                contextBusy = false;
             }
         }, 200);
     }
@@ -337,22 +351,21 @@
         var result = writeToInputBox(context);
 
         browser.runtime.sendMessage({
-            type:   'DEBUG_INFO',
-            info:   'write: ok=' + result.ok + ' stage=' + result.stage
+            type: 'DEBUG_INFO',
+            info: 'write: ok=' + result.ok + ' stage=' + result.stage
         }).catch(function () {});
 
         if (!result.ok) {
             browser.runtime.sendMessage({
-                type:    'CONTEXT_WRITTEN',
-                stage:   'write_failed',
-                detail:  result.stage,
-                len:     0,
-                domain:  location.hostname
+                type:   'CONTEXT_WRITTEN',
+                stage:  'write_failed',
+                detail: result.stage,
+                domain: location.hostname
             }).catch(function () {});
+            contextBusy = false;
             return;
         }
 
-        // انتظر قليلاً ثم اضغط إرسال
         setTimeout(clickSendButton, 600);
     }
 
