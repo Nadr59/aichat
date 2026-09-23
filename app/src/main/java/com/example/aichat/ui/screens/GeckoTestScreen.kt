@@ -65,18 +65,17 @@ fun GeckoTestScreen(
     }
 
     // ── الحالة ───────────────────────────────────────────────────────
-    var isLoading       by remember { mutableStateOf(true) }
-    var progress        by remember { mutableIntStateOf(0) }
-    var canGoBack       by remember { mutableStateOf(false) }
-    var currentUrl      by remember { mutableStateOf(url) }
-    var currentTitle    by remember { mutableStateOf(title) }
-    var loadError       by remember { mutableStateOf<String?>(null) }
-    var geckoViewRef    by remember { mutableStateOf<GeckoView?>(null) }
-    var isSavingMemory  by remember { mutableStateOf(false) }
-    var isSendingCtx    by remember { mutableStateOf(false) }
-    var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
-
-
+    var isLoading             by remember { mutableStateOf(true) }
+    var progress              by remember { mutableIntStateOf(0) }
+    var canGoBack             by remember { mutableStateOf(false) }
+    var currentUrl            by remember { mutableStateOf(url) }
+    var currentTitle          by remember { mutableStateOf(title) }
+    var loadError             by remember { mutableStateOf<String?>(null) }
+    var geckoViewRef          by remember { mutableStateOf<GeckoView?>(null) }
+    var isSavingMemory        by remember { mutableStateOf(false) }
+    var isSendingCtx          by remember { mutableStateOf(false) }
+    var timeoutRunnable       by remember { mutableStateOf<Runnable?>(null) }
+    var isSystemPromptEnabled by remember { mutableStateOf(true) }   // ← جديد
 
     // ── Session ──────────────────────────────────────────────────────
     val session = remember { GeckoSession() }
@@ -220,30 +219,31 @@ fun GeckoTestScreen(
     }
 
     // ── المسار 2: زر 📤 ──────────────────────────────────────────────
-    
 
-                
-// زر 📤 البسيط
-val sendContext: () -> Unit = ctx@{
-    if (isLoading) return@ctx
-    if (platform == null || !platform.memoryEnabled) return@ctx
-    if (chatViewModel == null) return@ctx
+    val sendContext: () -> Unit = ctx@{
+        if (isLoading) return@ctx
+        if (platform == null || !platform.memoryEnabled) return@ctx
+        if (chatViewModel == null) return@ctx
 
-    Toast.makeText(context, "📤 جاري تحضير السياق...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "📤 جاري تحضير السياق...", Toast.LENGTH_SHORT).show()
 
-    CoroutineScope(Dispatchers.IO).launch {
-        try {
-            val memories = chatViewModel.getSharedMemories()
-            mainHandler.post {
-                app.sendContextToPage(memories = memories)
-            }
-        } catch (e: Exception) {
-            mainHandler.post {
-                Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_SHORT).show()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val memories = chatViewModel.getSharedMemories()
+                mainHandler.post {
+                    app.sendContextToPage(
+                        memories              = memories,
+                        isSystemPromptEnabled = isSystemPromptEnabled   // ← يُمرَّر الآن
+                    )
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
-}
+
     // ── رجوع ذكي ─────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
         if (canGoBack) session.goBack() else onBack()
@@ -315,6 +315,16 @@ val sendContext: () -> Unit = ctx@{
                     ) {
                         Text(
                             text  = if (isSavingMemory) "⏳" else "🧠",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+
+                    // زر تفعيل/تعطيل الوثيقة — جديد
+                    IconButton(
+                        onClick = { isSystemPromptEnabled = !isSystemPromptEnabled }
+                    ) {
+                        Text(
+                            text  = if (isSystemPromptEnabled) "📄✅" else "📄❌",
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
