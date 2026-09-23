@@ -1,10 +1,18 @@
 (function () {
 
-    console.log("AICAPTURE_VERSION: 1.1.0 - stability check + junk filter");
-
     if (window !== window.top) return;
     if (window.__aiCaptureActive) return;
     window.__aiCaptureActive = true;
+
+    // ✅ إرسال نبضة تحقق فورية — تظهر كـ Toast في التطبيق
+    try {
+        browser.runtime.sendMessage({
+            type: 'DEBUG_INFO',
+            info: 'SCRIPT_LOADED v1.1.0 on ' + location.hostname
+        });
+    } catch (e) {}
+
+    
 
     var lastSentText     = '';
     var debounceTimer     = null;
