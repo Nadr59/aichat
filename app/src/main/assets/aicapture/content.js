@@ -66,19 +66,30 @@
     // ── Extractors ────────────────────────────────────────────────────
 
     function extractChatGPT() {
-        var turns = document.querySelectorAll(
-            '[data-message-author-role="assistant"]'
-        );
-        for (var i = turns.length - 1; i >= 0; i--) {
-            var turn = turns[i];
-            if (turn.closest('[data-is-streaming="true"]')) continue;
-            var inner = turn.querySelector(
-                '.markdown, .prose, .whitespace-pre-wrap'
-            ) || turn;
-            var t = clean(inner.innerText);
-            if (t.length >= MIN_LEN) return t;
-        }
-        return null;   // ✅ لا احتياط للـ longest-block هنا
+    var turns = document.querySelectorAll(
+        '[data-message-author-role="assistant"]'
+    );
+    for (var i = turns.length - 1; i >= 0; i--) {
+        var turn = turns[i];
+        if (turn.closest('[data-is-streaming="true"]')) continue;
+        var inner = turn.querySelector(
+            '.markdown, .prose, .whitespace-pre-wrap'
+        ) || turn;
+        var t = clean(inner.innerText);
+        if (t.length >= MIN_LEN) return t;
+    }
+
+    // ✅ الاحتياط الخاص بـ ChatGPT — يجب أن يبقى
+    var articles = document.querySelectorAll(
+        'article[data-testid^="conversation-turn"]'
+    );
+    for (var j = articles.length - 1; j >= 0; j--) {
+        if (articles[j].querySelector('[data-message-author-role="user"]')) continue;
+        var t2 = clean(articles[j].innerText);
+        if (t2.length >= MIN_LEN) return t2;
+    }
+
+    return null;
     }
 
     function extractClaude() {
