@@ -1,5 +1,9 @@
 (function () {
 
+
+    console.log("AICAPTURE_VERSION: 1.0.7 - GET_CONTEXT enabled");
+
+
     if (window !== window.top) return;
     if (window.__aiCaptureActive) return;
     window.__aiCaptureActive = true;
