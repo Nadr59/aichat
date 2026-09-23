@@ -7,8 +7,6 @@ browser.runtime.onMessage.addListener(function (message, sender) {
 
     var type = message.type;
 
-    // ── التقاط تلقائي ─────────────────────────────────────────────────
-
     if (type === "AI_RESPONSE") {
         browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "AI_RESPONSE",
@@ -17,8 +15,6 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         });
         return;
     }
-
-    // ── التقاط يدوي — CHECK_CAPTURE ───────────────────────────────────
 
     if (type === "CHECK_CAPTURE") {
         return browser.runtime.sendNativeMessage(NATIVE_APP, {
@@ -42,11 +38,11 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         return;
     }
 
-    // ── إرسال السياق — GET_CONTEXT ────────────────────────────────────
-
+    // ── جديد: GET_CONTEXT ─────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
         return browser.runtime.sendNativeMessage(NATIVE_APP, {
-            type: "GET_CONTEXT"
+            type:   "GET_CONTEXT",
+            domain: message.domain || ""
         }).then(function (response) {
             return response;
         }).catch(function () {
@@ -54,34 +50,13 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         });
     }
 
-    // ── نتيجة الكتابة ─────────────────────────────────────────────────
-
+    // ── جديد: CONTEXT_WRITTEN ─────────────────────────────────────────
     if (type === "CONTEXT_WRITTEN") {
         browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "CONTEXT_WRITTEN",
             stage:  message.stage  || "",
             detail: message.detail || "",
-            len:    message.len    || 0,
             domain: message.domain || ""
-        });
-        return;
-    }
-
-    // ── معلومات تشخيصية ───────────────────────────────────────────────
-
-    if (type === "DEBUG_INFO") {
-        browser.runtime.sendNativeMessage(NATIVE_APP, {
-            type: "DEBUG_INFO",
-            info: message.info || ""
-        });
-        return;
-    }
-
-    if (type === "DEBUG_BUTTONS") {
-        browser.runtime.sendNativeMessage(NATIVE_APP, {
-            type:    "DEBUG_BUTTONS",
-            buttons: message.buttons || [],
-            domain:  message.domain  || ""
         });
         return;
     }
