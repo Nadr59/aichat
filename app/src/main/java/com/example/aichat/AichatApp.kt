@@ -57,17 +57,30 @@ class AichatApp : Application() {
     // ══════════════════════════════════════════════════════════════════
 
     fun sendContextToPage(
-        memories:          List<MemoryItem>,
-        customInstruction: String = ""
+        memories:              List<MemoryItem>,
+        customInstruction:     String  = "",
+        isSystemPromptEnabled: Boolean = true
     ) {
         val memoryContext = MemoryContextBuilder().build(memories)
-        val systemPrompt  = SystemPrompt.build(
+
+        if (memoryContext.isBlank() && !isSystemPromptEnabled) {
+            showToast("⚠️ لا يوجد سياق لإرساله (الذاكرة فارغة والوثيقة معطّلة)")
+            Log.w("AichatApp", "⚠️ Nothing to send: memory empty, prompt disabled")
+            return
+        }
+
+        val systemPrompt = SystemPrompt.build(
             memoryContext     = memoryContext,
             customInstruction = customInstruction,
-            includeAccuracy   = true
+            includeAccuracy   = isSystemPromptEnabled
         )
+
         contextPending = systemPrompt
-        Log.d("AichatApp", "📤 contextPending set: ${systemPrompt.length} chars")
+        Log.d(
+            "AichatApp",
+            "📤 contextPending set: ${systemPrompt.length} chars " +
+            "(promptEnabled=$isSystemPromptEnabled, memoryLen=${memoryContext.length})"
+        )
         showToast("📤 السياق جاهز: ${systemPrompt.length} حرف")
     }
 
