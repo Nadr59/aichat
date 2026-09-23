@@ -76,12 +76,7 @@ fun GeckoTestScreen(
     var isSendingCtx    by remember { mutableStateOf(false) }
     var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
 
-    // ── المسار 2: Bridge — يجب أن يكون هنا قبل أي استخدام ───────────
-    val bridge = remember { SessionContextBridge(app) }
 
-    DisposableEffect(Unit) {
-        onDispose { bridge.close() }
-    }
 
     // ── Session ──────────────────────────────────────────────────────
     val session = remember { GeckoSession() }
@@ -225,63 +220,30 @@ fun GeckoTestScreen(
     }
 
     // ── المسار 2: زر 📤 ──────────────────────────────────────────────
-    val sendContext: () -> Unit = ctx@{
-        if (isSendingCtx || isLoading) return@ctx
-        if (platform == null || !platform.memoryEnabled) return@ctx
-        if (chatViewModel == null) return@ctx
+    
 
-        Log.d("GeckoTestScreen",
-            "📤 connected=${bridge.isConnected} ready=${bridge.isPageReady}")
+                
+// زر 📤 البسيط
+val sendContext: () -> Unit = ctx@{
+    if (isLoading) return@ctx
+    if (platform == null || !platform.memoryEnabled) return@ctx
+    if (chatViewModel == null) return@ctx
 
-        if (!bridge.isConnected) {
-            Toast.makeText(
-                context,
-                "❌ Bridge غير متصل — انتظر تحميل الصفحة",
-                Toast.LENGTH_SHORT
-            ).show()
-            return@ctx
-        }
+    Toast.makeText(context, "📤 جاري تحضير السياق...", Toast.LENGTH_SHORT).show()
 
-        isSendingCtx = true
-        Toast.makeText(context, "📤 جاري إرسال السياق...", Toast.LENGTH_SHORT).show()
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val memories      = chatViewModel.getSharedMemories()
-                val memoryContext = MemoryContextBuilder().build(memories)
-                val systemDoc     = SystemPrompt.ACCURACY_PROMPT
-
-                val result = bridge.deliver(
-                    systemDocument = systemDoc,
-                    memoryContext  = memoryContext,
-                    submit         = true,
-                    timeoutMs      = 10_000L
-                )
-
-                mainHandler.post {
-                    isSendingCtx = false
-                    val msg = when (result.stage) {
-                        "clicked"        -> "✅ تم الإرسال — انتظر رد المنصة"
-                        "filled"         -> "✅ السياق في الصندوق — اضغط إرسال"
-                        "write_failed"   -> "❌ فشل الكتابة: ${result.detail}"
-                        "no_port"        -> "❌ الجسر غير متصل"
-                        "page_not_ready" -> "❌ الصفحة لم تُحمَّل بعد"
-                        "timeout"        -> "❌ انتهت المهلة — حاول مرة أخرى"
-                        "busy"           -> "⏳ جاري تنفيذ عملية أخرى"
-                        "bridge_closed"  -> "❌ الجسر مغلق"
-                        else             -> "⚠️ ${result.stage}: ${result.detail}"
-                    }
-                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                mainHandler.post {
-                    isSendingCtx = false
-                    Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_LONG).show()
-                }
+    CoroutineScope(Dispatchers.IO).launch {
+        try {
+            val memories = chatViewModel.getSharedMemories()
+            mainHandler.post {
+                app.sendContextToPage(memories = memories)
+            }
+        } catch (e: Exception) {
+            mainHandler.post {
+                Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
-
+}
     // ── رجوع ذكي ─────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
         if (canGoBack) session.goBack() else onBack()
