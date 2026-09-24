@@ -190,25 +190,42 @@ class AiSettings(context: Context) {
         set(value) = prefs.edit()
             .putString("custom_model", value.trim())
             .apply()
-            // ── أضف في AiSettings.kt ─────────────────────────────────────────────────────
 
-// تفعيل وثيقة الدقة
-var accuracyPromptEnabled: Boolean
-    get() = prefs.getBoolean("accuracy_prompt_enabled", true)
-    set(value) = prefs.edit().putBoolean("accuracy_prompt_enabled", value).apply()
+    // تفعيل وثيقة الدقة
+    var accuracyPromptEnabled: Boolean
+        get() = prefs.getBoolean("accuracy_prompt_enabled", true)
+        set(value) = prefs.edit().putBoolean("accuracy_prompt_enabled", value).apply()
 
-// تعليمات مخصصة إضافية
-var customSystemInstruction: String
-    get() = prefs.getString("custom_system_instruction", "") ?: ""
-    set(value) = prefs.edit().putString("custom_system_instruction", value).apply()
+    // تعليمات مخصصة إضافية
+    var customSystemInstruction: String
+        get() = prefs.getString("custom_system_instruction", "") ?: ""
+        set(value) = prefs.edit().putString("custom_system_instruction", value).apply()
+
+    // ── Memory Curator (وسيط الذاكرة الذكي) ──────────────────────────
+
+    var memoryCuratorEnabled: Boolean
+        get() = prefs.getBoolean("memory_curator_enabled", false)
+        set(value) = prefs.edit()
+            .putBoolean("memory_curator_enabled", value)
+            .apply()
+
+    var memoryCuratorModel: String
+        get() = prefs.getString(
+            "memory_curator_model",
+            "gemini-2.0-flash"
+        )?.trim() ?: "gemini-2.0-flash"
+        set(value) = prefs.edit()
+            .putString("memory_curator_model", value.trim())
+            .apply()
 
     // Web
 
     var webPlatform: String
-    get() = prefs.getString("web_platform", "venice") ?: "venice"
-    set(value) = prefs.edit()
-        .putString("web_platform", value.trim())
-        .apply()
+        get() = prefs.getString("web_platform", "venice") ?: "venice"
+        set(value) = prefs.edit()
+            .putString("web_platform", value.trim())
+            .apply()
+
     // Helpers
 
     fun getActiveKey(): String {
