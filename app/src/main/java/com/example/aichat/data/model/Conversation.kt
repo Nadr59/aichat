@@ -9,5 +9,6 @@ data class Conversation(
     val id: Long = 0,
     val title: String,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val memoryAccessEnabled: Boolean = true   // ✅ جديد — تحكم لكل محادثة على حدة
 )
