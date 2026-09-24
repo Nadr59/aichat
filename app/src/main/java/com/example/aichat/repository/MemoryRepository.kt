@@ -21,8 +21,7 @@ class MemoryRepository(
 
     private val aiSettings = AiSettings(context)
 
-    private val embeddingService: EmbeddingService
-        get() = EmbeddingService(aiSettings.geminiKey)
+    private val embeddingService = EmbeddingService { aiSettings.geminiKey }
         // أضف في MemoryRepository
 
 suspend fun getAllSharedMemoriesList(): List<MemoryItem> {
@@ -246,13 +245,10 @@ suspend fun addMemoryWithEmbedding(
 
     // تحويل embedding إلى String
     val embeddingStr = if (embedding.isNotEmpty()) {
-        try {
-            val service = EmbeddingService(aiSettings.geminiKey)
-            service.vectorToString(embedding, compress = true)
-        } catch (e: Exception) {
-            ""
-        }
-    } else ""
+    try {
+        EmbeddingService.vectorToString(embedding, compress = true)
+    } catch (e: Exception) { "" }
+} else ""
 
     val embeddingModel = if (embeddingStr.isNotBlank()) EmbeddingService.CURRENT_MODEL else ""
     val embeddingDims  = if (embeddingStr.isNotBlank()) EmbeddingService.CURRENT_DIMENSIONS else 0
