@@ -16,6 +16,7 @@ import com.example.aichat.repository.EmbeddingService
 import com.example.aichat.repository.FileProcessor
 import com.example.aichat.repository.ImageProcessor
 import com.example.aichat.repository.MemoryContextBuilder
+import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryRepository
 import com.example.aichat.repository.WebPageFetcher
 import kotlinx.coroutines.Job
@@ -51,6 +52,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val imageProcessor       = ImageProcessor(application)
     private val fileProcessor        = FileProcessor(getApplication())
     private val webPageFetcher       = WebPageFetcher()
+
+    // ✅ جديد — نمط singleton، نفس نمط memoryContextBuilder تماماً
+    private val memoryCuratorService = MemoryCuratorService(
+        settings        = AiSettings(getApplication()),
+        fallbackBuilder = memoryContextBuilder
+    )
 
     val customRequestCount: StateFlow<Int> = repository.customRequestCount
 
@@ -88,6 +95,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _memoryContext = MutableStateFlow("")
     val memoryContext: StateFlow<String> = _memoryContext.asStateFlow()
+
+    // ✅ جديد — حالة تحكم المستخدم بالذاكرة لكل محادثة
+    private val _memoryAccessEnabled = MutableStateFlow(true)
+    val memoryAccessEnabled: StateFlow<Boolean> = _memoryAccessEnabled.asStateFlow()
 
     // ============================================================
     // الذاكرة
@@ -137,11 +148,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun getMemoryById(memoryId: Long): MemoryItem? =
         memoryRepository.getMemoryById(memoryId)
-        // أضف في ChatViewModel
 
-suspend fun getSharedMemories(): List<MemoryItem> {
-    return memoryRepository.getAllSharedMemoriesList()
-}
+    suspend fun getSharedMemories(): List<MemoryItem> {
+        return memoryRepository.getAllSharedMemoriesList()
+    }
 
     fun deleteConversationMemories(conversationId: Long) {
         viewModelScope.launch {
@@ -151,9 +161,16 @@ suspend fun getSharedMemories(): List<MemoryItem> {
 
     /**
      * يبحث في الذاكرة المشتركة ويبني سياقاً نصياً للرسالة القادمة.
+     * ✅ يفحص أولاً memoryAccessEnabled — إذا محجوبة: لا بحث، لا وسيط، لا نداء شبكة.
      */
     private suspend fun prepareMemoryContext(userText: String) {
         if (userText.isBlank()) { _memoryContext.value = ""; return }
+
+        if (!_memoryAccessEnabled.value) {
+            android.util.Log.d("ChatViewModel", "⚪ Memory access disabled for this conversation")
+            _memoryContext.value = ""
+            return
+        }
 
         try {
             android.util.Log.d("ChatViewModel", "🔍 Memory context for: ${userText.take(50)}")
@@ -165,7 +182,9 @@ suspend fun getSharedMemories(): List<MemoryItem> {
             )
 
             android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
-            _memoryContext.value = memoryContextBuilder.build(memories)
+
+            // ✅ الوسيط الذكي (يتعامل داخلياً مع التفعيل + fallback)
+            _memoryContext.value = memoryCuratorService.curate(userText, memories)
 
         } catch (e: Exception) {
             android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext: ${e.message}", e)
@@ -181,6 +200,12 @@ suspend fun getSharedMemories(): List<MemoryItem> {
         _currentConversationId.value = conversationId
         _memoryContext.value = ""
         startCollecting(conversationId)
+
+        // ✅ استعادة حالة memoryAccessEnabled الفعلية من قاعدة البيانات
+        viewModelScope.launch {
+            val conv = conversationRepository.getConversationById(conversationId)
+            _memoryAccessEnabled.value = conv?.memoryAccessEnabled ?: true
+        }
     }
 
     fun newConversation() {
@@ -192,6 +217,21 @@ suspend fun getSharedMemories(): List<MemoryItem> {
         _memoryContext.value         = ""
         _error.value                 = null
         _successMessage.value        = null
+        _memoryAccessEnabled.value   = true   // ✅ إعادة الضبط للحالة الافتراضية
+    }
+
+    /**
+     * ✅ جديد — يُستدعى من الواجهة لتبديل حالة الوصول للذاكرة.
+     * إذا كانت المحادثة موجودة بالفعل في القاعدة: حفظ فوري.
+     * إذا كانت محادثة جديدة لم تُنشأ بعد: القيمة تُستخدَم عند الإنشاء الفعلي.
+     */
+    fun toggleMemoryAccess(enabled: Boolean) {
+        _memoryAccessEnabled.value = enabled
+
+        val convId = _currentConversationId.value ?: return
+        viewModelScope.launch {
+            conversationRepository.updateMemoryAccess(convId, enabled)
+        }
     }
 
     private fun startCollecting(conversationId: Long) {
@@ -227,7 +267,8 @@ suspend fun getSharedMemories(): List<MemoryItem> {
                 val convId = _currentConversationId.value ?: run {
                     val id = conversationRepository.insertConversation(
                         Conversation(
-                            title = userText.take(50).ifBlank { "محادثة جديدة" }
+                            title = userText.take(50).ifBlank { "محادثة جديدة" },
+                            memoryAccessEnabled = _memoryAccessEnabled.value   // ✅ يحفظ اختيار المستخدم المسبق
                         )
                     )
                     _currentConversationId.value = id
@@ -289,12 +330,12 @@ suspend fun getSharedMemories(): List<MemoryItem> {
                     .firstOrNull { it.role == "user" }?.content
                     ?: userText
 
-                conversationRepository.updateConversation(
-                    Conversation(
-                        id        = convId,
-                        title     = title.take(50),
-                        updatedAt = System.currentTimeMillis()
-                    )
+                // ✅ الإصلاح الحرج — يحل محل updateConversation(Conversation(...))
+                // الذي كان يُصفّر createdAt و memoryAccessEnabled في كل رسالة
+                conversationRepository.updateTitleAndTimestamp(
+                    id        = convId,
+                    title     = title.take(50),
+                    updatedAt = System.currentTimeMillis()
                 )
 
             } catch (e: Exception) {
@@ -306,41 +347,42 @@ suspend fun getSharedMemories(): List<MemoryItem> {
     }
 
     fun onWebAiResponse(
-    platformId:   String,
-    platformName: String,
-    text:         String
-) {
-    if (text.isBlank()) return
+        platformId:   String,
+        platformName: String,
+        text:         String
+    ) {
+        if (text.isBlank()) return
 
-    viewModelScope.launch {
-        try {
-            android.util.Log.d(
-                "ChatViewModel",
-                "🌐 Web AI from $platformName: ${text.take(80)}..."
-            )
+        viewModelScope.launch {
+            try {
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "🌐 Web AI from $platformName: ${text.take(80)}..."
+                )
 
-            memoryRepository.addMemory(
-                content              = text,
-                sourceConversationId = null,
-                sourceMessageId      = null,
-                category             = "WEB",
-                isShared             = true
-            )
+                memoryRepository.addMemory(
+                    content              = text,
+                    sourceConversationId = null,
+                    sourceMessageId      = null,
+                    category             = "WEB",
+                    isShared             = true
+                )
 
-            android.util.Log.d(
-                "ChatViewModel",
-                "✅ Saved to memory from: $platformName"
-            )
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "✅ Saved to memory from: $platformName"
+                )
 
-        } catch (e: Exception) {
-            android.util.Log.e(
-                "ChatViewModel",
-                "❌ onWebAiResponse: ${e.message}",
-                e
-            )
+            } catch (e: Exception) {
+                android.util.Log.e(
+                    "ChatViewModel",
+                    "❌ onWebAiResponse: ${e.message}",
+                    e
+                )
+            }
         }
     }
-    }
+
     // ============================================================
     // الصور
     // ============================================================
@@ -419,7 +461,6 @@ suspend fun getSharedMemories(): List<MemoryItem> {
                 val totalChunks   = chunks.size
                 val limitedChunks = chunks.take(20)
 
-                // ── فلترة التكرار قبل طلب API ─────────────────────────────
                 val newChunks    = mutableListOf<String>()
                 var skippedCount = 0
 
@@ -439,7 +480,6 @@ suspend fun getSharedMemories(): List<MemoryItem> {
                 var savedCount = 0
 
                 if (newChunks.isNotEmpty()) {
-                    // ── طلب Batch واحد لكل الـ chunks ──────────────────────
                     val embeddings = try {
                         embeddingService.getBatchEmbeddings(newChunks).also {
                             android.util.Log.d(
@@ -455,7 +495,6 @@ suspend fun getSharedMemories(): List<MemoryItem> {
                         newChunks.map { emptyList() }
                     }
 
-                    // ── حفظ كل chunk مع embedding ──────────────────────────
                     newChunks.forEachIndexed { i, chunk ->
                         val embeddingList = embeddings.getOrElse(i) { emptyList() }
                         val id = memoryRepository.addMemoryWithEmbedding(
@@ -526,7 +565,6 @@ suspend fun getSharedMemories(): List<MemoryItem> {
                 val totalChunks   = chunks.size
                 val limitedChunks = chunks.take(20)
 
-                // ── فلترة التكرار ─────────────────────────────────────────
                 val newChunks    = mutableListOf<String>()
                 var skippedCount = 0
 
@@ -546,7 +584,6 @@ suspend fun getSharedMemories(): List<MemoryItem> {
                 var savedCount = 0
 
                 if (newChunks.isNotEmpty()) {
-                    // ── Batch Embeddings ──────────────────────────────────
                     val embeddings = try {
                         embeddingService.getBatchEmbeddings(newChunks)
                     } catch (e: Exception) {
@@ -601,7 +638,6 @@ suspend fun getSharedMemories(): List<MemoryItem> {
         }
     }
 
-    
     // ============================================================
     // Helpers
     // ============================================================
@@ -610,7 +646,6 @@ suspend fun getSharedMemories(): List<MemoryItem> {
     fun clearError()          { _error.value = null }
     fun clearSuccessMessage() { _successMessage.value = null }
 
-    /** حساب SHA-256 محلياً للفلترة المسبقة */
     private fun calculateHash(content: String): String = try {
         MessageDigest.getInstance("SHA-256")
             .digest(content.toByteArray(Charsets.UTF_8))
