@@ -38,6 +38,7 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         return;
     }
 
+    // ── جديد: GET_CONTEXT ─────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
         return browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "GET_CONTEXT",
@@ -49,21 +50,13 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         });
     }
 
+    // ── جديد: CONTEXT_WRITTEN ─────────────────────────────────────────
     if (type === "CONTEXT_WRITTEN") {
         browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "CONTEXT_WRITTEN",
             stage:  message.stage  || "",
             detail: message.detail || "",
             domain: message.domain || ""
-        });
-        return;
-    }
-
-    // ── إصلاح: DEBUG_INFO كانت مفقودة تماماً ──────────────────────────
-    if (type === "DEBUG_INFO") {
-        browser.runtime.sendNativeMessage(NATIVE_APP, {
-            type: "DEBUG_INFO",
-            info: message.info || ""
         });
         return;
     }
