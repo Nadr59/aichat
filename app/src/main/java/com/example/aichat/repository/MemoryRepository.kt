@@ -291,12 +291,7 @@ suspend fun addMemoryWithEmbedding(
     // البحث في الذكريات المشتركة
     // ============================================================
 
-    suspend fun searchSharedMemories(
-        query: String,
-        useSemanticAnalysis: Boolean = false,
-        ollamaUrl: String = "http://127.0.0.1:11434"
-    ): List<MemoryItem> {
-
+    suspend fun searchSharedMemories(query: String): List<MemoryItem> {
         val cleanQuery = query.trim()
 
         if (cleanQuery.isBlank()) {
@@ -371,11 +366,9 @@ suspend fun addMemoryWithEmbedding(
                 return@mapNotNull null
             }
 
-            val memoryVector = embeddingService.stringToVector(memory.embedding)
-            if (memoryVector.isEmpty()) return@mapNotNull null
-
-            val similarity = embeddingService.cosineSimilarity(queryVector, memoryVector)
-
+            val memoryVector = EmbeddingService.stringToVector(memory.embedding)
+if (memoryVector.isEmpty()) return@mapNotNull null
+val similarity = EmbeddingService.cosineSimilarity(queryVector, memoryVector)
             Log.d(
                 TAG,
                 "📊 Similarity: ${String.format("%.3f", similarity)} " +
