@@ -9,7 +9,7 @@
     var DEBOUNCE_MS   = 1800;
     var MIN_LEN       = 30;
     var MAX_LEN       = 3000;
-    var contextBusy   = false;
+    var contextBusy   = false;  // منع تكرار writeAndSend
 
     // ── Helpers ───────────────────────────────────────────────────────
 
@@ -37,24 +37,6 @@
             if (t.length >= MIN_LEN) return t;
         }
         return null;
-    }
-
-    // ── فلتر: رفض محتوى واجهة الموقع ──────────────────────────────────
-
-    function looksLikeUiJunk(text) {
-        var junkPhrases = [
-            'تسجيل الدخول', 'المكونات الإضافية', 'تعرف على الخطط والأسعار',
-            'البحث التفصيلي', 'الدردشة مع', 'أنت قلت', 'قال ChatGPT',
-            'قم بتسجيل الدخول', 'احصل على إجابات مصممة',
-            'Log in', 'Sign up', 'Upgrade to Plus', 'New chat',
-            'Settings', 'Help & FAQ'
-        ];
-        var matches = 0;
-        for (var i = 0; i < junkPhrases.length; i++) {
-            if (text.indexOf(junkPhrases[i]) !== -1) matches++;
-            if (matches >= 2) return true;
-        }
-        return false;
     }
 
     // ── Extractors ────────────────────────────────────────────────────
@@ -125,28 +107,13 @@
     function extractLatestResponse() {
         var host = location.hostname;
         var text = null;
-        var isKnownPlatform = false;
 
-        if (/chatgpt\.com|openai\.com/.test(host)) {
-            text = extractChatGPT();
-            isKnownPlatform = true;
-        } else if (/claude\.ai/.test(host)) {
-            text = extractClaude();
-            isKnownPlatform = true;
-        } else if (/gemini\.google\.com/.test(host)) {
-            text = extractGemini();
-            isKnownPlatform = true;
-        }
+        if (/chatgpt\.com|openai\.com/.test(host)) text = extractChatGPT();
+        else if (/claude\.ai/.test(host))          text = extractClaude();
+        else if (/gemini\.google\.com/.test(host)) text = extractGemini();
 
-        // الاحتياط فقط للمنصات غير المعروفة
-        if (!text && !isKnownPlatform) {
-            text = extractByLongestBlock();
-        }
-
-        if (!text) return null;
-        if (looksLikeUiJunk(text)) return null;
-
-        return text.substring(0, MAX_LEN);
+        if (!text) text = extractByLongestBlock();
+        return text ? text.substring(0, MAX_LEN) : null;
     }
 
     // ── إرسال تلقائي ──────────────────────────────────────────────────
@@ -164,24 +131,12 @@
         } catch (e) {}
     }
 
-    // ── مراقبة تلقائية (بنية الأصل + تأكيد واحد فقط غير متكرر) ────────
+    // ── مراقبة تلقائية ────────────────────────────────────────────────
 
     var observer = new MutationObserver(function () {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function () {
-            var text1 = extractLatestResponse();
-            if (!text1) return;
-
-            // ✅ تأكيد إضافي واحد فقط (وليس تكراراً لا نهائياً)
-            setTimeout(function () {
-                var text2 = extractLatestResponse();
-                if (text2 === text1) {
-                    sendAutoToKotlin(text2);
-                }
-                // إذا اختلف النصان، لا نرسل الآن؛
-                // الـ observer سيُعاد تشغيله تلقائياً مع أي mutation لاحق
-            }, 1200);
-
+            sendAutoToKotlin(extractLatestResponse());
         }, DEBOUNCE_MS);
     });
 
@@ -237,7 +192,7 @@
     setInterval(function () {
 
         if (document.visibilityState !== 'visible') return;
-        if (contextBusy) return;
+        if (contextBusy) return;  // لا تسأل أثناء الكتابة
 
         browser.runtime.sendMessage({
             type:   'GET_CONTEXT',
@@ -282,6 +237,7 @@
         var input = findInputBox();
         if (!input) return { ok: false, stage: 'find=NULL' };
 
+        // TEXTAREA
         if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
             try {
                 input.focus();
@@ -297,6 +253,7 @@
             }
         }
 
+        // contenteditable
         input.focus();
         var activeOk = document.activeElement === input
                     || input.contains(document.activeElement);
@@ -369,6 +326,7 @@
                 contextBusy = false;
             } else if (attempts >= 15) {
                 clearInterval(interval);
+                // محاولة Enter
                 var input = findInputBox();
                 if (input) {
                     input.dispatchEvent(new KeyboardEvent('keydown', {
