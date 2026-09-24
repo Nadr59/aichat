@@ -18,7 +18,7 @@ import com.example.aichat.data.model.WebPlatform
         MemoryItem::class,
         WebPlatform::class
     ],
-    version = 7,          // ✅ 6 → 7
+    version = 8,          // ✅ 7 → 8
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -109,18 +109,25 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
-        // ✅ جديد — يضيف الحقلين اللذين أُضيفا لـ WebPlatform
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // aiMessageSelector: CSS selector لاستخراج ردود الـ AI
                 db.execSQL(
                     "ALTER TABLE web_platforms " +
                     "ADD COLUMN aiMessageSelector TEXT NOT NULL DEFAULT ''"
                 )
-                // memoryEnabled: هل يُحفظ رد هذه المنصة في الذاكرة؟
                 db.execSQL(
                     "ALTER TABLE web_platforms " +
                     "ADD COLUMN memoryEnabled INTEGER NOT NULL DEFAULT 1"
+                )
+            }
+        }
+
+        // ✅ جديد — تحكم في الوصول للذاكرة لكل محادثة على حدة
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE conversations " +
+                    "ADD COLUMN memoryAccessEnabled INTEGER NOT NULL DEFAULT 1"
                 )
             }
         }
@@ -139,7 +146,8 @@ abstract class ChatDatabase : RoomDatabase() {
                     MIGRATION_3_4,
                     MIGRATION_4_5,
                     MIGRATION_5_6,
-                    MIGRATION_6_7   // ✅ مضاف
+                    MIGRATION_6_7,
+                    MIGRATION_7_8   // ✅ مضاف
                 )
                 .build()
 
