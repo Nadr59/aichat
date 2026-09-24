@@ -119,18 +119,26 @@
     // ── إرسال تلقائي ──────────────────────────────────────────────────
 
     function sendAutoToKotlin(text) {
-        if (!text || text.length < 80) return;
-        if (text === lastSentText)     return;
-        lastSentText = text;
-        try {
-            browser.runtime.sendMessage({
-                type:   'AI_RESPONSE',
-                text:   text,
-                domain: location.hostname
-            });
-        } catch (e) {}
+    if (!text || text.length < 80) return;
+    if (text === lastSentText)     return;
+    
+    // ✅ التعديل الوحيد: تأكيد بسيط قبل الإرسال الفعلي
+    var textSnapshot = text;
+    setTimeout(function() {
+        var recheck = extractLatestResponse();
+        if (recheck === textSnapshot && textSnapshot !== lastSentText) {
+            lastSentText = textSnapshot;
+            try {
+                browser.runtime.sendMessage({
+                    type:   'AI_RESPONSE',
+                    text:   textSnapshot,
+                    domain: location.hostname
+                });
+            } catch (e) {}
+        }
+    }, 1000);
     }
-
+    
     // ── مراقبة تلقائية ────────────────────────────────────────────────
 
     var observer = new MutationObserver(function () {
