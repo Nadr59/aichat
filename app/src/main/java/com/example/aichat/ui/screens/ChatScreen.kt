@@ -214,19 +214,25 @@ fun ChatScreen(
                         )
                     }
                 },
-                actions = {
-                    Icon(
-                        imageVector = Icons.Filled.Chat,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
-        },
+                
+
+actions = {
+    val memoryAccessEnabled by viewModel.memoryAccessEnabled.collectAsState()
+
+    IconButton(onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }) {
+        Icon(
+            imageVector = Icons.Default.Memory,
+            contentDescription = if (memoryAccessEnabled)
+                "الذاكرة مفعّلة — اضغط للحجب"
+            else
+                "الذاكرة محجوبة — اضغط للتفعيل",
+            tint = if (memoryAccessEnabled)
+                MaterialTheme.colorScheme.primary
+            else
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+        )
+    }
+},
         bottomBar = {
             InputBar(
                 inputText = inputText,
