@@ -39,7 +39,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val dao       = db.chatDao()
     private val memoryDao = db.memoryDao()
 
-    // ✅ instance واحد فقط للإعدادات، يُشارَك بين كل الخدمات
     private val aiSettings = AiSettings(getApplication())
 
     val repository = ChatRepository(application)
@@ -56,15 +55,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val fileProcessor        = FileProcessor(getApplication())
     private val webPageFetcher       = WebPageFetcher()
 
-    // ✅ singleton حقيقي — نمط مطابق لـ memoryContextBuilder
     private val memoryCuratorService = MemoryCuratorService(
         settings        = aiSettings,
         fallbackBuilder = memoryContextBuilder
     )
 
-    // ✅ مُصحَّح: apiKeyProvider كدالة — يقرأ المفتاح الفعلي من
-    // aiSettings في كل نداء شبكة، لا قيمة مجمَّدة عند الإنشاء.
-    // العميل (OkHttpClient) يُبنى مرة واحدة فقط طوال عمر الـ ViewModel.
     private val embeddingService = EmbeddingService { aiSettings.geminiKey }
 
     val customRequestCount: StateFlow<Int> = repository.customRequestCount
@@ -100,7 +95,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _memoryContext = MutableStateFlow("")
     val memoryContext: StateFlow<String> = _memoryContext.asStateFlow()
 
-    // ✅ حالة تحكم المستخدم بالذاكرة لكل محادثة على حدة
     private val _memoryAccessEnabled = MutableStateFlow(true)
     val memoryAccessEnabled: StateFlow<Boolean> = _memoryAccessEnabled.asStateFlow()
 
@@ -143,7 +137,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { memoryRepository.deleteMemory(memory) }
     }
 
-    // ✅ مُصحَّح: بلا معاملين ميتين
     suspend fun searchSharedMemories(query: String): List<MemoryItem> =
         memoryRepository.searchSharedMemories(query)
 
@@ -177,13 +170,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         try {
             android.util.Log.d("ChatViewModel", "🔍 Memory context for: ${userText.take(50)}")
 
-            // ✅ مُصحَّح: بلا معاملين ميتين
             val memories = memoryRepository.searchSharedMemories(userText)
 
             android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
 
-            // الوسيط الذكي (يتعامل داخلياً مع التفعيل + fallback)
+            // DEBUG-TEMP: تتبع حالة الوسيط الذكي قبل الاستدعاء
+            android.util.Log.d(
+                "ChatViewModel",
+                "DEBUG-TEMP: curatorEnabled=${aiSettings.memoryCuratorEnabled}, " +
+                "hasGeminiKey=${aiSettings.geminiKey.isNotBlank()}, " +
+                "candidatesCount=${memories.size}"
+            )
+
             _memoryContext.value = memoryCuratorService.curate(userText, memories)
+
+            // DEBUG-TEMP: عرض السياق النهائي كرسالة خطأ مرئية على الشاشة
+            // (طريقة فحص بصرية سريعة بلا حاجة لـ logcat خارجي)
+            // ⚠️ احذف هذا السطر بعد انتهاء الاختبار
+            if (memories.isNotEmpty()) {
+                _error.value = "DEBUG-TEMP CONTEXT:\n${_memoryContext.value.take(400)}"
+            }
 
         } catch (e: Exception) {
             android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext: ${e.message}", e)
@@ -200,7 +206,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _memoryContext.value = ""
         startCollecting(conversationId)
 
-        // استعادة حالة memoryAccessEnabled الفعلية من قاعدة البيانات
         viewModelScope.launch {
             val conv = conversationRepository.getConversationById(conversationId)
             _memoryAccessEnabled.value = conv?.memoryAccessEnabled ?: true
@@ -216,14 +221,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _memoryContext.value         = ""
         _error.value                 = null
         _successMessage.value        = null
-        _memoryAccessEnabled.value   = true   // إعادة الضبط للحالة الافتراضية
+        _memoryAccessEnabled.value   = true
     }
 
-    /**
-     * يُستدعى من الواجهة لتبديل حالة الوصول للذاكرة لهذه المحادثة.
-     * إذا كانت المحادثة موجودة بالفعل: حفظ فوري في القاعدة.
-     * إذا كانت محادثة جديدة لم تُنشأ بعد: القيمة تُستخدَم عند الإنشاء.
-     */
     fun toggleMemoryAccess(enabled: Boolean) {
         _memoryAccessEnabled.value = enabled
 
@@ -262,7 +262,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val imageBase64 = _selectedImageBase64.value
 
-                // ── إنشاء محادثة جديدة إن لم تكن موجودة ─────────────────
                 val convId = _currentConversationId.value ?: run {
                     val id = conversationRepository.insertConversation(
                         Conversation(
@@ -275,10 +274,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     id
                 }
 
-                // ── سحب السجل قبل إضافة الرسالة الجديدة ─────────────────
                 val historySnapshot = conversationRepository.getMessagesOnce(convId)
 
-                // ── حفظ رسالة المستخدم ────────────────────────────────────
                 conversationRepository.insertMessage(
                     Message(
                         conversationId = convId,
@@ -292,9 +289,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedImageBase64.value = null
 
                 // ── بناء سياق الذاكرة ────────────────────────────────────
+                // ⚠️ DEBUG-TEMP: قد يضع رسالة تصحيح مؤقتة في _error.value
                 prepareMemoryContext(userText)
 
-                // ── استدعاء الـ AI ────────────────────────────────────────
+                // DEBUG-TEMP: احفظ رسالة الخطأ المؤقتة قبل أن تُصفَّرها العمليات التالية
+                val debugContextSnapshot = _error.value
+
                 val response = repository.sendMessage(
                     history       = historySnapshot,
                     userMessage   = userText,
@@ -302,7 +302,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     memoryContext = _memoryContext.value
                 )
 
-                // ── حفظ رد المساعد ────────────────────────────────────────
                 val assistantMessage = Message(
                     conversationId = convId,
                     role           = "assistant",
@@ -311,7 +310,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 conversationRepository.insertMessage(assistantMessage)
 
-                // ── تحديث عنوان المحادثة والوقت (بلا تصفير أي حقل آخر) ───
                 val title = historySnapshot
                     .firstOrNull { it.role == "user" }?.content
                     ?: userText
@@ -321,6 +319,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     title     = title.take(50),
                     updatedAt = System.currentTimeMillis()
                 )
+
+                // DEBUG-TEMP: أعد عرض رسالة السياق بعد نجاح الإرسال
+                // (لأن _error.value قد يُصفَّر أو يُستبدَل أعلاه بمسار آخر)
+                // ⚠️ احذف هذا السطر بعد انتهاء الاختبار
+                if (debugContextSnapshot != null) {
+                    _error.value = debugContextSnapshot
+                }
 
             } catch (e: Exception) {
                 _error.value = e.message ?: "حدث خطأ غير معروف"
