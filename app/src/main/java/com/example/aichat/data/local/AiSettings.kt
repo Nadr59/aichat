@@ -212,8 +212,8 @@ class AiSettings(context: Context) {
     var memoryCuratorModel: String
         get() = prefs.getString(
             "memory_curator_model",
-            "gemini-2.0-flash"
-        )?.trim() ?: "gemini-2.0-flash"
+            "gemini-3.6-flash"
+        )?.trim() ?: "gemini-3.6-flash"
         set(value) = prefs.edit()
             .putString("memory_curator_model", value.trim())
             .apply()
