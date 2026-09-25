@@ -39,32 +39,41 @@ class MemoryCuratorService(
         .build()
 
     suspend fun curate(userQuery: String, candidates: List<MemoryItem>): String =
-    withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
 
-        if (candidates.isEmpty()) return@withContext ""
+            if (candidates.isEmpty()) return@withContext ""
 
-        if (!settings.memoryCuratorEnabled) {
-            Log.d(TAG, "⚪ DEBUG-TEMP: Curator DISABLED by setting")
-            return@withContext fallbackBuilder.build(candidates)
+            if (!settings.memoryCuratorEnabled) {
+                Log.d(TAG, "⚪ DEBUG-TEMP: Curator DISABLED by setting")
+                return@withContext fallbackBuilder.build(candidates)
+            }
+
+            val apiKey = settings.geminiKey
+            if (apiKey.isBlank()) {
+                Log.w(TAG, "⚠️ DEBUG-TEMP: No Gemini key (blank)")
+                return@withContext fallbackBuilder.build(candidates)
+            }
+
+            try {
+                val prompt = MemoryCuratorPrompt.build(userQuery, candidates)
+                Log.d(TAG, "🔄 DEBUG-TEMP: Calling Gemini Flash now...")
+
+                val result = callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
+
+                Log.d(TAG, "✅ DEBUG-TEMP: Gemini Flash succeeded: ${result.take(100)}")
+
+                if (result.isBlank() || result.trim().equals("NONE", ignoreCase = true)) {
+                    Log.d(TAG, "⚪ Curator found nothing relevant")
+                    ""
+                } else {
+                    Log.d(TAG, "✅ Curated: ${result.take(80)}...")
+                    result.trim()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ DEBUG-TEMP: Curator EXCEPTION: ${e.message}", e)
+                fallbackBuilder.build(candidates)
+            }
         }
-
-        val apiKey = settings.geminiKey
-        if (apiKey.isBlank()) {
-            Log.w(TAG, "⚠️ DEBUG-TEMP: No Gemini key (blank)")
-            return@withContext fallbackBuilder.build(candidates)
-        }
-
-        try {
-            val prompt = MemoryCuratorPrompt.build(userQuery, candidates)
-            Log.d(TAG, "🔄 DEBUG-TEMP: Calling Gemini Flash now...")
-            val result = callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
-            Log.d(TAG, "✅ DEBUG-TEMP: Gemini Flash succeeded: ${result.take(100)}")
-            ...
-        } catch (e: Exception) {
-            Log.w(TAG, "⚠️ DEBUG-TEMP: Curator EXCEPTION: ${e.message}", e)
-            fallbackBuilder.build(candidates)
-        }
-    }
 
     private fun callGeminiFlash(prompt: String, apiKey: String, model: String): String {
         val json = JSONObject().apply {
