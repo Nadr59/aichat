@@ -204,7 +204,7 @@ class AiSettings(context: Context) {
     // ── Memory Curator (وسيط الذاكرة الذكي) ──────────────────────────
 
     var memoryCuratorEnabled: Boolean
-        get() = prefs.getBoolean("memory_curator_enabled", false)
+        get() = prefs.getBoolean("memory_curator_enabled", true)
         set(value) = prefs.edit()
             .putBoolean("memory_curator_enabled", value)
             .apply()
