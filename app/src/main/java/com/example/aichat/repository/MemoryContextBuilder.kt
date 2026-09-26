@@ -5,22 +5,18 @@ import com.example.aichat.data.model.MemoryItem
 class MemoryContextBuilder {
 
     companion object {
-        private const val MAX_CONTEXT_LENGTH = 2000  // حد أقصى 2000 حرف
-        private const val MAX_MEMORIES = 3           // حد أقصى 3 ذكريات
-        private const val MAX_MEMORY_PREVIEW = 500   // حد أقصى 500 حرف لكل ذاكرة
+        private const val MAX_CONTEXT_LENGTH = 2000
+        private const val MAX_MEMORIES = 3
+        private const val MAX_MEMORY_PREVIEW = 500
+
+        // نفس التحذير المستخدَم في MemoryCuratorService — يجب أن يبقى
+        // متطابقاً بين المسارين لضمان سلوك متسق بصرف النظر عن مصدر السياق.
+        private const val CONTEXT_DISCLAIMER =
+            "\n\n⚠️ ملاحظة: هذا كل ما هو مؤكد ومتاح بخصوص هذا الموضوع تحديداً. " +
+            "لا تُضف تفاصيل تقنية أو تاريخية أو مؤسسية إضافية من معرفتك العامة " +
+            "غير مذكورة صراحة أعلاه، حتى لو بدت مألوفة أو مرتبطة لديك."
     }
 
-    /**
-     * يبني نصاً خاماً فقط من الذكريات — بلا عناوين، بلا زخرفة،
-     * بلا أي تعليمات استخدام مضمّنة.
-     *
-     * سبب هذا القرار: تعليمات الاستخدام أصبحت مسؤولية مركزية واحدة
-     * في SystemPrompt.build()، بنفس الفلسفة المطبّقة على مخرجات
-     * MemoryCuratorPrompt تماماً. توحيد شكل المخرجات بين المسارين
-     * (Curator + Fallback) ضروري لمنع ازدواج/تعارض التوجيهات المرسلة
-     * للنموذج، ولجعل منطق "متى نستخدم السياق" قابلاً للتعديل من
-     * مكان واحد فقط دون الحاجة لتعديل كل مصدر سياق على حدة.
-     */
     fun build(memories: List<MemoryItem>): String {
 
         if (memories.isEmpty()) {
@@ -46,7 +42,7 @@ class MemoryContextBuilder {
 
                 android.util.Log.d("MemoryContextBuilder", "Memory ${index + 1}: ${memory.content.take(50)}...")
             }
-        }.trim()
+        }.trim() + CONTEXT_DISCLAIMER
 
         val finalContext = if (context.length > MAX_CONTEXT_LENGTH) {
             android.util.Log.w("MemoryContextBuilder", "⚠️ Context too long (${context.length}), truncating to $MAX_CONTEXT_LENGTH")
