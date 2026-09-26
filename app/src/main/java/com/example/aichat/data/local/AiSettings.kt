@@ -218,6 +218,25 @@ class AiSettings(context: Context) {
             .putString("memory_curator_model", value.trim())
             .apply()
 
+    /**
+     * مزوّد الوسيط الذكي — مستقل تماماً عن [provider] الرئيسي المستخدَم
+     * في المحادثة. يسمح للمستخدم بتبديل الوسيط إلى مزوّد آخر (مثل "custom")
+     * دون التأثير على مزوّد المحادثة الأساسي، ودون أي تعديل كود مستقبلي —
+     * فقط تبديل هذه القيمة من واجهة الإعدادات.
+     *
+     * القيم المدعومة حالياً: "gemini" (افتراضي، يحافظ على السلوك القديم)
+     * و "custom" (يعيد استخدام customUrl/customKey/customModel الموجودة
+     * أصلاً، بلا ازدواج إعدادات).
+     */
+    var memoryCuratorProvider: String
+        get() = prefs.getString("memory_curator_provider", "gemini")
+            ?.trim()
+            ?.lowercase()
+            ?: "gemini"
+        set(value) = prefs.edit()
+            .putString("memory_curator_provider", value.trim().lowercase())
+            .apply()
+
     // Web
 
     var webPlatform: String
