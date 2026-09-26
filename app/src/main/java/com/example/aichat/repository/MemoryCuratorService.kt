@@ -22,8 +22,9 @@ class MemoryCuratorService(
         private const val TAG = "MemoryCurator"
 
         /**
-         * تحذير مُلصَق حتمياً بعد المحتوى المُستخلَص مباشرة (لا في SystemPrompt
-         * العام)، بهدف تقريب مسافة الانتباه بين التحذير والحقائق نفسها.
+         * تحذير مُلصَق حتمياً بعد المحتوى المُستخلَص من الذاكرة تحديداً
+         * (لا بعد نقاط الهوية الأسلوبية)، بهدف تقريب مسافة الانتباه بين
+         * التحذير والحقائق نفسها.
          *
          * ⚠️ تجربة غير مؤكدة الفعالية بعد: محاولات سابقة لمنع النموذج
          * المُجيب من "إثراء" السياق بمعرفته العامة عبر تعليمات في
@@ -31,6 +32,12 @@ class MemoryCuratorService(
          * استمر بمزج تفاصيل عامة غير مؤكدة حتى مع تعطيل وثيقة الدقة
          * بالكامل). هذا تدخّل مختلف (قرب فيزيائي من المحتوى بدل فقرة
          * منفصلة)، ويحتاج اختباراً فعلياً قبل اعتباره حلاً ناجحاً.
+         *
+         * ملاحظة تصميمية (جديد): تُلحَق هذه العبارة فقط إذا كانت هناك
+         * ذاكرة فعلية مسترجَعة (candidates.isNotEmpty())، لأنها تتحدث
+         * صراحة عن "حقائق مؤكدة بخصوص الموضوع". إن كان مخرج الوسيط
+         * نقاط هوية أسلوبية فقط بلا ذاكرة، لا معنى لإلحاق تحذير عن
+         * حقائق غير موجودة أصلاً.
          */
         private const val CONTEXT_DISCLAIMER =
             "\n\n⚠️ ملاحظة: هذا كل ما هو مؤكد ومتاح بخصوص هذا الموضوع تحديداً. " +
@@ -43,17 +50,37 @@ class MemoryCuratorService(
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
-    suspend fun curate(userQuery: String, candidates: List<MemoryItem>): String =
+    /**
+     * الدالة الرئيسية للوسيط الذكي.
+     *
+     * @param mediatorIdentityText نص هوية/أسلوب اختياري (من الإعدادات افتراضياً).
+     *        فارغ = سلوك الوسيط الأصلي بالضبط (تنقية ذاكرة فقط، بلا كسر توافق).
+     *        غير فارغ = يتحول الوسيط أيضاً لمحسّن طلبات ضمن نفس الاستدعاء الواحد،
+     *        بلا أي استدعاء شبكة إضافي عن السابق.
+     *
+     * ملاحظة توافق: هذا المعامل له قيمة افتراضية، لذا أي استدعاء قديم
+     * لـ curate(userQuery, candidates) بدون تعديل يستمر بالعمل بلا كسر.
+     */
+    suspend fun curate(
+        userQuery: String,
+        candidates: List<MemoryItem>,
+        mediatorIdentityText: String = settings.mediatorIdentityText
+    ): String =
         withContext(Dispatchers.IO) {
 
-            if (candidates.isEmpty()) return@withContext ""
+            // لا داعي لاستدعاء LLM إطلاقاً إن لم توجد ذاكرة ولا نص هوية
+            if (candidates.isEmpty() && mediatorIdentityText.isBlank()) {
+                return@withContext ""
+            }
 
             if (!settings.memoryCuratorEnabled) {
                 Log.d(TAG, "⚪ Curator DISABLED by setting")
+                // ملاحظة: عند تعطيل الوسيط، تُتجاهَل نقاط الهوية تماماً
+                // (تحتاج LLM بالضرورة)، ويُكتفى بالمسار الاحتياطي الخام.
                 return@withContext fallbackBuilder.build(candidates)
             }
 
-            val prompt = MemoryCuratorPrompt.build(userQuery, candidates)
+            val prompt = MemoryCuratorPrompt.build(userQuery, candidates, mediatorIdentityText)
             val curatorProvider = settings.memoryCuratorProvider
 
             try {
@@ -90,8 +117,15 @@ class MemoryCuratorService(
                     Log.d(TAG, "⚪ Curator found nothing relevant")
                     ""
                 } else {
-                    Log.d(TAG, "✅ Curated: ${result.take(80)}...")
-                    result.trim() + CONTEXT_DISCLAIMER
+                    val trimmedResult = result.trim()
+                    Log.d(TAG, "✅ Curated: ${trimmedResult.take(80)}...")
+
+                    // التحذير يُلحَق فقط عند وجود ذاكرة فعلية مسترجَعة
+                    if (candidates.isNotEmpty()) {
+                        trimmedResult + CONTEXT_DISCLAIMER
+                    } else {
+                        trimmedResult
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Curator ($curatorProvider) EXCEPTION: ${e.message}", e)
