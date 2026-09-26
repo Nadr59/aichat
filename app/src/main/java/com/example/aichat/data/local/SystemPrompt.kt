@@ -2,8 +2,7 @@ package com.example.aichat.data.local
 
 object SystemPrompt {
 
-    // ✅ بدون const — النص طويل جداً لـ const
-    val ACCURACY_PROMPT = """
+    val DEFAULT_ACCURACY_PROMPT = """
 # وثيقة الدقة والموثوقية في الإجابة
 
 ## الهدف
@@ -77,6 +76,12 @@ object SystemPrompt {
 اعرض النتيجة، والأدلة اللازمة، وحدود اليقين فقط.
 """.trimIndent()
 
+    @Deprecated(
+        "استخدم DEFAULT_ACCURACY_PROMPT بدلاً منه — أُبقي هذا الاسم للتوافق فقط",
+        ReplaceWith("DEFAULT_ACCURACY_PROMPT")
+    )
+    val ACCURACY_PROMPT get() = DEFAULT_ACCURACY_PROMPT
+
     fun build(
         memoryContext:     String  = "",
         customInstruction: String  = "",
@@ -84,10 +89,12 @@ object SystemPrompt {
     ): String = buildString {
 
         if (includeAccuracy) {
-            append(ACCURACY_PROMPT)
+            append(DEFAULT_ACCURACY_PROMPT)
             append("\n\n")
         }
 
+        // مستقلة تماماً عن includeAccuracy — تعمل بصرف النظر عن تفعيل
+        // الوثيقة أو تعطيلها، لمرونة أكبر للمستخدم.
         if (customInstruction.isNotBlank()) {
             append("## تعليمات إضافية\n")
             append(customInstruction.trim())
