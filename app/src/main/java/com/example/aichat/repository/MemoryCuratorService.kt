@@ -13,31 +13,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/**
- * وسيط ذكي لاستخلاص السياق من الذاكرة قبل إرساله للمزود.
- *
- * يدعم مزوّدين مستقلّين تماماً عن settings.provider (مزوّد المحادثة الرئيسي):
- *  - "gemini" (افتراضي): يستخدم geminiKey + memoryCuratorModel عبر Gemini API مباشرة.
- *  - "custom": يعيد استخدام customUrl/customKey/customModel الموجودة أصلاً
- *    لمزوّد المحادثة "custom"، عبر بروتوكول OpenAI-compatible القياسي
- *    (chat/completions). مفيد تحديداً لتجاوز تحديد معدّل الطلبات (Rate
- *    Limiting) الخاص بمفتاح Gemini، بالانتقال لخادم آخر بلا أي تعديل كود.
- *
- * التبديل بين المزوّدين يتم بالكامل عبر settings.memoryCuratorProvider —
- * قيمة واحدة يغيّرها المستخدم من واجهة الإعدادات، بلا أي حاجة لإعادة
- * بناء التطبيق أو لمس هذا الملف مرة أخرى.
- *
- * التحكم الإضافي بيد المستخدم عبر settings.memoryCuratorEnabled:
- * - مفعّل  → يُستدعى دائماً عند وجود مرشحين، بصرف النظر عن عددهم
- * - معطّل → fallback فوري لـ MemoryContextBuilder (السلوك الأصلي)
- *
- * Fail-safe: أي فشل تقني (خطأ شبكة، لا مفتاح، لا رابط خادم) → fallback
- * أيضاً، بلا انهيار، بصرف النظر عن المزوّد المختار.
- *
- * ⚠️ DEBUG-TEMP نشط حالياً داخل مسار "custom" فقط، لتشخيص مشكلة ظهور
- * محتوى "null" من خادم مخصص. يجب التراجع عنه بعد انتهاء التشخيص —
- * التعليمات في نهاية الملف.
- */
 class MemoryCuratorService(
     private val settings: AiSettings,
     private val fallbackBuilder: MemoryContextBuilder
@@ -49,7 +24,7 @@ class MemoryCuratorService(
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
     suspend fun curate(userQuery: String, candidates: List<MemoryItem>): String =
@@ -58,7 +33,7 @@ class MemoryCuratorService(
             if (candidates.isEmpty()) return@withContext ""
 
             if (!settings.memoryCuratorEnabled) {
-                Log.d(TAG, "⚪ DEBUG-TEMP: Curator DISABLED by setting")
+                Log.d(TAG, "⚪ Curator DISABLED by setting")
                 return@withContext fallbackBuilder.build(candidates)
             }
 
@@ -73,15 +48,10 @@ class MemoryCuratorService(
                         val model   = settings.customModel.trim()
 
                         if (baseUrl.isBlank() || model.isBlank()) {
-                            Log.w(
-                                TAG,
-                                "⚠️ DEBUG-TEMP: Custom curator selected but " +
-                                "URL or model is blank (url=$baseUrl, model=$model)"
-                            )
+                            Log.w(TAG, "⚠️ Custom curator: URL or model blank")
                             return@withContext fallbackBuilder.build(candidates)
                         }
 
-                        Log.d(TAG, "🔄 DEBUG-TEMP: Calling custom curator ($baseUrl, $model)...")
                         callCustomProvider(
                             prompt  = prompt,
                             baseUrl = baseUrl,
@@ -90,19 +60,15 @@ class MemoryCuratorService(
                         )
                     }
 
-                    else -> { // "gemini" — السلوك الافتراضي الأصلي
+                    else -> {
                         val apiKey = settings.geminiKey
                         if (apiKey.isBlank()) {
-                            Log.w(TAG, "⚠️ DEBUG-TEMP: No Gemini key (blank)")
+                            Log.w(TAG, "⚠️ No Gemini key (blank)")
                             return@withContext fallbackBuilder.build(candidates)
                         }
-
-                        Log.d(TAG, "🔄 DEBUG-TEMP: Calling Gemini Flash now...")
                         callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
                     }
                 }
-
-                Log.d(TAG, "✅ DEBUG-TEMP: Curator ($curatorProvider) succeeded: ${result.take(100)}")
 
                 if (result.isBlank() || result.trim().equals("NONE", ignoreCase = true)) {
                     Log.d(TAG, "⚪ Curator found nothing relevant")
@@ -112,16 +78,7 @@ class MemoryCuratorService(
                     result.trim()
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "⚠️ DEBUG-TEMP: Curator ($curatorProvider) EXCEPTION: ${e.message}", e)
-
-                // ⚠️ DEBUG-TEMP: نعرض رسالة الخطأ مباشرة بدل الإخفاء الصامت
-                // عبر fallback، لنتمكن من رؤية الاستجابة الخام في الواجهة
-                // (Logcat غير متاح حالياً). احذف هذا الشرط وأعد السطر الأصلي
-                // (fallbackBuilder.build(candidates)) بعد انتهاء التشخيص.
-                if (curatorProvider == "custom") {
-                    return@withContext "DEBUG-TEMP ERROR: ${e.message}"
-                }
-
+                Log.w(TAG, "⚠️ Curator ($curatorProvider) EXCEPTION: ${e.message}", e)
                 fallbackBuilder.build(candidates)
             }
         }
@@ -170,13 +127,14 @@ class MemoryCuratorService(
 
     // ── Custom (OpenAI-compatible chat/completions) ──────────────────
     //
-    // ⚠️ ملاحظة تصميمية مهمة: هذه الدالة تنفيذ مستقل وخفيف لبروتوكول
-    // OpenAI القياسي، وليست إعادة استخدام لـ OpenAICompatibleProvider
-    // الموجود في المشروع أصلاً (المستخدَم في مزوّد المحادثة الرئيسي).
-    // السبب: OpenAICompatibleProvider مصمَّم لسياق محادثة كامل (history +
-    // systemPrompt + رسالة مستخدم)، بينما الوسيط يحتاج فقط إرسال prompt
-    // واحد مكتفٍ بذاته دون سياق محادثة. تنفيذ مستقل هنا أبسط وأكثر أماناً
-    // من محاولة "حشر" استخدام مختلف داخل دالة مصمَّمة لغرض آخر.
+    // ⚠️ ملاحظة مهمة: بعض خوادم OpenAI-compatible (مثل Cloudflare Workers
+    // AI مع نماذج reasoning كـ glm-4.7-flash) تُعيد الاستجابة الفعلية في
+    // حقل "reasoning" غير القياسي بدل "content"، عندما لا يكتمل النموذج
+    // من "التفكير" ضمن حد max_tokens. لذلك:
+    // 1. رفعنا max_tokens بشكل كبير لإعطاء مساحة كافية لإكمال reasoning
+    //    والوصول فعلياً لمرحلة content.
+    // 2. أضفنا قراءة احتياطية لحقل reasoning إن كان content فارغاً/null،
+    //    حتى لا نفقد استجابة مفيدة فعلياً وصلت لكنها في حقل غير متوقَّع.
 
     private fun callCustomProvider(
         prompt:  String,
@@ -193,7 +151,7 @@ class MemoryCuratorService(
                 })
             })
             put("temperature", 0.2)
-            put("max_tokens", 500)
+            put("max_tokens", 2000) // ← رُفع من 500: مساحة كافية لإكمال reasoning + content
         }
 
         val requestBuilder = Request.Builder()
@@ -215,25 +173,28 @@ class MemoryCuratorService(
             val body = response.body?.string()
                 ?: throw Exception("Empty response from custom curator")
 
-            // ⚠️ DEBUG-TEMP: تسجيل الاستجابة الخام كاملة قبل أي محاولة تحليل
-            Log.d(TAG, "🔍 DEBUG-TEMP RAW RESPONSE: $body")
-
-            val rawContent = JSONObject(body)
+            val message = JSONObject(body)
                 .getJSONArray("choices")
                 .getJSONObject(0)
                 .getJSONObject("message")
-                .getString("content")
 
-            // ⚠️ DEBUG-TEMP: كشف صريح لحالة "content": null القادمة من
-            // بعض الخوادم، والتي لا ترميها org.json كاستثناء بل تُعيدها
-            // كسلسلة نصية حرفية "null". احذف هذا الشرط بعد انتهاء التشخيص.
-            if (rawContent == "null" || rawContent.isBlank()) {
-                throw Exception(
-                    "DEBUG-TEMP: Empty content field. Raw body: ${body.take(300)}"
-                )
+            // content أولاً (المسار القياسي)
+            val content = message.optString("content", "")
+                .takeIf { it.isNotBlank() && it != "null" }
+
+            if (content != null) return content
+
+            // fallback: بعض النماذج (reasoning models) تضع الناتج الفعلي
+            // هنا بدل content، تحديداً عند نماذج مثل glm عبر Cloudflare
+            val reasoning = message.optString("reasoning", "")
+                .takeIf { it.isNotBlank() && it != "null" }
+
+            if (reasoning != null) {
+                Log.d(TAG, "ℹ️ Custom curator: using 'reasoning' field (content was empty)")
+                return reasoning
             }
 
-            return rawContent
+            throw Exception("Both 'content' and 'reasoning' fields are empty. Raw: ${body.take(300)}")
         }
     }
 }
