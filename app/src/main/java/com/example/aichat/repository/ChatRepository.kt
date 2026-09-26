@@ -37,11 +37,21 @@ class ChatRepository(context: Context) {
 
     // ── بناء System Prompt ────────────────────────────────────────────────────
 
-    private fun buildSystemPrompt(memoryContext: String): String =
+    /**
+     * @param hasMemorySource 🆕 يحدد ما إذا كان [memoryContext] يحوي فعلاً
+     *        ذاكرة مسترجَعة من محادثات سابقة (true)، أم يحوي فقط نقاط
+     *        هوية أسلوبية بلا ذاكرة حقيقية (false). يُمرَّر مباشرة إلى
+     *        SystemPrompt.build() لاختيار الصياغة الدلالية الصحيحة.
+     */
+    private fun buildSystemPrompt(
+        memoryContext:   String,
+        hasMemorySource: Boolean
+    ): String =
         SystemPrompt.build(
             memoryContext     = memoryContext,
             customInstruction = settings.customSystemInstruction,
-            includeAccuracy   = settings.accuracyPromptEnabled
+            includeAccuracy   = settings.accuracyPromptEnabled,
+            hasMemorySource   = hasMemorySource
         )
 
     // ── جلب النماذج ───────────────────────────────────────────────────────────
@@ -65,11 +75,19 @@ class ChatRepository(context: Context) {
 
     // ── إرسال الرسالة ─────────────────────────────────────────────────────────
 
+    /**
+     * @param hasMemorySource 🆕 يحدد ما إذا كان [memoryContext] يحوي فعلاً
+     *        ذاكرة مسترجَعة (true)، أم فقط نقاط هوية أسلوبية (false).
+     *        القيمة الافتراضية true تحافظ على السلوك القديم بالضبط لأي
+     *        استدعاء لم يُحدَّث بعد (يفترض وجود ذاكرة دائماً عند وجود
+     *        memoryContext غير فارغ).
+     */
     suspend fun sendMessage(
-        history:       List<Message>,
-        userMessage:   String,
-        imageBase64:   String? = null,
-        memoryContext: String  = ""
+        history:         List<Message>,
+        userMessage:     String,
+        imageBase64:     String?  = null,
+        memoryContext:   String   = "",
+        hasMemorySource: Boolean  = true
     ): String = withContext(Dispatchers.IO) {
 
         val providerId = settings.provider.lowercase().trim()
@@ -81,7 +99,7 @@ class ChatRepository(context: Context) {
             history      = history,
             userMessage  = userMessage,
             imageBase64  = imageBase64,
-            systemPrompt = buildSystemPrompt(memoryContext)
+            systemPrompt = buildSystemPrompt(memoryContext, hasMemorySource)
         )
 
         provider.send(request)
