@@ -96,6 +96,9 @@ fun SettingsScreen(
     var customUrl by remember { mutableStateOf(settings.customUrl) }
     var customKey by remember { mutableStateOf(settings.customKey) }
     var customModel by remember { mutableStateOf(settings.customModel) }
+    var memoryCuratorEnabled by remember { mutableStateOf(settings.memoryCuratorEnabled) }
+var memoryCuratorModel by remember { mutableStateOf(settings.memoryCuratorModel) }
+var memoryCuratorProvider by remember { mutableStateOf(settings.memoryCuratorProvider) }
 
     // ✅ نقل هذين المتغيرين إلى مستوى الـ Composable الرئيسي
     var accuracyEnabled by remember { mutableStateOf(settings.accuracyPromptEnabled) }
@@ -628,6 +631,138 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(8.dp))
+            // ====================================================
+// وسيط الذاكرة الذكي (Memory Curator)
+// ====================================================
+
+HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+Text(
+    text       = "🧠 وسيط الذاكرة الذكي",
+    fontWeight = FontWeight.Bold,
+    style      = MaterialTheme.typography.titleSmall
+)
+
+Card(
+    colors = CardDefaults.cardColors(
+        containerColor = if (memoryCuratorEnabled)
+            MaterialTheme.colorScheme.primaryContainer
+        else
+            MaterialTheme.colorScheme.surfaceVariant
+    ),
+    shape    = RoundedCornerShape(12.dp),
+    modifier = Modifier.fillMaxWidth()
+) {
+    Column(
+        modifier = Modifier.padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("تفعيل الوسيط الذكي", fontWeight = FontWeight.Bold)
+                Text(
+                    text  = "يحلل الذاكرة قبل إرسالها للنموذج الرئيسي، ويستخلص السياق الأكثر صلة فقط",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked         = memoryCuratorEnabled,
+                onCheckedChange = { memoryCuratorEnabled = it; saved = false }
+            )
+        }
+
+        if (memoryCuratorEnabled) {
+
+            HorizontalDivider()
+
+            Text(
+                text       = "مزوّد الوسيط:",
+                fontWeight = FontWeight.Bold,
+                style      = MaterialTheme.typography.bodySmall
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { memoryCuratorProvider = "gemini"; saved = false },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = memoryCuratorProvider == "gemini",
+                    onClick  = { memoryCuratorProvider = "gemini"; saved = false }
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Gemini (افتراضي)")
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { memoryCuratorProvider = "custom"; saved = false },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = memoryCuratorProvider == "custom",
+                    onClick  = { memoryCuratorProvider = "custom"; saved = false }
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("خادم مخصص (Custom) — لتجاوز حدود الطلبات")
+            }
+
+            when (memoryCuratorProvider) {
+
+                "gemini" -> {
+                    OutlinedTextField(
+                        value         = memoryCuratorModel,
+                        onValueChange = { memoryCuratorModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("موديل Gemini للوسيط") },
+                        placeholder   = { Text("gemini-2.0-flash-exp") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                    Text(
+                        text  = "يستخدم مفتاح Gemini API المُدخل في قسم Gemini أعلاه.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                "custom" -> {
+                    Text(
+                        text  = "يُعاد استخدام إعدادات \"Custom\" (Server URL / API Key / النموذج) " +
+                                "المضبوطة أعلاه عند اختيار \"Custom\" كمزوّد محادثة — لا حاجة لإدخالها مرتين.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (customUrl.isBlank() || customModel.isBlank()) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text     = "⚠️ Server URL أو اسم النموذج فارغ حالياً — سيُستخدم " +
+                                           "المسار الاحتياطي (بلا وسيط ذكي) حتى يتم ضبطهما من قسم \"Custom\" أعلاه.",
+                                modifier = Modifier.padding(10.dp),
+                                style    = MaterialTheme.typography.bodySmall,
+                                color    = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+Spacer(Modifier.height(8.dp))
 
             // ====================================================
             // System Prompt Section
