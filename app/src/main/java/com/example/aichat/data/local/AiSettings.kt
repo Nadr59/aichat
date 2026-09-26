@@ -237,6 +237,25 @@ class AiSettings(context: Context) {
             .putString("memory_curator_provider", value.trim().lowercase())
             .apply()
 
+    /**
+     * 🆕 نص هوية/أسلوب الوسيط — حقل حر اختياري.
+     *
+     * - فارغ (الافتراضي): الوسيط يعمل بنفس سلوكه الأصلي تماماً
+     *   (تنقية سياق الذاكرة فقط، بلا أي تغيير سلوكي أو كسر توافق).
+     * - غير فارغ: يتحول دور الوسيط أيضاً إلى "محسّن طلبات" يقترح نقاط
+     *   محتوى ملموسة تخدم هذا الوصف، ضمن نفس استدعاء LLM الواحد
+     *   (لا يضيف أي استدعاء شبكة إضافي).
+     *
+     * حماية مهمة: هذا النص لا يُستخدَم أبداً لإعادة صياغة سؤال المستخدم
+     * نفسه — فقط يُوجّه الوسيط لإنتاج توجيه/سياق مرافق. يُنفَّذ هذا الشرط
+     * داخل MemoryCuratorPrompt.build()، وليس في هذا الملف.
+     */
+    var mediatorIdentityText: String
+        get() = prefs.getString("mediator_identity_text", "") ?: ""
+        set(value) = prefs.edit()
+            .putString("mediator_identity_text", value.trim())
+            .apply()
+
     // Web
 
     var webPlatform: String
