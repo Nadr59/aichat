@@ -104,7 +104,7 @@ var memoryCuratorProvider by remember { mutableStateOf(settings.memoryCuratorPro
     // ✅ نقل هذين المتغيرين إلى مستوى الـ Composable الرئيسي
     var accuracyEnabled by remember { mutableStateOf(settings.accuracyPromptEnabled) }
     var customInstruction by remember { mutableStateOf(settings.customSystemInstruction) }
-
+    var mediatorIdentityText by remember { mutableStateOf(settings.mediatorIdentityText) }
     var showKeys by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
 
@@ -632,138 +632,167 @@ var memoryCuratorProvider by remember { mutableStateOf(settings.memoryCuratorPro
             }
 
             Spacer(Modifier.height(8.dp))
+    
             // ====================================================
-// وسيط الذاكرة الذكي (Memory Curator)
-// ====================================================
+            // وسيط الذاكرة الذكي (Memory Curator)
+            // ====================================================
 
-HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-Text(
-    text       = "🧠 وسيط الذاكرة الذكي",
-    fontWeight = FontWeight.Bold,
-    style      = MaterialTheme.typography.titleSmall
-)
-
-Card(
-    colors = CardDefaults.cardColors(
-        containerColor = if (memoryCuratorEnabled)
-            MaterialTheme.colorScheme.primaryContainer
-        else
-            MaterialTheme.colorScheme.surfaceVariant
-    ),
-    shape    = RoundedCornerShape(12.dp),
-    modifier = Modifier.fillMaxWidth()
-) {
-    Column(
-        modifier = Modifier.padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("تفعيل الوسيط الذكي", fontWeight = FontWeight.Bold)
-                Text(
-                    text  = "يحلل الذاكرة قبل إرسالها للنموذج الرئيسي، ويستخلص السياق الأكثر صلة فقط",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            Switch(
-                checked         = memoryCuratorEnabled,
-                onCheckedChange = { memoryCuratorEnabled = it; saved = false }
-            )
-        }
-
-        if (memoryCuratorEnabled) {
-
-            HorizontalDivider()
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Text(
-                text       = "مزوّد الوسيط:",
+                text       = "🧠 وسيط الذاكرة الذكي",
                 fontWeight = FontWeight.Bold,
-                style      = MaterialTheme.typography.bodySmall
+                style      = MaterialTheme.typography.titleSmall
             )
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { memoryCuratorProvider = "gemini"; saved = false },
-                verticalAlignment = Alignment.CenterVertically
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (memoryCuratorEnabled)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
+                ),
+                shape    = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                RadioButton(
-                    selected = memoryCuratorProvider == "gemini",
-                    onClick  = { memoryCuratorProvider = "gemini"; saved = false }
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("Gemini (افتراضي)")
-            }
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { memoryCuratorProvider = "custom"; saved = false },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RadioButton(
-                    selected = memoryCuratorProvider == "custom",
-                    onClick  = { memoryCuratorProvider = "custom"; saved = false }
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("خادم مخصص (Custom) — لتجاوز حدود الطلبات")
-            }
-
-            when (memoryCuratorProvider) {
-
-                "gemini" -> {
-                    OutlinedTextField(
-                        value         = memoryCuratorModel,
-                        onValueChange = { memoryCuratorModel = it; saved = false },
-                        modifier      = Modifier.fillMaxWidth(),
-                        label         = { Text("موديل Gemini للوسيط") },
-                        placeholder   = { Text("gemini-2.0-flash-exp") },
-                        singleLine    = true,
-                        shape         = RoundedCornerShape(12.dp)
-                    )
-                    Text(
-                        text  = "يستخدم مفتاح Gemini API المُدخل في قسم Gemini أعلاه.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                "custom" -> {
-                    Text(
-                        text  = "يُعاد استخدام إعدادات \"Custom\" (Server URL / API Key / النموذج) " +
-                                "المضبوطة أعلاه عند اختيار \"Custom\" كمزوّد محادثة — لا حاجة لإدخالها مرتين.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (customUrl.isBlank() || customModel.isBlank()) {
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("تفعيل الوسيط الذكي", fontWeight = FontWeight.Bold)
                             Text(
-                                text     = "⚠️ Server URL أو اسم النموذج فارغ حالياً — سيُستخدم " +
-                                           "المسار الاحتياطي (بلا وسيط ذكي) حتى يتم ضبطهما من قسم \"Custom\" أعلاه.",
-                                modifier = Modifier.padding(10.dp),
-                                style    = MaterialTheme.typography.bodySmall,
-                                color    = MaterialTheme.colorScheme.onErrorContainer
+                                text  = "يحلل الذاكرة قبل إرسالها للنموذج الرئيسي، ويستخلص السياق الأكثر صلة فقط. " +
+                                        "إن وُصفت هوية أدناه، يقترح أيضاً نقاط محتوى تخدمها.",
+                                style = MaterialTheme.typography.bodySmall
                             )
                         }
+                        Switch(
+                            checked         = memoryCuratorEnabled,
+                            onCheckedChange = { memoryCuratorEnabled = it; saved = false }
+                        )
+                    }
+
+                    if (memoryCuratorEnabled) {
+
+                        HorizontalDivider()
+
+                        Text(
+                            text       = "مزوّد الوسيط:",
+                            fontWeight = FontWeight.Bold,
+                            style      = MaterialTheme.typography.bodySmall
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { memoryCuratorProvider = "gemini"; saved = false },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = memoryCuratorProvider == "gemini",
+                                onClick  = { memoryCuratorProvider = "gemini"; saved = false }
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Gemini (افتراضي)")
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { memoryCuratorProvider = "custom"; saved = false },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = memoryCuratorProvider == "custom",
+                                onClick  = { memoryCuratorProvider = "custom"; saved = false }
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("خادم مخصص (Custom) — لتجاوز حدود الطلبات")
+                        }
+
+                        when (memoryCuratorProvider) {
+
+                            "gemini" -> {
+                                OutlinedTextField(
+                                    value         = memoryCuratorModel,
+                                    onValueChange = { memoryCuratorModel = it; saved = false },
+                                    modifier      = Modifier.fillMaxWidth(),
+                                    label         = { Text("موديل Gemini للوسيط") },
+                                    placeholder   = { Text("gemini-2.0-flash-exp") },
+                                    singleLine    = true,
+                                    shape         = RoundedCornerShape(12.dp)
+                                )
+                                Text(
+                                    text  = "يستخدم مفتاح Gemini API المُدخل في قسم Gemini أعلاه.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            "custom" -> {
+                                Text(
+                                    text  = "يُعاد استخدام إعدادات \"Custom\" (Server URL / API Key / النموذج) " +
+                                            "المضبوطة أعلاه عند اختيار \"Custom\" كمزوّد محادثة — لا حاجة لإدخالها مرتين.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                if (customUrl.isBlank() || customModel.isBlank()) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text     = "⚠️ Server URL أو اسم النموذج فارغ حالياً — سيُستخدم " +
+                                                       "المسار الاحتياطي (بلا وسيط ذكي) حتى يتم ضبطهما من قسم \"Custom\" أعلاه.",
+                                            modifier = Modifier.padding(10.dp),
+                                            style    = MaterialTheme.typography.bodySmall,
+                                            color    = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 🆕 القسم الجديد: هوية/أسلوب الوسيط — حقل نص حر
+                        HorizontalDivider()
+
+                        Text(
+                            text       = "هوية/أسلوب الوسيط (اختياري):",
+                            fontWeight = FontWeight.Bold,
+                            style      = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text  = "إن تُرك فارغاً: الوسيط يقتصر على تنقية سياق الذاكرة فقط. " +
+                                    "إن كُتب وصف هنا: يتحول الوسيط أيضاً لمحسّن يقترح نقاط محتوى ملموسة " +
+                                    "تخدم هذا الوصف، مع الحفاظ الكامل على سؤالك كما هو دون أي تغيير.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        OutlinedTextField(
+                            value         = mediatorIdentityText,
+                            onValueChange = { mediatorIdentityText = it; saved = false },
+                            modifier      = Modifier.fillMaxWidth(),
+                            label         = { Text("وصف الهوية (اختياري)") },
+                            placeholder   = { Text("مثال: مبرمج يفضل الأمثلة العملية والكود المباشر") },
+                            minLines      = 2,
+                            maxLines      = 4,
+                            shape         = RoundedCornerShape(12.dp)
+                        )
                     }
                 }
             }
-        }
-    }
-}
 
-Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
 
             // ====================================================
             // System Prompt Section
@@ -804,7 +833,6 @@ Spacer(Modifier.height(8.dp))
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    // ✅ الإصلاح: استخدام newValue بدلاً من it المبهم
                     Switch(
                         checked         = accuracyEnabled,
                         onCheckedChange = { newValue ->
@@ -833,30 +861,31 @@ Spacer(Modifier.height(8.dp))
 
             Button(
                 onClick = {
-                    settings.provider              = provider
-                    settings.geminiKey             = geminiKey
-                    settings.geminiModel           = geminiModel
-                    settings.openrouterKey         = openrouterKey
-                    settings.openrouterModel       = openrouterModel
-                    settings.openaiKey             = openaiKey
-                    settings.openaiModel           = openaiModel
-                    settings.mistralKey            = mistralKey
-                    settings.mistralModel          = mistralModel
-                    settings.groqKey               = groqKey
-                    settings.groqModel             = groqModel
-                    settings.nvidiaKey             = nvidiaKey
-                    settings.nvidiaModel           = nvidiaModel
-                    settings.huggingfaceKey        = huggingfaceKey
-                    settings.huggingfaceModel      = huggingfaceModel
-                    settings.ollamaModel           = ollamaModel
-                    settings.customUrl             = customUrl
-                    settings.customKey             = customKey
-                    settings.customModel           = customModel
+                    settings.provider                = provider
+                    settings.geminiKey               = geminiKey
+                    settings.geminiModel             = geminiModel
+                    settings.openrouterKey           = openrouterKey
+                    settings.openrouterModel         = openrouterModel
+                    settings.openaiKey               = openaiKey
+                    settings.openaiModel             = openaiModel
+                    settings.mistralKey              = mistralKey
+                    settings.mistralModel            = mistralModel
+                    settings.groqKey                 = groqKey
+                    settings.groqModel               = groqModel
+                    settings.nvidiaKey               = nvidiaKey
+                    settings.nvidiaModel             = nvidiaModel
+                    settings.huggingfaceKey          = huggingfaceKey
+                    settings.huggingfaceModel        = huggingfaceModel
+                    settings.ollamaModel             = ollamaModel
+                    settings.customUrl               = customUrl
+                    settings.customKey               = customKey
+                    settings.customModel             = customModel
                     settings.accuracyPromptEnabled   = accuracyEnabled
                     settings.customSystemInstruction = customInstruction
                     settings.memoryCuratorEnabled    = memoryCuratorEnabled
                     settings.memoryCuratorModel      = memoryCuratorModel
                     settings.memoryCuratorProvider   = memoryCuratorProvider
+                    settings.mediatorIdentityText    = mediatorIdentityText  // 🆕 الحقل الجديد
                     saved = true
                 },
                 modifier = Modifier
