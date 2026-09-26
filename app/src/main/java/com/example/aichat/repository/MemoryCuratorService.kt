@@ -20,6 +20,22 @@ class MemoryCuratorService(
 
     companion object {
         private const val TAG = "MemoryCurator"
+
+        /**
+         * تحذير مُلصَق حتمياً بعد المحتوى المُستخلَص مباشرة (لا في SystemPrompt
+         * العام)، بهدف تقريب مسافة الانتباه بين التحذير والحقائق نفسها.
+         *
+         * ⚠️ تجربة غير مؤكدة الفعالية بعد: محاولات سابقة لمنع النموذج
+         * المُجيب من "إثراء" السياق بمعرفته العامة عبر تعليمات في
+         * SystemPrompt فشلت بدليل تجريبي مباشر (نموذج pixtral-12b-2409
+         * استمر بمزج تفاصيل عامة غير مؤكدة حتى مع تعطيل وثيقة الدقة
+         * بالكامل). هذا تدخّل مختلف (قرب فيزيائي من المحتوى بدل فقرة
+         * منفصلة)، ويحتاج اختباراً فعلياً قبل اعتباره حلاً ناجحاً.
+         */
+        private const val CONTEXT_DISCLAIMER =
+            "\n\n⚠️ ملاحظة: هذا كل ما هو مؤكد ومتاح بخصوص هذا الموضوع تحديداً. " +
+            "لا تُضف تفاصيل تقنية أو تاريخية أو مؤسسية إضافية من معرفتك العامة " +
+            "غير مذكورة صراحة أعلاه، حتى لو بدت مألوفة أو مرتبطة لديك."
     }
 
     private val client = OkHttpClient.Builder()
@@ -75,7 +91,7 @@ class MemoryCuratorService(
                     ""
                 } else {
                     Log.d(TAG, "✅ Curated: ${result.take(80)}...")
-                    result.trim()
+                    result.trim() + CONTEXT_DISCLAIMER
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Curator ($curatorProvider) EXCEPTION: ${e.message}", e)
@@ -126,15 +142,6 @@ class MemoryCuratorService(
     }
 
     // ── Custom (OpenAI-compatible chat/completions) ──────────────────
-    //
-    // ⚠️ ملاحظة مهمة: بعض خوادم OpenAI-compatible (مثل Cloudflare Workers
-    // AI مع نماذج reasoning كـ glm-4.7-flash) تُعيد الاستجابة الفعلية في
-    // حقل "reasoning" غير القياسي بدل "content"، عندما لا يكتمل النموذج
-    // من "التفكير" ضمن حد max_tokens. لذلك:
-    // 1. رفعنا max_tokens بشكل كبير لإعطاء مساحة كافية لإكمال reasoning
-    //    والوصول فعلياً لمرحلة content.
-    // 2. أضفنا قراءة احتياطية لحقل reasoning إن كان content فارغاً/null،
-    //    حتى لا نفقد استجابة مفيدة فعلياً وصلت لكنها في حقل غير متوقَّع.
 
     private fun callCustomProvider(
         prompt:  String,
@@ -151,7 +158,7 @@ class MemoryCuratorService(
                 })
             })
             put("temperature", 0.2)
-            put("max_tokens", 2000) // ← رُفع من 500: مساحة كافية لإكمال reasoning + content
+            put("max_tokens", 2000)
         }
 
         val requestBuilder = Request.Builder()
@@ -178,14 +185,11 @@ class MemoryCuratorService(
                 .getJSONObject(0)
                 .getJSONObject("message")
 
-            // content أولاً (المسار القياسي)
             val content = message.optString("content", "")
                 .takeIf { it.isNotBlank() && it != "null" }
 
             if (content != null) return content
 
-            // fallback: بعض النماذج (reasoning models) تضع الناتج الفعلي
-            // هنا بدل content، تحديداً عند نماذج مثل glm عبر Cloudflare
             val reasoning = message.optString("reasoning", "")
                 .takeIf { it.isNotBlank() && it != "null" }
 
