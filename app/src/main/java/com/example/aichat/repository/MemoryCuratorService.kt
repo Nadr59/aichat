@@ -33,6 +33,10 @@ import java.util.concurrent.TimeUnit
  *
  * Fail-safe: أي فشل تقني (خطأ شبكة، لا مفتاح، لا رابط خادم) → fallback
  * أيضاً، بلا انهيار، بصرف النظر عن المزوّد المختار.
+ *
+ * ⚠️ DEBUG-TEMP نشط حالياً داخل مسار "custom" فقط، لتشخيص مشكلة ظهور
+ * محتوى "null" من خادم مخصص. يجب التراجع عنه بعد انتهاء التشخيص —
+ * التعليمات في نهاية الملف.
  */
 class MemoryCuratorService(
     private val settings: AiSettings,
@@ -109,6 +113,15 @@ class MemoryCuratorService(
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ DEBUG-TEMP: Curator ($curatorProvider) EXCEPTION: ${e.message}", e)
+
+                // ⚠️ DEBUG-TEMP: نعرض رسالة الخطأ مباشرة بدل الإخفاء الصامت
+                // عبر fallback، لنتمكن من رؤية الاستجابة الخام في الواجهة
+                // (Logcat غير متاح حالياً). احذف هذا الشرط وأعد السطر الأصلي
+                // (fallbackBuilder.build(candidates)) بعد انتهاء التشخيص.
+                if (curatorProvider == "custom") {
+                    return@withContext "DEBUG-TEMP ERROR: ${e.message}"
+                }
+
                 fallbackBuilder.build(candidates)
             }
         }
@@ -202,11 +215,25 @@ class MemoryCuratorService(
             val body = response.body?.string()
                 ?: throw Exception("Empty response from custom curator")
 
-            return JSONObject(body)
+            // ⚠️ DEBUG-TEMP: تسجيل الاستجابة الخام كاملة قبل أي محاولة تحليل
+            Log.d(TAG, "🔍 DEBUG-TEMP RAW RESPONSE: $body")
+
+            val rawContent = JSONObject(body)
                 .getJSONArray("choices")
                 .getJSONObject(0)
                 .getJSONObject("message")
                 .getString("content")
+
+            // ⚠️ DEBUG-TEMP: كشف صريح لحالة "content": null القادمة من
+            // بعض الخوادم، والتي لا ترميها org.json كاستثناء بل تُعيدها
+            // كسلسلة نصية حرفية "null". احذف هذا الشرط بعد انتهاء التشخيص.
+            if (rawContent == "null" || rawContent.isBlank()) {
+                throw Exception(
+                    "DEBUG-TEMP: Empty content field. Raw body: ${body.take(300)}"
+                )
+            }
+
+            return rawContent
         }
     }
 }
