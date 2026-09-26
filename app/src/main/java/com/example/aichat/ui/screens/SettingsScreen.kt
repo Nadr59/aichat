@@ -853,6 +853,9 @@ Spacer(Modifier.height(8.dp))
                     settings.customModel           = customModel
                     settings.accuracyPromptEnabled   = accuracyEnabled
                     settings.customSystemInstruction = customInstruction
+                    settings.memoryCuratorEnabled    = memoryCuratorEnabled
+                    settings.memoryCuratorModel      = memoryCuratorModel
+                    settings.memoryCuratorProvider   = memoryCuratorProvider
                     saved = true
                 },
                 modifier = Modifier
