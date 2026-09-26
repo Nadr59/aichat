@@ -98,6 +98,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _memoryAccessEnabled = MutableStateFlow(true)
     val memoryAccessEnabled: StateFlow<Boolean> = _memoryAccessEnabled.asStateFlow()
 
+    // 🆕 تتبع حالة وجود ذاكرة حقيقية لتمريرها مع memoryContext
+    // (منفصلة عن memoryContext نفسه، لأن الأخير قد يحوي نقاط هوية
+    // أسلوبية فقط دون ذاكرة، ويجب التمييز بينهما للصياغة الصحيحة
+    // في SystemPrompt.build())
+    private val _hasMemorySource = MutableStateFlow(false)
+
     // ============================================================
     // الذاكرة
     // ============================================================
@@ -157,13 +163,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * يبحث في الذاكرة المشتركة ويبني سياقاً نصياً للرسالة القادمة.
      * يفحص أولاً memoryAccessEnabled — إذا محجوبة: لا بحث، لا وسيط،
      * لا نداء شبكة إطلاقاً.
+     *
+     * 🆕 يُحدّث أيضاً _hasMemorySource بناءً على وجود نتائج بحث فعلية
+     * من عدمه، لتمريرها لاحقاً إلى SystemPrompt.build() كي يُصاغ
+     * النص بدقة (تجنّب الادعاء بوجود "محادثات سابقة" غير موجودة فعلياً).
      */
     private suspend fun prepareMemoryContext(userText: String) {
-        if (userText.isBlank()) { _memoryContext.value = ""; return }
+        if (userText.isBlank()) {
+            _memoryContext.value = ""
+            _hasMemorySource.value = false
+            return
+        }
 
         if (!_memoryAccessEnabled.value) {
             android.util.Log.d("ChatViewModel", "⚪ Memory access disabled for this conversation")
             _memoryContext.value = ""
+            _hasMemorySource.value = false
             return
         }
 
@@ -171,6 +186,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             android.util.Log.d("ChatViewModel", "🔍 Memory context for: ${userText.take(50)}")
 
             val memories = memoryRepository.searchSharedMemories(userText)
+
+            // 🆕 احفظ حالة الوجود الفعلي للذاكرة قبل استدعاء الوسيط
+            // (لأن الوسيط قد يُضيف نقاط هوية حتى لو كانت memories فارغة)
+            _hasMemorySource.value = memories.isNotEmpty()
 
             android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
 
@@ -182,7 +201,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 "candidatesCount=${memories.size}"
             )
 
-            _memoryContext.value = memoryCuratorService.curate(userText, memories)
+            // 🆕 تمرير mediatorIdentityText صراحة (اختيارياً — له قيمة افتراضية
+            // في curate() تقرأ من settings.mediatorIdentityText، لكن التمرير
+            // الصريح هنا أوضح للقارئ وأكثر قابلية للاختبار/الـ mocking لاحقاً)
+            _memoryContext.value = memoryCuratorService.curate(
+                userQuery = userText,
+                candidates = memories,
+                mediatorIdentityText = aiSettings.mediatorIdentityText
+            )
 
             // DEBUG-TEMP: عرض السياق النهائي كرسالة خطأ مرئية على الشاشة
             // (طريقة فحص بصرية سريعة بلا حاجة لـ logcat خارجي)
@@ -194,6 +220,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext: ${e.message}", e)
             _memoryContext.value = ""
+            _hasMemorySource.value = false
         }
     }
 
@@ -204,6 +231,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun openConversation(conversationId: Long) {
         _currentConversationId.value = conversationId
         _memoryContext.value = ""
+        _hasMemorySource.value = false
         startCollecting(conversationId)
 
         viewModelScope.launch {
@@ -219,6 +247,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _messages.value              = emptyList()
         _selectedImageBase64.value   = null
         _memoryContext.value         = ""
+        _hasMemorySource.value       = false
         _error.value                 = null
         _successMessage.value        = null
         _memoryAccessEnabled.value   = true
@@ -295,11 +324,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 // DEBUG-TEMP: احفظ رسالة الخطأ المؤقتة قبل أن تُصفَّرها العمليات التالية
                 val debugContextSnapshot = _error.value
 
+                // 🆕 تمرير hasMemorySource إلى ChatRepository
                 val response = repository.sendMessage(
-                    history       = historySnapshot,
-                    userMessage   = userText,
-                    imageBase64   = imageBase64,
-                    memoryContext = _memoryContext.value
+                    history         = historySnapshot,
+                    userMessage     = userText,
+                    imageBase64     = imageBase64,
+                    memoryContext   = _memoryContext.value,
+                    hasMemorySource = _hasMemorySource.value
                 )
 
                 val assistantMessage = Message(
