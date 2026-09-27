@@ -167,9 +167,10 @@ fun ChatScreen(
         )
     }
 
+    // ✅ الاسم الصحيح هو sendChatMessage وليس sendMessage
     fun sendCurrentMessage() {
         if (displayedText.isNotBlank()) {
-            viewModel.sendMessage(displayedText)
+            viewModel.sendChatMessage(displayedText)
             userInput = ""
             viewModel.clearEnhancedQuery()
         }
@@ -311,8 +312,8 @@ fun ChatScreen(
                 onClearEnhanced = { viewModel.clearEnhancedQuery() }
             )
 
-        }
-    }
+        } // ← نهاية Column
+    } // ← نهاية Scaffold
 
     // ============================================================
     // Dialogs
@@ -344,7 +345,8 @@ fun ChatScreen(
             }
         )
     }
-}
+
+} // ← نهاية ChatScreen
 
 // ============================================================
 // WebPageImportDialog
@@ -857,9 +859,9 @@ private fun InputBar(
                             }
                         )
 
-                    }
-                }
-            }
+                    } // ← نهاية Row الداخلي
+                } // ← نهاية Surface
+            } // ← نهاية Row الخارجي
 
             if (isEnhanced) {
                 Text(
@@ -869,9 +871,10 @@ private fun InputBar(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
-        }
-    }
-}
+
+        } // ← نهاية Column
+    } // ← نهاية Surface
+} // ← نهاية InputBar
 
 // ============================================================
 // ThinkingBubble
