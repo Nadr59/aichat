@@ -191,6 +191,26 @@ class MemoryCuratorService(
             userQuery  // Fallback للأصلي عند أي خطأ
         }
     }
+    // أضف هذه الدالة قبل callGeminiFlash()
+private suspend fun callConfiguredProvider(prompt: String): String {
+    return when (settings.memoryCuratorProvider) {
+        "custom" -> {
+            val baseUrl = settings.customUrl.trim()
+            val model   = settings.customModel.trim()
+            if (baseUrl.isBlank() || model.isBlank()) {
+                throw Exception("Custom provider not configured")
+            }
+            callCustomProvider(prompt, baseUrl, settings.customKey, model)
+        }
+        else -> {
+            val apiKey = settings.geminiKey
+            if (apiKey.isBlank()) {
+                throw Exception("Gemini API key is blank")
+            }
+            callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
+        }
+    }
+}
 
     // ── Gemini Flash ──────────────────────────────────────────────────
 
