@@ -95,9 +95,12 @@ fun ChatScreen(
     val selectedImage by viewModel.selectedImageBase64.collectAsState()
     val customRequestCount by viewModel.customRequestCount.collectAsState()
 
-    var inputText by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
+    // aiSettings مشتق من settings المُمرَّر
     val context = LocalContext.current
+    val aiSettings = settings
+
+    var userInput by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
@@ -171,6 +174,19 @@ fun ChatScreen(
     }
 
     // ============================================================
+    // حالات التحسين
+    // ============================================================
+
+    val enhancedQuery by viewModel.enhancedQuery.collectAsState()
+    val isEnhancing by viewModel.isEnhancing.collectAsState()
+
+    val displayedText = enhancedQuery ?: userInput
+    val isEnhanced = enhancedQuery != null
+    val hasIdentity = remember(aiSettings.mediatorIdentityText) {
+        aiSettings.mediatorIdentityText.isNotBlank()
+    }
+
+    // ============================================================
     // Scaffold
     // ============================================================
 
@@ -226,19 +242,6 @@ fun ChatScreen(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
-        },
-        bottomBar = {
-            InputBar(
-                viewModel = viewModel,
-                aiSettings = settings,
-                isLoading = isLoading,
-                hasSelectedImage = selectedImage != null,
-                onOpenGallery = { galleryLauncher.launch("image/*") },
-                onOpenCamera = { openCamera() },
-                onOpenFile = { fileLauncher.launch("*/*") },
-                onOpenWebImport = { showWebImportDialog = true },
-                onRemoveImage = { viewModel.clearSelectedImage() }
-            )
         }
     ) { padding ->
 
@@ -248,8 +251,14 @@ fun ChatScreen(
                 .padding(padding)
         ) {
 
+            // ============================================================
+            // قائمة الرسائل
+            // ============================================================
+
             if (messages.isEmpty()) {
-                EmptyChatView()
+                EmptyChatView(
+                    modifier = Modifier.weight(1f)
+                )
             } else {
                 LazyColumn(
                     state = listState,
@@ -289,8 +298,40 @@ fun ChatScreen(
                     onCopy = { copyToClipboard(err) }
                 )
             }
-        }
-    }
+
+            // ============================================================
+            // شريط الإدخال السفلي
+            // ============================================================
+
+            InputBar(
+                viewModel = viewModel,
+                aiSettings = aiSettings,
+                isLoading = isLoading,
+                hasSelectedImage = selectedImage != null,
+                userInput = userInput,
+                onUserInputChange = { userInput = it },
+                displayedText = displayedText,
+                isEnhanced = isEnhanced,
+                isEnhancing = isEnhancing,
+                hasIdentity = hasIdentity,
+                onOpenGallery = { galleryLauncher.launch("image/*") },
+                onOpenCamera = { openCamera() },
+                onOpenFile = { fileLauncher.launch("*/*") },
+                onOpenWebImport = { showWebImportDialog = true },
+                onRemoveImage = { viewModel.clearSelectedImage() },
+                onSend = {
+                    if (displayedText.isNotBlank()) {
+                        viewModel.sendMessage(displayedText)
+                        userInput = ""
+                        viewModel.clearEnhancedQuery()
+                    }
+                },
+                onEnhance = { viewModel.enhanceUserQuery(userInput) },
+                onClearEnhanced = { viewModel.clearEnhancedQuery() }
+            )
+
+        } // ← نهاية Column الرئيسي
+    } // ← نهاية Scaffold content
 
     // ============================================================
     // Dialog حفظ في الذاكرة
@@ -326,10 +367,11 @@ fun ChatScreen(
             }
         )
     }
-}
+
+} // ← نهاية ChatScreen
 
 // ============================================================
-// Dialog استيراد صفحة الويب
+// WebPageImportDialog
 // ============================================================
 
 @Composable
@@ -416,9 +458,11 @@ private fun WebPageImportDialog(
 // ============================================================
 
 @Composable
-private fun EmptyChatView() {
+private fun EmptyChatView(
+    modifier: Modifier = Modifier
+) {
     Box(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -583,23 +627,22 @@ private fun InputBar(
     aiSettings: AiSettings,
     isLoading: Boolean,
     hasSelectedImage: Boolean,
+    userInput: String,
+    onUserInputChange: (String) -> Unit,
+    displayedText: String,
+    isEnhanced: Boolean,
+    isEnhancing: Boolean,
+    hasIdentity: Boolean,
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
     onOpenFile: () -> Unit,
     onOpenWebImport: () -> Unit,
-    onRemoveImage: () -> Unit
+    onRemoveImage: () -> Unit,
+    onSend: () -> Unit,
+    onEnhance: () -> Unit,
+    onClearEnhanced: () -> Unit
 ) {
     var showAttachMenu by remember { mutableStateOf(false) }
-    var userInput by remember { mutableStateOf("") }
-
-    val enhancedQuery by viewModel.enhancedQuery.collectAsState()
-    val isEnhancing by viewModel.isEnhancing.collectAsState()
-
-    val displayedText = enhancedQuery ?: userInput
-    val isEnhanced = enhancedQuery != null
-    val hasIdentity = remember(aiSettings.mediatorIdentityText) {
-        aiSettings.mediatorIdentityText.isNotBlank()
-    }
 
     Surface(
         modifier = Modifier
@@ -670,6 +713,8 @@ private fun InputBar(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Bottom
                     ) {
+
+                        // زر الإرفاق مع القائمة المنسدلة
                         Box {
                             IconButton(
                                 onClick = { showAttachMenu = true },
@@ -762,14 +807,17 @@ private fun InputBar(
                                     }
                                 )
                             }
-                        }
+                        } // ← نهاية Box (AttachMenu)
 
-                        // حقل الإدخال
+                        // ════════════════════════════════════════
+                        // حقل الإدخال + أزرار التحسين/الإرسال
+                        // ════════════════════════════════════════
+
                         OutlinedTextField(
                             value = displayedText,
                             onValueChange = { newValue ->
                                 if (!isEnhanced) {
-                                    userInput = newValue
+                                    onUserInputChange(newValue)
                                 }
                             },
                             modifier = Modifier
@@ -799,10 +847,10 @@ private fun InputBar(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    // زر التحسين
+                                    // زر التحسين (يظهر فقط عند: هوية مفعّلة + نص غير فارغ + لم يُحسّن بعد)
                                     if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
                                         IconButton(
-                                            onClick = { viewModel.enhanceUserQuery(userInput) },
+                                            onClick = onEnhance,
                                             enabled = !isEnhancing
                                         ) {
                                             if (isEnhancing) {
@@ -820,10 +868,10 @@ private fun InputBar(
                                         }
                                     }
 
-                                    // زر الرجوع للأصلي
+                                    // زر الرجوع للأصلي (يظهر فقط بعد التحسين)
                                     if (isEnhanced) {
                                         IconButton(
-                                            onClick = { viewModel.clearEnhancedQuery() },
+                                            onClick = onClearEnhanced,
                                             enabled = !isLoading
                                         ) {
                                             Icon(
@@ -836,13 +884,7 @@ private fun InputBar(
 
                                     // زر الإرسال
                                     IconButton(
-                                        onClick = {
-                                            if (displayedText.isNotBlank()) {
-                                                viewModel.sendMessage(displayedText)
-                                                userInput = ""
-                                                viewModel.clearEnhancedQuery()
-                                            }
-                                        },
+                                        onClick = onSend,
                                         enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
                                     ) {
                                         Icon(
@@ -854,14 +896,15 @@ private fun InputBar(
                                                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                         )
                                     }
-                                }
-                            }
-                        )
-                    }
-                }
-            }
+                                } // ← نهاية Row (trailingIcon)
+                            }     // ← نهاية trailingIcon
+                        )         // ← نهاية OutlinedTextField
 
-            // رسالة توضيحية عند التحسين
+                    } // ← نهاية Row الداخلي (Surface)
+                } // ← نهاية Surface (حقل الإدخال)
+            } // ← نهاية Row الخارجي
+
+            // رسالة توضيحية صغيرة عند التحسين
             if (isEnhanced) {
                 Text(
                     text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل في الإعدادات. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
@@ -870,9 +913,10 @@ private fun InputBar(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
-        }
-    }
-}
+
+        } // ← نهاية Column (InputBar)
+    } // ← نهاية Surface (InputBar)
+} // ← نهاية InputBar
 
 // ============================================================
 // ThinkingBubble
