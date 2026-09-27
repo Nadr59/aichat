@@ -15,10 +15,10 @@ enum class QueryStyle(
     ),
     
     CASUAL(
-        emoji = "💬",
-        displayName = "عامي",
-        displayName = "لغة بسيطة ومباشرة كأنك تتحدث مع صديق"
-    ),
+    emoji = "💬",
+    displayName = "عامي",
+    description = "لغة بسيطة ومباشرة كأنك تتحدث مع صديق"
+),
     
     ACADEMIC(
         emoji = "📚",
