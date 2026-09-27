@@ -97,12 +97,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _memoryAccessEnabled = MutableStateFlow(true)
     val memoryAccessEnabled: StateFlow<Boolean> = _memoryAccessEnabled.asStateFlow()
+        // 🆕 تتبع حالة تحسين السؤال
+    private val _enhancedQuery = MutableStateFlow<String?>(null)
+    val enhancedQuery: StateFlow<String?> = _enhancedQuery.asStateFlow()
+
+    private val _isEnhancing = MutableStateFlow(false)
+    val isEnhancing: StateFlow<Boolean> = _isEnhancing.asStateFlow()
 
     // 🆕 تتبع حالة وجود ذاكرة حقيقية لتمريرها مع memoryContext
     // (منفصلة عن memoryContext نفسه، لأن الأخير قد يحوي نقاط هوية
     // أسلوبية فقط دون ذاكرة، ويجب التمييز بينهما للصياغة الصحيحة
     // في SystemPrompt.build())
     private val _hasMemorySource = MutableStateFlow(false)
+    
 
     // ============================================================
     // الذاكرة
@@ -251,6 +258,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _error.value                 = null
         _successMessage.value        = null
         _memoryAccessEnabled.value   = true
+        
     }
 
     fun toggleMemoryAccess(enabled: Boolean) {
@@ -269,6 +277,55 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 .getMessages(conversationId)
                 .collect { _messages.value = it }
         }
+    }
+        /**
+     * 🆕 يطلب تحسين السؤال بناءً على الهوية المفعّلة في الإعدادات.
+     * يُستدعى عند ضغط المستخدم على زر "تحسين" في الواجهة.
+     * 
+     * النتيجة تُخزَّن في _enhancedQuery، والواجهة تعرضها بدل النص الأصلي.
+     */
+    fun enhanceUserQuery(userText: String) {
+        if (userText.isBlank()) return
+        if (aiSettings.mediatorIdentityText.isBlank()) {
+            _error.value = "⚠️ لم يتم تعيين هوية/أسلوب في الإعدادات"
+            return
+        }
+
+        _isEnhancing.value = true
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("ChatViewModel", "🔄 Requesting query enhancement...")
+
+                // جلب سياق من الذاكرة (اختياري، لكنه يُحسّن الجودة)
+                val memories = if (_memoryAccessEnabled.value) {
+                    memoryRepository.searchSharedMemories(userText)
+                } else {
+                    emptyList()
+                }
+
+                val enhanced = memoryCuratorService.enhanceQuery(
+                    userQuery            = userText,
+                    mediatorIdentityText = aiSettings.mediatorIdentityText,
+                    memoryCandidates     = memories
+                )
+
+                _enhancedQuery.value = enhanced
+                android.util.Log.d("ChatViewModel", "✅ Enhancement result: ${enhanced.take(80)}...")
+
+            } catch (e: Exception) {
+                android.util.Log.e("ChatViewModel", "❌ enhanceQuery: ${e.message}", e)
+                _error.value = "فشل تحسين السؤال: ${e.message}"
+            } finally {
+                _isEnhancing.value = false
+            }
+        }
+    }
+
+    /**
+     * 🆕 إلغاء التحسين والعودة للسؤال الأصلي
+     */
+    fun clearEnhancedQuery() {
+        _enhancedQuery.value = null
     }
 
     // ============================================================
