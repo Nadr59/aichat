@@ -778,23 +778,30 @@ private fun InputBar(
                         OutlinedTextField(
                             value = displayedText,
                             onValueChange = { newValue ->
-                                if (!isEnhanced) {
-                                    onUserInputChange(newValue)
-                                }
+    // ✅ السماح بالتعديل دائماً
+    if (isEnhanced) {
+        // عند تعديل سؤال محسّن: نحدّث enhancedQuery
+        viewModel.updateEnhancedQuery(newValue)
+    } else {
+        // عند تعديل سؤال عادي: نحدّث userInput
+        onUserInputChange(newValue)
+    }
+},
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
                             label = {
-                                Text(
-                                    if (isEnhanced) "السؤال المُحسّن ✨"
-                                    else "اكتب رسالة..."
-                                )
+    Text(
+        if (isEnhanced) "السؤال المُحسّن ✨ (قابل للتعديل)"
+        else "اكتب رسالة..."
+    )
+},
                             },
                             placeholder = {
                                 Text(if (isEnhanced) "" else "مثال: اشرح النسبية")
                             },
-                            readOnly = isEnhanced,
+                            readOnly = false,  // ✅ السماح بالتعديل دائماً
                             enabled = !isLoading,
                             minLines = 1,
                             maxLines = 6,
