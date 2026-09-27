@@ -93,25 +93,16 @@ fun ChatScreen(
     val error by viewModel.error.collectAsState()
     val selectedImage by viewModel.selectedImageBase64.collectAsState()
     val customRequestCount by viewModel.customRequestCount.collectAsState()
-
-    // ============================================================
-    // حالات التحسين
-    // ============================================================
-
+    val memoryAccessEnabled by viewModel.memoryAccessEnabled.collectAsState()
     val enhancedQuery by viewModel.enhancedQuery.collectAsState()
     val isEnhancing by viewModel.isEnhancing.collectAsState()
 
     var userInput by remember { mutableStateOf("") }
-
     val displayedText = enhancedQuery ?: userInput
     val isEnhanced = enhancedQuery != null
     val hasIdentity = remember(settings.mediatorIdentityText) {
         settings.mediatorIdentityText.isNotBlank()
     }
-
-    // ============================================================
-    // متغيرات أخرى
-    // ============================================================
 
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -176,6 +167,14 @@ fun ChatScreen(
         )
     }
 
+    fun sendCurrentMessage() {
+        if (displayedText.isNotBlank()) {
+            viewModel.sendMessage(displayedText)
+            userInput = ""
+            viewModel.clearEnhancedQuery()
+        }
+    }
+
     // ============================================================
     // Auto scroll
     // ============================================================
@@ -223,8 +222,9 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    val memoryAccessEnabled by viewModel.memoryAccessEnabled.collectAsState()
-                    IconButton(onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }) {
+                    IconButton(
+                        onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Memory,
                             contentDescription = if (memoryAccessEnabled)
@@ -251,14 +251,8 @@ fun ChatScreen(
                 .padding(padding)
         ) {
 
-            // ============================================================
-            // قائمة الرسائل
-            // ============================================================
-
             if (messages.isEmpty()) {
-                EmptyChatView(
-                    modifier = Modifier.weight(1f)
-                )
+                EmptyChatView(modifier = Modifier.weight(1f))
             } else {
                 LazyColumn(
                     state = listState,
@@ -290,7 +284,6 @@ fun ChatScreen(
                 }
             }
 
-            // رسائل الخطأ
             error?.let { err ->
                 ErrorMessage(
                     error = err,
@@ -298,10 +291,6 @@ fun ChatScreen(
                     onCopy = { copyToClipboard(err) }
                 )
             }
-
-            // ============================================================
-            // شريط الإدخال
-            // ============================================================
 
             InputBar(
                 isLoading = isLoading,
@@ -317,22 +306,16 @@ fun ChatScreen(
                 onOpenFile = { fileLauncher.launch("*/*") },
                 onOpenWebImport = { showWebImportDialog = true },
                 onRemoveImage = { viewModel.clearSelectedImage() },
-                onSend = {
-                    if (displayedText.isNotBlank()) {
-                        viewModel.sendMessage(displayedText)
-                        userInput = ""
-                        viewModel.clearEnhancedQuery()
-                    }
-                },
+                onSend = { sendCurrentMessage() },
                 onEnhance = { viewModel.enhanceUserQuery(userInput) },
                 onClearEnhanced = { viewModel.clearEnhancedQuery() }
             )
 
-        } // ← نهاية Column الرئيسي
-    } // ← نهاية Scaffold
+        }
+    }
 
     // ============================================================
-    // Dialog حفظ في الذاكرة
+    // Dialogs
     // ============================================================
 
     memoryMessage?.let { message ->
@@ -352,10 +335,6 @@ fun ChatScreen(
         )
     }
 
-    // ============================================================
-    // Dialog استيراد صفحة الويب
-    // ============================================================
-
     if (showWebImportDialog) {
         WebPageImportDialog(
             onDismiss = { showWebImportDialog = false },
@@ -365,8 +344,7 @@ fun ChatScreen(
             }
         )
     }
-
-} // ← نهاية ChatScreen
+}
 
 // ============================================================
 // WebPageImportDialog
@@ -456,16 +434,12 @@ private fun WebPageImportDialog(
 // ============================================================
 
 @Composable
-private fun EmptyChatView(
-    modifier: Modifier = Modifier
-) {
+private fun EmptyChatView(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Surface(
                 modifier = Modifier.size(64.dp),
                 shape = CircleShape,
@@ -654,7 +628,6 @@ private fun InputBar(
             )
         ) {
 
-            // مؤشر الصورة المحددة
             if (hasSelectedImage) {
                 Surface(
                     modifier = Modifier.padding(bottom = 6.dp),
@@ -710,7 +683,6 @@ private fun InputBar(
                         verticalAlignment = Alignment.Bottom
                     ) {
 
-                        // زر الإرفاق مع القائمة المنسدلة
                         Box {
                             IconButton(
                                 onClick = { showAttachMenu = true },
@@ -727,7 +699,6 @@ private fun InputBar(
                                 onDismissRequest = { showAttachMenu = false }
                             ) {
 
-                                // كاميرا
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -746,7 +717,6 @@ private fun InputBar(
                                     }
                                 )
 
-                                // معرض الصور
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -765,7 +735,6 @@ private fun InputBar(
                                     }
                                 )
 
-                                // ملف TXT أو PDF
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -784,7 +753,6 @@ private fun InputBar(
                                     }
                                 )
 
-                                // استيراد صفحة ويب
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -803,9 +771,8 @@ private fun InputBar(
                                     }
                                 )
                             }
-                        } // ← نهاية Box (AttachMenu)
+                        }
 
-                        // حقل الإدخال
                         OutlinedTextField(
                             value = displayedText,
                             onValueChange = { newValue ->
@@ -840,7 +807,6 @@ private fun InputBar(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    // زر التحسين
                                     if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
                                         IconButton(
                                             onClick = onEnhance,
@@ -861,7 +827,6 @@ private fun InputBar(
                                         }
                                     }
 
-                                    // زر الرجوع للأصلي
                                     if (isEnhanced) {
                                         IconButton(
                                             onClick = onClearEnhanced,
@@ -875,7 +840,6 @@ private fun InputBar(
                                         }
                                     }
 
-                                    // زر الإرسال
                                     IconButton(
                                         onClick = onSend,
                                         enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
@@ -889,15 +853,14 @@ private fun InputBar(
                                                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                         )
                                     }
-                                } // ← نهاية Row (trailingIcon)
-                            }     // ← نهاية trailingIcon
-                        )         // ← نهاية OutlinedTextField
+                                }
+                            }
+                        )
 
-                    } // ← نهاية Row الداخلي
-                } // ← نهاية Surface
-            } // ← نهاية Row الخارجي
+                    }
+                }
+            }
 
-            // رسالة توضيحية عند التحسين
             if (isEnhanced) {
                 Text(
                     text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل في الإعدادات. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
@@ -906,10 +869,9 @@ private fun InputBar(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
-
-        } // ← نهاية Column
-    } // ← نهاية Surface
-} // ← نهاية InputBar
+        }
+    }
+}
 
 // ============================================================
 // ThinkingBubble
