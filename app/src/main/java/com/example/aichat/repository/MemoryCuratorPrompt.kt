@@ -1,7 +1,7 @@
 package com.example.aichat.repository
 
 import com.example.aichat.data.model.MemoryItem
-import com.example.aichat.data.model.QueryStyle  
+import com.example.aichat.data.model.QueryStyle
 
 object MemoryCuratorPrompt {
 
@@ -45,15 +45,11 @@ object MemoryCuratorPrompt {
     }
 
     /**
-     * ✅ برومبت محسّن الطلبات - معدّل (حذف memoryCandidates).
-     * يُعيد صياغة سؤال المستخدم بناءً على الهوية المطلوبة فقط.
-     * 
-     * ⚠️ التغيير: حذف معامل memoryCandidates وكل الكود المرتبط به.
+     * برومبت محسّن الطلبات - توسيع السؤال بناءً على الهوية.
      */
     fun buildEnhancerPrompt(
         userQuery: String,
         mediatorIdentityText: String
-        // ✅ حذف: memoryCandidates: List<MemoryItem> = emptyList()
     ): String = buildString {
 
         appendLine("مهمتك: إعادة صياغة سؤال المستخدم التالي ليصبح أوضح وأكثر توجيهاً نحو الأسلوب المطلوب،")
@@ -65,15 +61,6 @@ object MemoryCuratorPrompt {
         appendLine("الأسلوب/الهوية المطلوبة:")
         appendLine("\"$mediatorIdentityText\"")
         appendLine()
-
-        // ✅ حذف هذه الكتلة بالكامل:
-        // if (memoryCandidates.isNotEmpty()) {
-        //     appendLine()
-        //     appendLine("سياق إضافي من ذاكرة المحادثات السابقة (استخدمه إن كان ذا صلة بالسؤال):")
-        //     memoryCandidates.take(3).forEachIndexed { i, m ->
-        //         appendLine("${i + 1}. ${m.content.take(200)}")
-        //     }
-        // }
 
         appendLine(
             """
@@ -140,6 +127,7 @@ object MemoryCuratorPrompt {
             """.trimIndent()
         )
     }
+
     /**
      * 🆕 بناء prompt تحسين صياغة السؤال (بدون إضافة محتوى)
      * 
@@ -150,5 +138,5 @@ object MemoryCuratorPrompt {
     fun buildStyleRefinementPrompt(
         userQuery: String,
         style: QueryStyle
-    ): String
+    ): String = style.buildPrompt(userQuery)
 }
