@@ -38,13 +38,16 @@ class ChatRepository(context: Context) {
     // ── بناء System Prompt ────────────────────────────────────────────────────
 
     /**
-     * @param hasMemorySource 🆕 يحدد ما إذا كان [memoryContext] يحوي فعلاً
-     *        ذاكرة مسترجَعة من محادثات سابقة (true)، أم يحوي فقط نقاط
-     *        هوية أسلوبية بلا ذاكرة حقيقية (false). يُمرَّر مباشرة إلى
-     *        SystemPrompt.build() لاختيار الصياغة الدلالية الصحيحة.
+     * @param memoryContext سياق منقّى من الذاكرة (من MemoryCuratorService.curate)،
+     *        أو فارغ إن لم توجد ذاكرة ذات صلة. هذا **منفصل** عن تحسين السؤال —
+     *        يُحقَن في SystemPrompt بجانب السؤال (سواء كان محسّناً أم لا).
+     * 
+     * @param hasMemorySource يحدد ما إذا كان memoryContext يحوي فعلاً ذاكرة
+     *        مسترجَعة (true) أم لا (false). يُستخدَم لاختيار الصياغة الصحيحة
+     *        في SystemPrompt.build().
      */
     private fun buildSystemPrompt(
-        memoryContext:   String,
+        memoryContext: String,
         hasMemorySource: Boolean
     ): String =
         SystemPrompt.build(
@@ -76,18 +79,18 @@ class ChatRepository(context: Context) {
     // ── إرسال الرسالة ─────────────────────────────────────────────────────────
 
     /**
-     * @param hasMemorySource 🆕 يحدد ما إذا كان [memoryContext] يحوي فعلاً
-     *        ذاكرة مسترجَعة (true)، أم فقط نقاط هوية أسلوبية (false).
-     *        القيمة الافتراضية true تحافظ على السلوك القديم بالضبط لأي
-     *        استدعاء لم يُحدَّث بعد (يفترض وجود ذاكرة دائماً عند وجود
-     *        memoryContext غير فارغ).
+     * إرسال رسالة للنموذج المُجيب.
+     * 
+     * @param userMessage السؤال الفعلي (قد يكون أصلياً أو محسّناً — لا يهم هنا)
+     * @param memoryContext سياق منقّى من الذاكرة (من curate)، يُحقَن في SystemPrompt
+     * @param hasMemorySource هل memoryContext يحوي ذاكرة فعلية (true) أم لا (false)
      */
     suspend fun sendMessage(
         history:         List<Message>,
         userMessage:     String,
         imageBase64:     String?  = null,
         memoryContext:   String   = "",
-        hasMemorySource: Boolean  = true
+        hasMemorySource: Boolean  = false
     ): String = withContext(Dispatchers.IO) {
 
         val providerId = settings.provider.lowercase().trim()
