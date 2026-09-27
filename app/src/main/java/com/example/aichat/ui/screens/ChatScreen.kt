@@ -91,16 +91,30 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
-    val successMessage by viewModel.successMessage.collectAsState()
     val selectedImage by viewModel.selectedImageBase64.collectAsState()
     val customRequestCount by viewModel.customRequestCount.collectAsState()
 
-    // aiSettings مشتق من settings المُمرَّر
-    val context = LocalContext.current
-    val aiSettings = settings
+    // ============================================================
+    // حالات التحسين
+    // ============================================================
+
+    val enhancedQuery by viewModel.enhancedQuery.collectAsState()
+    val isEnhancing by viewModel.isEnhancing.collectAsState()
 
     var userInput by remember { mutableStateOf("") }
+
+    val displayedText = enhancedQuery ?: userInput
+    val isEnhanced = enhancedQuery != null
+    val hasIdentity = remember(settings.mediatorIdentityText) {
+        settings.mediatorIdentityText.isNotBlank()
+    }
+
+    // ============================================================
+    // متغيرات أخرى
+    // ============================================================
+
     val listState = rememberLazyListState()
+    val context = LocalContext.current
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
@@ -174,19 +188,6 @@ fun ChatScreen(
     }
 
     // ============================================================
-    // حالات التحسين
-    // ============================================================
-
-    val enhancedQuery by viewModel.enhancedQuery.collectAsState()
-    val isEnhancing by viewModel.isEnhancing.collectAsState()
-
-    val displayedText = enhancedQuery ?: userInput
-    val isEnhanced = enhancedQuery != null
-    val hasIdentity = remember(aiSettings.mediatorIdentityText) {
-        aiSettings.mediatorIdentityText.isNotBlank()
-    }
-
-    // ============================================================
     // Scaffold
     // ============================================================
 
@@ -223,7 +224,6 @@ fun ChatScreen(
                 },
                 actions = {
                     val memoryAccessEnabled by viewModel.memoryAccessEnabled.collectAsState()
-
                     IconButton(onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }) {
                         Icon(
                             imageVector = Icons.Default.Memory,
@@ -300,12 +300,10 @@ fun ChatScreen(
             }
 
             // ============================================================
-            // شريط الإدخال السفلي
+            // شريط الإدخال
             // ============================================================
 
             InputBar(
-                viewModel = viewModel,
-                aiSettings = aiSettings,
                 isLoading = isLoading,
                 hasSelectedImage = selectedImage != null,
                 userInput = userInput,
@@ -331,7 +329,7 @@ fun ChatScreen(
             )
 
         } // ← نهاية Column الرئيسي
-    } // ← نهاية Scaffold content
+    } // ← نهاية Scaffold
 
     // ============================================================
     // Dialog حفظ في الذاكرة
@@ -623,8 +621,6 @@ private fun MemoryCategoryOption(
 
 @Composable
 private fun InputBar(
-    viewModel: ChatViewModel,
-    aiSettings: AiSettings,
     isLoading: Boolean,
     hasSelectedImage: Boolean,
     userInput: String,
@@ -809,10 +805,7 @@ private fun InputBar(
                             }
                         } // ← نهاية Box (AttachMenu)
 
-                        // ════════════════════════════════════════
-                        // حقل الإدخال + أزرار التحسين/الإرسال
-                        // ════════════════════════════════════════
-
+                        // حقل الإدخال
                         OutlinedTextField(
                             value = displayedText,
                             onValueChange = { newValue ->
@@ -847,7 +840,7 @@ private fun InputBar(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    // زر التحسين (يظهر فقط عند: هوية مفعّلة + نص غير فارغ + لم يُحسّن بعد)
+                                    // زر التحسين
                                     if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
                                         IconButton(
                                             onClick = onEnhance,
@@ -868,7 +861,7 @@ private fun InputBar(
                                         }
                                     }
 
-                                    // زر الرجوع للأصلي (يظهر فقط بعد التحسين)
+                                    // زر الرجوع للأصلي
                                     if (isEnhanced) {
                                         IconButton(
                                             onClick = onClearEnhanced,
@@ -900,11 +893,11 @@ private fun InputBar(
                             }     // ← نهاية trailingIcon
                         )         // ← نهاية OutlinedTextField
 
-                    } // ← نهاية Row الداخلي (Surface)
-                } // ← نهاية Surface (حقل الإدخال)
+                    } // ← نهاية Row الداخلي
+                } // ← نهاية Surface
             } // ← نهاية Row الخارجي
 
-            // رسالة توضيحية صغيرة عند التحسين
+            // رسالة توضيحية عند التحسين
             if (isEnhanced) {
                 Text(
                     text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل في الإعدادات. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
@@ -914,8 +907,8 @@ private fun InputBar(
                 )
             }
 
-        } // ← نهاية Column (InputBar)
-    } // ← نهاية Surface (InputBar)
+        } // ← نهاية Column
+    } // ← نهاية Surface
 } // ← نهاية InputBar
 
 // ============================================================
