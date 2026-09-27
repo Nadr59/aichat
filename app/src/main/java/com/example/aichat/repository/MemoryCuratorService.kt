@@ -140,7 +140,7 @@ class MemoryCuratorService(
      * (بالضغط على زر التحسين)، وليست عملية تلقائية.
      * 
      * @param userQuery السؤال الأصلي كما كتبه المستخدم
-     * @param mediatorIdentityText وصف الهوية/الأسلوب المطلوب من الإعدادات
+     * @param mediatorIdentityText وصف الهوية/الأسلوب من المطلوب من الإعدادات
      * 
      * @return السؤال المُحسّن (مُعاد صياغته بالكامل)، أو السؤال الأصلي
      *         دون تغيير إن فشل التحسين أو لم يكن ممكناً منطقياً.
@@ -192,6 +192,61 @@ class MemoryCuratorService(
             userQuery
         }
     }
+    /**
+ * 🆕 تحسين صياغة السؤال فقط (بدون إضافة محتوى أو توسيع)
+ * 
+ * الفرق عن enhanceQuery():
+ * - هذه: نفس المعنى، لغة أفضل (رسمي/عامي/أكاديمي/إبداعي)
+ * - تلك: توسيع السؤال وإضافة تفاصيل بناءً على الهوية
+ * 
+ * @param userQuery السؤال الأصلي
+ * @param style النمط المطلوب (FORMAL, CASUAL, ACADEMIC, CREATIVE)
+ * 
+ * @return السؤال بنفس المحتوى لكن بصياغة محسّنة
+ */
+suspend fun refineQueryStyle(
+    userQuery: String,
+    style: QueryStyle
+): String = withContext(Dispatchers.IO) {
+
+    if (userQuery.isBlank()) {
+        Log.d(TAG, "⚪ Empty query, returning as-is")
+        return@withContext userQuery
+    }
+
+    if (!settings.memoryCuratorEnabled) {
+        Log.d(TAG, "⚪ Curator disabled, returning original")
+        return@withContext userQuery
+    }
+
+    try {
+        Log.d(TAG, "🎨 Refining query style: ${style.displayName} - ${userQuery.take(50)}...")
+
+        val prompt = MemoryCuratorPrompt.buildStyleRefinementPrompt(
+            userQuery = userQuery,
+            style = style
+        )
+
+        val refined = callConfiguredProvider(prompt).trim()
+
+        // التحقق من الجودة (أقل صرامة من enhanceQuery)
+        val isValid = refined.isNotBlank() &&
+                      refined.length >= 5 &&
+                      !refined.equals("NONE", ignoreCase = true)
+
+        if (isValid) {
+            Log.d(TAG, "✅ Refined (${style.displayName}): ${refined.take(80)}...")
+            refined
+        } else {
+            Log.d(TAG, "⚠️ Refinement invalid, returning original")
+            userQuery
+        }
+
+    } catch (e: Exception) {
+        Log.w(TAG, "❌ Query style refinement failed: ${e.message}", e)
+        userQuery
+    }
+}
 
     // ── Helper: استدعاء الموفر المُختار ──────────────────────────
 
