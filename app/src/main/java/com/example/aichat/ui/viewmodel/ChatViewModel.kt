@@ -333,14 +333,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // إرسال الرسائل
     // ============================================================
 
-    fun sendMessage(userText: String) {
-        if (_isLoading.value) return
-        val image = _selectedImageBase64.value
-        if (userText.isBlank() && image == null) return
-        sendChatMessage(userText)
-    }
-
-    private fun sendChatMessage(userText: String) {
+         private fun sendChatMessage(userText: String) {
         if (_isLoading.value) return
         _isLoading.value = true
 
@@ -375,20 +368,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 _selectedImageBase64.value = null
 
-                // ── بناء سياق الذاكرة ────────────────────────────────────
-                // ⚠️ DEBUG-TEMP: قد يضع رسالة تصحيح مؤقتة في _error.value
-                prepareMemoryContext(userText)
+                // ── بناء سياق الذاكرة (يحدث دائماً، سواء كان السؤال محسّناً أم لا) ──
+                var memoryContextText = ""
+                var hasMemorySource = false
 
-                // DEBUG-TEMP: احفظ رسالة الخطأ المؤقتة قبل أن تُصفَّرها العمليات التالية
-                val debugContextSnapshot = _error.value
+                if (_memoryAccessEnabled.value) {
+                    try {
+                        android.util.Log.d("ChatViewModel", "🔍 Searching memory for: ${userText.take(50)}")
 
-                // 🆕 تمرير hasMemorySource إلى ChatRepository
+                        val memories = memoryRepository.searchSharedMemories(userText)
+                        hasMemorySource = memories.isNotEmpty()
+
+                        android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
+
+                        // تنقية الذاكرة عبر الوسيط (الوظيفة الأصلية — تبقى كما هي)
+                        memoryContextText = memoryCuratorService.curate(
+                            userQuery = userText,
+                            candidates = memories,
+                            mediatorIdentityText = ""  // لا نُمرّر الهوية هنا — فقط التنقية
+                        )
+
+                        android.util.Log.d("ChatViewModel", "✅ Curated context: ${memoryContextText.take(80)}...")
+
+                    } catch (e: Exception) {
+                        android.util.Log.e("ChatViewModel", "❌ Memory context prep failed: ${e.message}", e)
+                        memoryContextText = ""
+                        hasMemorySource = false
+                    }
+                }
+
+                // ── الإرسال للنموذج المُجيب ──
                 val response = repository.sendMessage(
                     history         = historySnapshot,
                     userMessage     = userText,
                     imageBase64     = imageBase64,
-                    memoryContext   = _memoryContext.value,
-                    hasMemorySource = _hasMemorySource.value
+                    memoryContext   = memoryContextText,
+                    hasMemorySource = hasMemorySource
                 )
 
                 val assistantMessage = Message(
@@ -409,20 +424,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     updatedAt = System.currentTimeMillis()
                 )
 
-                // DEBUG-TEMP: أعد عرض رسالة السياق بعد نجاح الإرسال
-                // (لأن _error.value قد يُصفَّر أو يُستبدَل أعلاه بمسار آخر)
-                // ⚠️ احذف هذا السطر بعد انتهاء الاختبار
-                if (debugContextSnapshot != null) {
-                    _error.value = debugContextSnapshot
-                }
-
             } catch (e: Exception) {
                 _error.value = e.message ?: "حدث خطأ غير معروف"
             } finally {
                 _isLoading.value = false
             }
         }
-    }
+         }
 
     fun onWebAiResponse(
         platformId:   String,
