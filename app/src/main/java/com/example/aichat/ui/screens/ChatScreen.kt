@@ -80,6 +80,8 @@ import com.example.aichat.data.model.Message
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import java.io.File
+import com.example.aichat.data.model.QueryStyle
+import androidx.compose.material.icons.filled.Palette  // أو AutoFixHigh
 
 // ============================================================
 // ChatScreen
@@ -811,76 +813,132 @@ private fun InputBar(
                             ),
                             shape = RoundedCornerShape(24.dp),
                             trailingIcon = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
-                                        IconButton(
-                                            onClick = onEnhance,
-                                            enabled = !isEnhancing
-                                        ) {
-                                            if (isEnhancing) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(20.dp),
-                                                    strokeWidth = 2.dp
-                                                )
-                                            } else {
-                                                Icon(
-                                                    Icons.Default.AutoAwesome,
-                                                    contentDescription = "تحسين تلقائي",
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    if (isEnhanced) {
-                                        IconButton(
-                                            onClick = onClearEnhanced,
-                                            enabled = !isLoading
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Undo,
-                                                contentDescription = "رجوع للسؤال الأصلي",
-                                                tint = MaterialTheme.colorScheme.secondary
-                                            )
-                                        }
-                                    }
-
-                                    IconButton(
-                                        onClick = onSend,
-                                        enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // 🆕 زر تحسين الصياغة
+        if (!isEnhanced && userInput.isNotBlank() && !isLoading) {
+            var showStyleMenu by remember { mutableStateOf(false) }
+            
+            Box {
+                IconButton(
+                    onClick = { showStyleMenu = true },
+                    enabled = !isEnhancing
+                ) {
+                    if (isEnhancing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Palette,  // أو AutoFixHigh
+                            contentDescription = "تحسين الصياغة",
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                }
+                
+                DropdownMenu(
+                    expanded = showStyleMenu,
+                    onDismissRequest = { showStyleMenu = false }
+                ) {
+                    Text(
+                        text = "🎨 اختر نمط الصياغة:",
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    HorizontalDivider()
+                    
+                    QueryStyle.entries.forEach { style ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Icon(
-                                            Icons.Default.Send,
-                                            contentDescription = "إرسال",
-                                            tint = if (displayedText.isNotBlank() && !isLoading)
-                                                MaterialTheme.colorScheme.primary
-                                            else
-                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                        Text(
+                                            text = style.emoji,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                        Text(
+                                            text = style.displayName,
+                                            style = MaterialTheme.typography.bodyLarge
                                         )
                                     }
+                                    Text(
+                                        text = style.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 32.dp, top = 2.dp)
+                                    )
                                 }
+                            },
+                            onClick = {
+                                showStyleMenu = false
+                                viewModel.refineQueryStyle(userInput, style)
                             }
                         )
-
                     }
                 }
             }
+        }
+        
+        // ⚡ زر توسيع الطلب (الموجود حالياً)
+        if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
+            IconButton(
+                onClick = onEnhance,
+                enabled = !isEnhancing
+            ) {
+                if (isEnhancing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = "توسيع الطلب",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
 
-            if (isEnhanced) {
-                Text(
-                    text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        // 🔄 زر الرجوع للأصلي
+        if (isEnhanced) {
+            IconButton(
+                onClick = onClearEnhanced,
+                enabled = !isLoading
+            ) {
+                Icon(
+                    Icons.Default.Undo,
+                    contentDescription = "رجوع للسؤال الأصلي",
+                    tint = MaterialTheme.colorScheme.secondary
                 )
             }
+        }
 
+        // 📤 زر الإرسال
+        IconButton(
+            onClick = onSend,
+            enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
+        ) {
+            Icon(
+                Icons.Default.Send,
+                contentDescription = "إرسال",
+                tint = if (displayedText.isNotBlank() && !isLoading)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            )
         }
     }
-}
+                            }
 
 // ============================================================
 // ThinkingBubble
