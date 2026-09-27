@@ -74,6 +74,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Undo
 import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
@@ -773,70 +775,126 @@ private fun InputBar(
                             }
                         }
 
-                        OutlinedTextField(
-                            value = inputText,
-                            onValueChange = onTextChange,
-                            modifier = Modifier.weight(1f),
-                            placeholder = { Text("اكتب رسالة...") },
-                            enabled = !isLoading,
-                            maxLines = 5,
-                            shape = RoundedCornerShape(26.dp),
-                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedBorderColor = Color.Transparent
-                            )
-                        )
-                    }
-                }
+                                    // ====================================================
+            // حقل الإدخال + أزرار التحسين/الإرسال
+            // ====================================================
 
-                Spacer(Modifier.width(8.dp))
-
-                val canSend = !isLoading && (inputText.isNotBlank() || hasSelectedImage)
-
-                FloatingActionButton(
-                    onClick = onSend,
-                    modifier = Modifier.size(50.dp),
-                    shape = CircleShape,
-                    containerColor = if (canSend)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(21.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Filled.Send,
-                            contentDescription = "إرسال",
-                            tint = if (canSend)
-                                MaterialTheme.colorScheme.onPrimary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+            val enhancedQuery by viewModel.enhancedQuery.collectAsState()
+            val isEnhancing by viewModel.isEnhancing.collectAsState()
+            
+            // تحديد النص المعروض: إما المُحسّن (إن وُجد) أو ما يكتبه المستخدم حالياً
+            val displayedText = enhancedQuery ?: userInput
+            val isEnhanced = enhancedQuery != null
+            val hasIdentity = remember(aiSettings.mediatorIdentityText) { 
+                aiSettings.mediatorIdentityText.isNotBlank() 
             }
 
-            Text(
-                text = when {
-                    hasSelectedImage -> "الصورة ستُرسل مع رسالتك للتحليل"
-                    else -> "اضغط مطولاً على الرسالة للنسخ أو حفظها في الذاكرة"
+            // الحقل نفسه
+            OutlinedTextField(
+                value = displayedText,
+                onValueChange = { newValue ->
+                    // السماح بالتعديل فقط إن لم يكن محسّناً
+                    if (!isEnhanced) {
+                        userInput = newValue
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                    .weight(1f),
+                label = { 
+                    Text(
+                        if (isEnhanced) "السؤال المُحسّن ✨" 
+                        else "اكتب رسالة..."
+                    ) 
+                },
+                placeholder = { 
+                    Text(if (isEnhanced) "" else "مثال: اشرح النسبية") 
+                },
+                readOnly = isEnhanced,  // للقراءة فقط بعد التحسين
+                enabled = !isLoading,
+                minLines = 1,
+                maxLines = 6,
+                colors = OutlinedTextFieldDefaults.colors(
+                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                    disabledBorderColor = MaterialTheme.colorScheme.primary,
+                    disabledLabelColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(24.dp),
+                trailingIcon = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        // زر التحسين (يظهر فقط عند: هوية مفعّلة + نص غير فارغ + لم يُحسّن بعد)
+                        if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
+                            IconButton(
+                                onClick = { viewModel.enhanceUserQuery(userInput) },
+                                enabled = !isEnhancing
+                            ) {
+                                if (isEnhancing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.AutoAwesome,
+                                        contentDescription = "تحسين تلقائي",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+
+                        // زر الرجوع للأصلي (يظهر فقط بعد التحسين)
+                        if (isEnhanced) {
+                            IconButton(
+                                onClick = { 
+                                    viewModel.clearEnhancedQuery()
+                                },
+                                enabled = !isLoading
+                            ) {
+                                Icon(
+                                    Icons.Default.Undo,
+                                    contentDescription = "رجوع للسؤال الأصلي",
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+
+                        // زر الإرسال (كما هو، لكن يُرسل displayedText)
+                        IconButton(
+                            onClick = {
+                                if (displayedText.isNotBlank()) {
+                                    viewModel.sendMessage(displayedText)
+                                    userInput = ""
+                                    viewModel.clearEnhancedQuery()
+                                }
+                            },
+                            enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
+                        ) {
+                            Icon(
+                                Icons.Default.Send,
+                                contentDescription = "إرسال",
+                                tint = if (displayedText.isNotBlank() && !isLoading) 
+                                    MaterialTheme.colorScheme.primary 
+                                else 
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+                    }
+                }
             )
-        }
-    }
-}
+
+            // رسالة توضيحية صغيرة عند التحسين
+            if (isEnhanced) {
+                Text(
+                    text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل في الإعدادات. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
 
 // ============================================================
 // ThinkingBubble
