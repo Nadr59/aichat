@@ -333,7 +333,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // إرسال الرسائل
     // ============================================================
 
-         private fun sendChatMessage(userText: String) {
+         fun sendChatMessage(userText: String) {
         if (_isLoading.value) return
         _isLoading.value = true
 
