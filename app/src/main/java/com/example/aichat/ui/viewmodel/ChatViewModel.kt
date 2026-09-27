@@ -19,6 +19,7 @@ import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryRepository
 import com.example.aichat.repository.WebPageFetcher
+import com.example.aichat.data.model.QueryStyle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -325,6 +326,37 @@ fun enhanceUserQuery(userText: String) {
         } catch (e: Exception) {
             android.util.Log.e("ChatViewModel", "❌ enhanceQuery: ${e.message}", e)
             _error.value = "فشل تحسين السؤال: ${e.message}"
+        } finally {
+            _isEnhancing.value = false
+        }
+    }
+}
+/**
+ * 🆕 تحسين صياغة السؤال (بدون إضافة محتوى)
+ * 
+ * الفرق عن enhanceUserQuery():
+ * - هذه: نفس المحتوى، لغة أفضل حسب النمط المختار
+ * - تلك: توسيع السؤال بناءً على الهوية
+ */
+fun refineQueryStyle(userText: String, style: QueryStyle) {
+    if (userText.isBlank()) return
+    
+    _isEnhancing.value = true
+    viewModelScope.launch {
+        try {
+            android.util.Log.d("ChatViewModel", "🎨 Refining style: ${style.displayName}")
+            
+            val refined = memoryCuratorService.refineQueryStyle(
+                userQuery = userText,
+                style = style
+            )
+            
+            _enhancedQuery.value = refined
+            android.util.Log.d("ChatViewModel", "✅ Refined (${style.displayName}): ${refined.take(80)}...")
+            
+        } catch (e: Exception) {
+            android.util.Log.e("ChatViewModel", "❌ refineStyle: ${e.message}", e)
+            _error.value = "فشل تحسين الصياغة: ${e.message}"
         } finally {
             _isEnhancing.value = false
         }
