@@ -1,6 +1,7 @@
 package com.example.aichat.repository
 
 import com.example.aichat.data.model.MemoryItem
+import com.example.aichat.data.model.QueryStyle  
 
 object MemoryCuratorPrompt {
 
@@ -139,4 +140,15 @@ object MemoryCuratorPrompt {
             """.trimIndent()
         )
     }
+    /**
+     * 🆕 بناء prompt تحسين صياغة السؤال (بدون إضافة محتوى)
+     * 
+     * الفرق عن buildEnhancerPrompt:
+     * - هنا: نفس المحتوى، لغة أفضل فقط
+     * - هناك: توسيع وإضافة تفاصيل
+     */
+    fun buildStyleRefinementPrompt(
+        userQuery: String,
+        style: QueryStyle
+    ): String
 }
