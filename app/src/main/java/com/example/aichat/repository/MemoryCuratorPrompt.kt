@@ -4,26 +4,55 @@ import com.example.aichat.data.model.MemoryItem
 
 object MemoryCuratorPrompt {
 
-    // الدالة القديمة تبقى كما هي (لا تحذفها)
+    /**
+     * الدالة الأصلية لتنقية الذاكرة - بدون تغيير.
+     * تُستخدم في sendChatMessage() لتنظيم نتائج البحث في الذاكرة.
+     */
     fun build(
         userQuery: String,
         candidates: List<MemoryItem>,
         mediatorIdentityText: String = ""
     ): String = buildString {
-        // ... الكود القديم كما هو تماماً، بلا تغيير
+
+        appendLine("أنت وسيط ذكي. مهمتك تنقية المعلومات من الذاكرة المشتركة وتقديمها بشكل منظم.")
+        appendLine()
+        appendLine("سؤال المستخدم:")
+        appendLine("\"$userQuery\"")
+        appendLine()
+
+        if (candidates.isNotEmpty()) {
+            appendLine("الذكريات المحتملة:")
+            candidates.forEachIndexed { i, mem ->
+                appendLine("${i + 1}. ${mem.content}")
+            }
+            appendLine()
+        }
+
+        if (mediatorIdentityText.isNotBlank()) {
+            appendLine("نقاط الهوية/الأسلوب:")
+            appendLine(mediatorIdentityText)
+            appendLine()
+        }
+
+        appendLine("مهمتك:")
+        appendLine("1. اختر فقط المعلومات المرتبطة مباشرة بالسؤال")
+        appendLine("2. رتبها حسب الأهمية")
+        appendLine("3. لخّصها بشكل موجز")
+        appendLine("4. إذا لم يكن هناك معلومات مفيدة، قل: NONE")
+        appendLine()
+        appendLine("أخرج الملخص مباشرة بدون ترويسات:")
     }
 
     /**
-     * 🆕 برومبت محسّن الطلبات — يُعيد صياغة سؤال المستخدم بناءً على الهوية المطلوبة.
-     * يُستخدَم عند ضغط المستخدم على زر "تحسين" في الواجهة.
-     *
-     * الفرق عن build(): هنا نُنتج **سؤالاً مُحسّناً بديلاً** يحل محل سؤال
-     * المستخدم الأصلي بالكامل، وليس "كتلة سياق منفصلة" تُحقَن في SystemPrompt.
+     * ✅ برومبت محسّن الطلبات - معدّل (حذف memoryCandidates).
+     * يُعيد صياغة سؤال المستخدم بناءً على الهوية المطلوبة فقط.
+     * 
+     * ⚠️ التغيير: حذف معامل memoryCandidates وكل الكود المرتبط به.
      */
     fun buildEnhancerPrompt(
         userQuery: String,
-        mediatorIdentityText: String,
-        memoryCandidates: List<MemoryItem> = emptyList()
+        mediatorIdentityText: String
+        // ✅ حذف: memoryCandidates: List<MemoryItem> = emptyList()
     ): String = buildString {
 
         appendLine("مهمتك: إعادة صياغة سؤال المستخدم التالي ليصبح أوضح وأكثر توجيهاً نحو الأسلوب المطلوب،")
@@ -34,16 +63,17 @@ object MemoryCuratorPrompt {
         appendLine()
         appendLine("الأسلوب/الهوية المطلوبة:")
         appendLine("\"$mediatorIdentityText\"")
-
-        if (memoryCandidates.isNotEmpty()) {
-            appendLine()
-            appendLine("سياق إضافي من ذاكرة المحادثات السابقة (استخدمه إن كان ذا صلة بالسؤال):")
-            memoryCandidates.take(3).forEachIndexed { i, m ->
-                appendLine("${i + 1}. ${m.content.take(200)}")
-            }
-        }
-
         appendLine()
+
+        // ✅ حذف هذه الكتلة بالكامل:
+        // if (memoryCandidates.isNotEmpty()) {
+        //     appendLine()
+        //     appendLine("سياق إضافي من ذاكرة المحادثات السابقة (استخدمه إن كان ذا صلة بالسؤال):")
+        //     memoryCandidates.take(3).forEachIndexed { i, m ->
+        //         appendLine("${i + 1}. ${m.content.take(200)}")
+        //     }
+        // }
+
         appendLine(
             """
             أمثلة على الإعادة الصياغة الصحيحة (تعلّم منها بالضبط):
