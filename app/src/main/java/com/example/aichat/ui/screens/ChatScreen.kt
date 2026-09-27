@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
@@ -50,6 +51,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -77,11 +79,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
+import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import java.io.File
-import com.example.aichat.data.model.QueryStyle
-import androidx.compose.material.icons.filled.Palette  // أو AutoFixHigh
 
 // ============================================================
 // ChatScreen
@@ -315,9 +316,9 @@ fun ChatScreen(
                 onSend = { sendCurrentMessage() },
                 onEnhance = { viewModel.enhanceUserQuery(userInput) },
                 onClearEnhanced = { viewModel.clearEnhancedQuery() },
-                onUpdateEnhancedQuery = { viewModel.updateEnhancedQuery(it) }
+                onUpdateEnhancedQuery = { viewModel.updateEnhancedQuery(it) },
+                onRefineStyle = { style -> viewModel.refineQueryStyle(userInput, style) }
             )
-
         }
     }
 
@@ -575,6 +576,10 @@ private fun SaveMemoryDialog(
     )
 }
 
+// ============================================================
+// MemoryCategoryOption
+// ============================================================
+
 @Composable
 private fun MemoryCategoryOption(
     text: String,
@@ -618,7 +623,8 @@ private fun InputBar(
     onSend: () -> Unit,
     onEnhance: () -> Unit,
     onClearEnhanced: () -> Unit,
-    onUpdateEnhancedQuery: (String) -> Unit
+    onUpdateEnhancedQuery: (String) -> Unit,
+    onRefineStyle: (QueryStyle) -> Unit
 ) {
     var showAttachMenu by remember { mutableStateOf(false) }
 
@@ -636,6 +642,7 @@ private fun InputBar(
             )
         ) {
 
+            // ---- صورة مختارة ----
             if (hasSelectedImage) {
                 Surface(
                     modifier = Modifier.padding(bottom = 6.dp),
@@ -676,6 +683,7 @@ private fun InputBar(
                 }
             }
 
+            // ---- صف الإدخال ----
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom
@@ -691,6 +699,7 @@ private fun InputBar(
                         verticalAlignment = Alignment.Bottom
                     ) {
 
+                        // ---- زر الإرفاق ----
                         Box {
                             IconButton(
                                 onClick = { showAttachMenu = true },
@@ -706,7 +715,6 @@ private fun InputBar(
                                 expanded = showAttachMenu,
                                 onDismissRequest = { showAttachMenu = false }
                             ) {
-
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -780,7 +788,9 @@ private fun InputBar(
                                 )
                             }
                         }
+                        // ---- نهاية زر الإرفاق ----
 
+                        // ---- حقل النص ----
                         OutlinedTextField(
                             value = displayedText,
                             onValueChange = { newValue ->
@@ -813,132 +823,156 @@ private fun InputBar(
                             ),
                             shape = RoundedCornerShape(24.dp),
                             trailingIcon = {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        // 🆕 زر تحسين الصياغة
-        if (!isEnhanced && userInput.isNotBlank() && !isLoading) {
-            var showStyleMenu by remember { mutableStateOf(false) }
-            
-            Box {
-                IconButton(
-                    onClick = { showStyleMenu = true },
-                    enabled = !isEnhancing
-                ) {
-                    if (isEnhancing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Palette,  // أو AutoFixHigh
-                            contentDescription = "تحسين الصياغة",
-                            tint = MaterialTheme.colorScheme.secondary
-                        )
-                    }
-                }
-                
-                DropdownMenu(
-                    expanded = showStyleMenu,
-                    onDismissRequest = { showStyleMenu = false }
-                ) {
-                    Text(
-                        text = "🎨 اختر نمط الصياغة:",
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    
-                    HorizontalDivider()
-                    
-                    QueryStyle.entries.forEach { style ->
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+
+                                    // 🎨 زر تحسين الصياغة
+                                    if (!isEnhanced && userInput.isNotBlank() && !isLoading) {
+                                        var showStyleMenu by remember { mutableStateOf(false) }
+
+                                        Box {
+                                            IconButton(
+                                                onClick = { showStyleMenu = true },
+                                                enabled = !isEnhancing
+                                            ) {
+                                                if (isEnhancing) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(20.dp),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Palette,
+                                                        contentDescription = "تحسين الصياغة",
+                                                        tint = MaterialTheme.colorScheme.secondary
+                                                    )
+                                                }
+                                            }
+
+                                            DropdownMenu(
+                                                expanded = showStyleMenu,
+                                                onDismissRequest = { showStyleMenu = false }
+                                            ) {
+                                                Text(
+                                                    text = "🎨 اختر نمط الصياغة:",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    modifier = Modifier.padding(
+                                                        horizontal = 16.dp,
+                                                        vertical = 8.dp
+                                                    ),
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+
+                                                HorizontalDivider()
+
+                                                QueryStyle.entries.forEach { style ->
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Column {
+                                                                Row(
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = style.emoji,
+                                                                        style = MaterialTheme.typography.titleMedium
+                                                                    )
+                                                                    Text(
+                                                                        text = style.displayName,
+                                                                        style = MaterialTheme.typography.bodyLarge
+                                                                    )
+                                                                }
+                                                                Text(
+                                                                    text = style.description,
+                                                                    style = MaterialTheme.typography.bodySmall,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                    modifier = Modifier.padding(
+                                                                        start = 32.dp,
+                                                                        top = 2.dp
+                                                                    )
+                                                                )
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            showStyleMenu = false
+                                                            onRefineStyle(style)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // ---- نهاية زر تحسين الصياغة ----
+
+                                    // ⚡ زر توسيع الطلب
+                                    if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
+                                        IconButton(
+                                            onClick = onEnhance,
+                                            enabled = !isEnhancing
+                                        ) {
+                                            if (isEnhancing) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(20.dp),
+                                                    strokeWidth = 2.dp
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.AutoAwesome,
+                                                    contentDescription = "توسيع الطلب",
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // 🔄 زر الرجوع للأصلي
+                                    if (isEnhanced) {
+                                        IconButton(
+                                            onClick = onClearEnhanced,
+                                            enabled = !isLoading
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Undo,
+                                                contentDescription = "رجوع للسؤال الأصلي",
+                                                tint = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    }
+
+                                    // 📤 زر الإرسال
+                                    IconButton(
+                                        onClick = onSend,
+                                        enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
                                     ) {
-                                        Text(
-                                            text = style.emoji,
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                        Text(
-                                            text = style.displayName,
-                                            style = MaterialTheme.typography.bodyLarge
+                                        Icon(
+                                            imageVector = Icons.Default.Send,
+                                            contentDescription = "إرسال",
+                                            tint = if (displayedText.isNotBlank() && !isLoading)
+                                                MaterialTheme.colorScheme.primary
+                                            else
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                         )
                                     }
-                                    Text(
-                                        text = style.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 32.dp, top = 2.dp)
-                                    )
+
                                 }
-                            },
-                            onClick = {
-                                showStyleMenu = false
-                                viewModel.refineQueryStyle(userInput, style)
                             }
+                            // ---- نهاية trailingIcon ----
                         )
+                        // ---- نهاية OutlinedTextField ----
+
                     }
+                    // ---- نهاية Row الداخلي ----
                 }
+                // ---- نهاية Surface ----
             }
+            // ---- نهاية Row الخارجي ----
         }
-        
-        // ⚡ زر توسيع الطلب (الموجود حالياً)
-        if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
-            IconButton(
-                onClick = onEnhance,
-                enabled = !isEnhancing
-            ) {
-                if (isEnhancing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.AutoAwesome,
-                        contentDescription = "توسيع الطلب",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
-
-        // 🔄 زر الرجوع للأصلي
-        if (isEnhanced) {
-            IconButton(
-                onClick = onClearEnhanced,
-                enabled = !isLoading
-            ) {
-                Icon(
-                    Icons.Default.Undo,
-                    contentDescription = "رجوع للسؤال الأصلي",
-                    tint = MaterialTheme.colorScheme.secondary
-                )
-            }
-        }
-
-        // 📤 زر الإرسال
-        IconButton(
-            onClick = onSend,
-            enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
-        ) {
-            Icon(
-                Icons.Default.Send,
-                contentDescription = "إرسال",
-                tint = if (displayedText.isNotBlank() && !isLoading)
-                    MaterialTheme.colorScheme.primary
-                else
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-            )
-        }
+        // ---- نهاية Column ----
     }
-                            }
+    // ---- نهاية Surface الرئيسي ----
+}
 
 // ============================================================
 // ThinkingBubble
