@@ -132,97 +132,43 @@ class MemoryCuratorService(
                 fallbackBuilder.build(candidates)
             }
         }
-            /**
-     * 🆕 تحسين طلب المستخدم بناءً على الهوية المفعّلة والسياق من الذاكرة.
+
+    /**
+     * ✅ تحسين طلب المستخدم بناءً على الهوية المفعّلة فقط (بدون ذاكرة).
      * 
      * تُستخدَم عندما يطلب المستخدم صراحة "تحسين السؤال" من الواجهة
      * (بالضغط على زر التحسين)، وليست عملية تلقائية.
      * 
      * @param userQuery السؤال الأصلي كما كتبه المستخدم
      * @param mediatorIdentityText وصف الهوية/الأسلوب المطلوب من الإعدادات
-     * @param memoryCandidates نتائج البحث في الذاكرة (اختياري، للسياق الإضافي)
      * 
      * @return السؤال المُحسّن (مُعاد صياغته بالكامل)، أو السؤال الأصلي
      *         دون تغيير إن فشل التحسين أو لم يكن ممكناً منطقياً.
+     * 
+     * ⚠️ التغيير: حذف معامل memoryCandidates - التحسين يعتمد فقط على السؤال + الهوية
      */
-    /**
- * ✅ تحسين طلب المستخدم بناءً على الهوية المفعّلة فقط (بدون ذاكرة).
- * 
- * تُستخدَم عندما يطلب المستخدم صراحة "تحسين السؤال" من الواجهة
- * (بالضغط على زر التحسين)، وليست عملية تلقائية.
- * 
- * @param userQuery السؤال الأصلي كما كتبه المستخدم
- * @param mediatorIdentityText وصف الهوية/الأسلوب المطلوب من الإعدادات
- * 
- * @return السؤال المُحسّن (مُعاد صياغته بالكامل)، أو السؤال الأصلي
- *         دون تغيير إن فشل التحسين أو لم يكن ممكناً منطقياً.
- * 
- * ⚠️ التغيير: حذف معامل memoryCandidates - التحسين يعتمد فقط على السؤال + الهوية
- */
-suspend fun enhanceQuery(
-    userQuery: String,
-    mediatorIdentityText: String
-    // ✅ حذف: memoryCandidates: List<MemoryItem> = emptyList()
-): String = withContext(Dispatchers.IO) {
-
-    if (mediatorIdentityText.isBlank()) {
-        android.util.Log.d(TAG, "⚪ No identity text, returning original query")
-        return@withContext userQuery
-    }
-
-    if (!settings.memoryCuratorEnabled) {
-        android.util.Log.d(TAG, "⚪ Curator disabled, returning original query")
-        return@withContext userQuery
-    }
-
-    try {
-        android.util.Log.d(TAG, "🔄 Enhancing query (identity-only): ${userQuery.take(50)}...")
-
-        // ✅ تمرير السؤال + الهوية فقط (بدون memoryCandidates)
-        val prompt = MemoryCuratorPrompt.buildEnhancerPrompt(
-            userQuery            = userQuery,
-            mediatorIdentityText = mediatorIdentityText
-        )
-
-        val enhanced = callConfiguredProvider(prompt).trim()
-
-        // التحقق من جودة الناتج
-        val isValid = enhanced.isNotBlank() &&
-                      enhanced != userQuery &&
-                      !enhanced.equals("NONE", ignoreCase = true) &&
-                      enhanced.length > userQuery.length / 2  // ليس مجرد حذف
-
-        if (isValid) {
-            android.util.Log.d(TAG, "✅ Enhanced (no memory): ${enhanced.take(80)}...")
-            enhanced
-        } else {
-            android.util.Log.d(TAG, "⚠️ Enhancement invalid or identical, returning original")
-            userQuery
-        }
-
-    } catch (e: Exception) {
-        android.util.Log.w(TAG, "❌ Query enhancement failed: ${e.message}", e)
-        userQuery  // Fallback للأصلي عند أي خطأ
-    }
-}
+    suspend fun enhanceQuery(
+        userQuery: String,
+        mediatorIdentityText: String
+    ): String = withContext(Dispatchers.IO) {
 
         if (mediatorIdentityText.isBlank()) {
-            android.util.Log.d(TAG, "⚪ No identity text, returning original query")
+            Log.d(TAG, "⚪ No identity text, returning original query")
             return@withContext userQuery
         }
 
         if (!settings.memoryCuratorEnabled) {
-            android.util.Log.d(TAG, "⚪ Curator disabled, returning original query")
+            Log.d(TAG, "⚪ Curator disabled, returning original query")
             return@withContext userQuery
         }
 
         try {
-            android.util.Log.d(TAG, "🔄 Enhancing query: ${userQuery.take(50)}...")
+            Log.d(TAG, "🔄 Enhancing query (identity-only): ${userQuery.take(50)}...")
 
+            // ✅ تمرير السؤال + الهوية فقط (بدون memoryCandidates)
             val prompt = MemoryCuratorPrompt.buildEnhancerPrompt(
                 userQuery            = userQuery,
-                mediatorIdentityText = mediatorIdentityText,
-                memoryCandidates     = memoryCandidates
+                mediatorIdentityText = mediatorIdentityText
             )
 
             val enhanced = callConfiguredProvider(prompt).trim()
@@ -231,41 +177,43 @@ suspend fun enhanceQuery(
             val isValid = enhanced.isNotBlank() &&
                           enhanced != userQuery &&
                           !enhanced.equals("NONE", ignoreCase = true) &&
-                          enhanced.length > userQuery.length / 2  // ليس مجرد حذف
+                          enhanced.length > userQuery.length / 2
 
             if (isValid) {
-                android.util.Log.d(TAG, "✅ Enhanced: ${enhanced.take(80)}...")
+                Log.d(TAG, "✅ Enhanced (no memory): ${enhanced.take(80)}...")
                 enhanced
             } else {
-                android.util.Log.d(TAG, "⚠️ Enhancement invalid or identical, returning original")
+                Log.d(TAG, "⚠️ Enhancement invalid or identical, returning original")
                 userQuery
             }
 
         } catch (e: Exception) {
-            android.util.Log.w(TAG, "❌ Query enhancement failed: ${e.message}", e)
-            userQuery  // Fallback للأصلي عند أي خطأ
+            Log.w(TAG, "❌ Query enhancement failed: ${e.message}", e)
+            userQuery
         }
     }
-    // أضف هذه الدالة قبل callGeminiFlash()
-private suspend fun callConfiguredProvider(prompt: String): String {
-    return when (settings.memoryCuratorProvider) {
-        "custom" -> {
-            val baseUrl = settings.customUrl.trim()
-            val model   = settings.customModel.trim()
-            if (baseUrl.isBlank() || model.isBlank()) {
-                throw Exception("Custom provider not configured")
+
+    // ── Helper: استدعاء الموفر المُختار ──────────────────────────
+
+    private suspend fun callConfiguredProvider(prompt: String): String {
+        return when (settings.memoryCuratorProvider) {
+            "custom" -> {
+                val baseUrl = settings.customUrl.trim()
+                val model   = settings.customModel.trim()
+                if (baseUrl.isBlank() || model.isBlank()) {
+                    throw Exception("Custom provider not configured")
+                }
+                callCustomProvider(prompt, baseUrl, settings.customKey, model)
             }
-            callCustomProvider(prompt, baseUrl, settings.customKey, model)
-        }
-        else -> {
-            val apiKey = settings.geminiKey
-            if (apiKey.isBlank()) {
-                throw Exception("Gemini API key is blank")
+            else -> {
+                val apiKey = settings.geminiKey
+                if (apiKey.isBlank()) {
+                    throw Exception("Gemini API key is blank")
+                }
+                callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
             }
-            callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
         }
     }
-}
 
     // ── Gemini Flash ──────────────────────────────────────────────────
 
