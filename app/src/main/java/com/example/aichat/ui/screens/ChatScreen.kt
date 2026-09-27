@@ -871,12 +871,13 @@ private fun InputBar(
             } // ← نهاية Row الخارجي
 
             if (isEnhanced) {
-                Text(
-                    text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل في الإعدادات. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
+    Text(
+        text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+    )
+            }
             }
 
         } // ← نهاية Column
