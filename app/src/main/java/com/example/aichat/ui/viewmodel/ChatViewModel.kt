@@ -247,7 +247,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun newConversation() {
+        fun newConversation() {
         messagesCollectJob?.cancel()
         messagesCollectJob           = null
         _currentConversationId.value = null
@@ -258,8 +258,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _error.value                 = null
         _successMessage.value        = null
         _memoryAccessEnabled.value   = true
-        
-    }
+        _enhancedQuery.value         = null       // 🆕 تصفير السؤال المُحسّن
+        _isEnhancing.value           = false      // 🆕
+        }
 
     fun toggleMemoryAccess(enabled: Boolean) {
         _memoryAccessEnabled.value = enabled
