@@ -775,114 +775,112 @@ private fun InputBar(
                             }
                         }
 
-                        OutlinedTextField(
-                            value = displayedText,
-                            onValueChange = { newValue ->
-    // ✅ السماح بالتعديل دائماً
-    if (isEnhanced) {
-        // عند تعديل سؤال محسّن: نحدّث enhancedQuery
-        viewModel.updateEnhancedQuery(newValue)
-    } else {
-        // عند تعديل سؤال عادي: نحدّث userInput
-        onUserInputChange(newValue)
-    }
-},
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            label = {
-    Text(
-        if (isEnhanced) "السؤال المُحسّن ✨ (قابل للتعديل)"
-        else "اكتب رسالة..."
-    )
-},
-                            },
-                            placeholder = {
-                                Text(if (isEnhanced) "" else "مثال: اشرح النسبية")
-                            },
-                            readOnly = false,  // ✅ السماح بالتعديل دائماً
-                            enabled = !isLoading,
-                            minLines = 1,
-                            maxLines = 6,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                                disabledBorderColor = MaterialTheme.colorScheme.primary,
-                                disabledLabelColor = MaterialTheme.colorScheme.primary
-                            ),
-                            shape = RoundedCornerShape(24.dp),
-                            trailingIcon = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
-                                        IconButton(
-                                            onClick = onEnhance,
-                                            enabled = !isEnhancing
-                                        ) {
-                                            if (isEnhancing) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(20.dp),
-                                                    strokeWidth = 2.dp
-                                                )
-                                            } else {
-                                                Icon(
-                                                    Icons.Default.AutoAwesome,
-                                                    contentDescription = "تحسين تلقائي",
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    if (isEnhanced) {
-                                        IconButton(
-                                            onClick = onClearEnhanced,
-                                            enabled = !isLoading
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Undo,
-                                                contentDescription = "رجوع للسؤال الأصلي",
-                                                tint = MaterialTheme.colorScheme.secondary
-                                            )
-                                        }
-                                    }
-
-                                    IconButton(
-                                        onClick = onSend,
-                                        enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Send,
-                                            contentDescription = "إرسال",
-                                            tint = if (displayedText.isNotBlank() && !isLoading)
-                                                MaterialTheme.colorScheme.primary
-                                            else
-                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                                        )
-                                    }
-                                }
-                            }
+OutlinedTextField(
+    value = displayedText,
+    onValueChange = { newValue ->
+        // ✅ السماح بالتعديل دائماً
+        if (isEnhanced) {
+            // عند تعديل سؤال محسّن: نحدّث enhancedQuery
+            viewModel.updateEnhancedQuery(newValue)
+        } else {
+            // عند تعديل سؤال عادي: نحدّث userInput
+            onUserInputChange(newValue)
+        }
+    },
+    modifier = Modifier
+        .fillMaxWidth()
+        .weight(1f),
+    label = {
+        Text(
+            if (isEnhanced) "السؤال المُحسّن ✨ (قابل للتعديل)"
+            else "اكتب رسالة..."
+        )
+    },
+    placeholder = {
+        Text(if (isEnhanced) "" else "مثال: اشرح النسبية")
+    },
+    readOnly = false,  // ✅ السماح بالتعديل دائماً
+    enabled = !isLoading,
+    minLines = 1,
+    maxLines = 6,
+    colors = OutlinedTextFieldDefaults.colors(
+        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+        disabledBorderColor = MaterialTheme.colorScheme.primary,
+        disabledLabelColor = MaterialTheme.colorScheme.primary
+    ),
+    shape = RoundedCornerShape(24.dp),
+    trailingIcon = {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
+                IconButton(
+                    onClick = onEnhance,
+                    enabled = !isEnhancing
+                ) {
+                    if (isEnhancing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
                         )
+                    } else {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = "تحسين تلقائي",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            if (isEnhanced) {
+                IconButton(
+                    onClick = onClearEnhanced,
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Default.Undo,
+                        contentDescription = "رجوع للسؤال الأصلي",
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onSend,
+                enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
+            ) {
+                Icon(
+                    Icons.Default.Send,
+                    contentDescription = "إرسال",
+                    tint = if (displayedText.isNotBlank() && !isLoading)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                )
+            }
+        }
+    }
+)
 
                     } // ← نهاية Row الداخلي
                 } // ← نهاية Surface
             } // ← نهاية Row الخارجي
 
             if (isEnhanced) {
-    Text(
-        text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-    )
-            }
+                Text(
+                    text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
             }
 
         } // ← نهاية Column
     } // ← نهاية Surface
 } // ← نهاية InputBar
+        
 
 // ============================================================
 // ThinkingBubble
