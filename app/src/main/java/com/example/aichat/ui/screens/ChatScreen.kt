@@ -1,4 +1,4 @@
- package com.example.aichat.ui.screens
+package com.example.aichat.ui.screens
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -48,14 +50,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -70,12 +71,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Undo
 import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
@@ -103,8 +101,6 @@ fun ChatScreen(
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
-
-    // ✅ مُضاف: حالة Dialog استيراد صفحة الويب
     var showWebImportDialog by remember { mutableStateOf(false) }
 
     // ============================================================
@@ -125,7 +121,6 @@ fun ChatScreen(
         }
     }
 
-    // ✅ مُصحَّح: فلتر الملفات ليشمل TXT و PDF فقط
     val fileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -176,16 +171,10 @@ fun ChatScreen(
     }
 
     // ============================================================
-    // ✅ مُضاف: تنظيف successMessage تلقائياً بعد 3 ثوان
-    // ============================================================
-
-    
-
-    // ============================================================
     // Scaffold
     // ============================================================
 
-         Scaffold(
+    Scaffold(
         topBar = {
             TopAppBar(
                 title = {
@@ -240,33 +229,24 @@ fun ChatScreen(
         },
         bottomBar = {
             InputBar(
-                inputText = inputText,
+                viewModel = viewModel,
+                aiSettings = settings,
                 isLoading = isLoading,
                 hasSelectedImage = selectedImage != null,
                 onOpenGallery = { galleryLauncher.launch("image/*") },
                 onOpenCamera = { openCamera() },
                 onOpenFile = { fileLauncher.launch("*/*") },
                 onOpenWebImport = { showWebImportDialog = true },
-                onRemoveImage = { viewModel.clearSelectedImage() },
-                onTextChange = { inputText = it },
-                onSend = {
-                    if (!isLoading && (inputText.isNotBlank() || selectedImage != null)) {
-                        viewModel.sendMessage(inputText.trim())
-                        inputText = ""
-                    }
-                }
+                onRemoveImage = { viewModel.clearSelectedImage() }
             )
         }
     ) { padding ->
-        
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-
-            // ✅ مُضاف: Snackbar للنجاح (أخضر)
-            
 
             if (messages.isEmpty()) {
                 EmptyChatView()
@@ -334,7 +314,7 @@ fun ChatScreen(
     }
 
     // ============================================================
-    // ✅ مُضاف: Dialog استيراد صفحة الويب
+    // Dialog استيراد صفحة الويب
     // ============================================================
 
     if (showWebImportDialog) {
@@ -349,7 +329,7 @@ fun ChatScreen(
 }
 
 // ============================================================
-// ✅ مُضاف: Dialog استيراد صفحة الويب
+// Dialog استيراد صفحة الويب
 // ============================================================
 
 @Composable
@@ -362,8 +342,8 @@ private fun WebPageImportDialog(
 
     fun validateUrl(input: String): Boolean {
         return input.isBlank() ||
-            input.startsWith("http://") ||
-            input.startsWith("https://")
+                input.startsWith("http://") ||
+                input.startsWith("https://")
     }
 
     AlertDialog(
@@ -594,23 +574,32 @@ private fun MemoryCategoryOption(
 }
 
 // ============================================================
-// InputBar - مُحسَّن: إضافة زر استيراد الويب
+// InputBar
 // ============================================================
 
 @Composable
 private fun InputBar(
-    inputText: String,
+    viewModel: ChatViewModel,
+    aiSettings: AiSettings,
     isLoading: Boolean,
     hasSelectedImage: Boolean,
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
     onOpenFile: () -> Unit,
     onOpenWebImport: () -> Unit,
-    onRemoveImage: () -> Unit,
-    onTextChange: (String) -> Unit,
-    onSend: () -> Unit
+    onRemoveImage: () -> Unit
 ) {
     var showAttachMenu by remember { mutableStateOf(false) }
+    var userInput by remember { mutableStateOf("") }
+
+    val enhancedQuery by viewModel.enhancedQuery.collectAsState()
+    val isEnhancing by viewModel.isEnhancing.collectAsState()
+
+    val displayedText = enhancedQuery ?: userInput
+    val isEnhanced = enhancedQuery != null
+    val hasIdentity = remember(aiSettings.mediatorIdentityText) {
+        aiSettings.mediatorIdentityText.isNotBlank()
+    }
 
     Surface(
         modifier = Modifier
@@ -754,7 +743,7 @@ private fun InputBar(
                                     }
                                 )
 
-                                // ✅ مُضاف: استيراد صفحة ويب
+                                // استيراد صفحة ويب
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -775,118 +764,104 @@ private fun InputBar(
                             }
                         }
 
-                                    // ====================================================
-            // حقل الإدخال + أزرار التحسين/الإرسال
-            // ====================================================
-
-            val enhancedQuery by viewModel.enhancedQuery.collectAsState()
-            val isEnhancing by viewModel.isEnhancing.collectAsState()
-            
-            // تحديد النص المعروض: إما المُحسّن (إن وُجد) أو ما يكتبه المستخدم حالياً
-            val displayedText = enhancedQuery ?: userInput
-            val isEnhanced = enhancedQuery != null
-            val hasIdentity = remember(aiSettings.mediatorIdentityText) { 
-                aiSettings.mediatorIdentityText.isNotBlank() 
-            }
-
-            // الحقل نفسه
-            OutlinedTextField(
-                value = displayedText,
-                onValueChange = { newValue ->
-                    // السماح بالتعديل فقط إن لم يكن محسّناً
-                    if (!isEnhanced) {
-                        userInput = newValue
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                label = { 
-                    Text(
-                        if (isEnhanced) "السؤال المُحسّن ✨" 
-                        else "اكتب رسالة..."
-                    ) 
-                },
-                placeholder = { 
-                    Text(if (isEnhanced) "" else "مثال: اشرح النسبية") 
-                },
-                readOnly = isEnhanced,  // للقراءة فقط بعد التحسين
-                enabled = !isLoading,
-                minLines = 1,
-                maxLines = 6,
-                colors = OutlinedTextFieldDefaults.colors(
-                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                    disabledBorderColor = MaterialTheme.colorScheme.primary,
-                    disabledLabelColor = MaterialTheme.colorScheme.primary
-                ),
-                shape = RoundedCornerShape(24.dp),
-                trailingIcon = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        // زر التحسين (يظهر فقط عند: هوية مفعّلة + نص غير فارغ + لم يُحسّن بعد)
-                        if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
-                            IconButton(
-                                onClick = { viewModel.enhanceUserQuery(userInput) },
-                                enabled = !isEnhancing
-                            ) {
-                                if (isEnhancing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Default.AutoAwesome,
-                                        contentDescription = "تحسين تلقائي",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-
-                        // زر الرجوع للأصلي (يظهر فقط بعد التحسين)
-                        if (isEnhanced) {
-                            IconButton(
-                                onClick = { 
-                                    viewModel.clearEnhancedQuery()
-                                },
-                                enabled = !isLoading
-                            ) {
-                                Icon(
-                                    Icons.Default.Undo,
-                                    contentDescription = "رجوع للسؤال الأصلي",
-                                    tint = MaterialTheme.colorScheme.secondary
-                                )
-                            }
-                        }
-
-                        // زر الإرسال (كما هو، لكن يُرسل displayedText)
-                        IconButton(
-                            onClick = {
-                                if (displayedText.isNotBlank()) {
-                                    viewModel.sendMessage(displayedText)
-                                    userInput = ""
-                                    viewModel.clearEnhancedQuery()
+                        // حقل الإدخال
+                        OutlinedTextField(
+                            value = displayedText,
+                            onValueChange = { newValue ->
+                                if (!isEnhanced) {
+                                    userInput = newValue
                                 }
                             },
-                            enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
-                        ) {
-                            Icon(
-                                Icons.Default.Send,
-                                contentDescription = "إرسال",
-                                tint = if (displayedText.isNotBlank() && !isLoading) 
-                                    MaterialTheme.colorScheme.primary 
-                                else 
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            )
-                        }
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            label = {
+                                Text(
+                                    if (isEnhanced) "السؤال المُحسّن ✨"
+                                    else "اكتب رسالة..."
+                                )
+                            },
+                            placeholder = {
+                                Text(if (isEnhanced) "" else "مثال: اشرح النسبية")
+                            },
+                            readOnly = isEnhanced,
+                            enabled = !isLoading,
+                            minLines = 1,
+                            maxLines = 6,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                disabledBorderColor = MaterialTheme.colorScheme.primary,
+                                disabledLabelColor = MaterialTheme.colorScheme.primary
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            trailingIcon = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    // زر التحسين
+                                    if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
+                                        IconButton(
+                                            onClick = { viewModel.enhanceUserQuery(userInput) },
+                                            enabled = !isEnhancing
+                                        ) {
+                                            if (isEnhancing) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(20.dp),
+                                                    strokeWidth = 2.dp
+                                                )
+                                            } else {
+                                                Icon(
+                                                    Icons.Default.AutoAwesome,
+                                                    contentDescription = "تحسين تلقائي",
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // زر الرجوع للأصلي
+                                    if (isEnhanced) {
+                                        IconButton(
+                                            onClick = { viewModel.clearEnhancedQuery() },
+                                            enabled = !isLoading
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Undo,
+                                                contentDescription = "رجوع للسؤال الأصلي",
+                                                tint = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    }
+
+                                    // زر الإرسال
+                                    IconButton(
+                                        onClick = {
+                                            if (displayedText.isNotBlank()) {
+                                                viewModel.sendMessage(displayedText)
+                                                userInput = ""
+                                                viewModel.clearEnhancedQuery()
+                                            }
+                                        },
+                                        enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Send,
+                                            contentDescription = "إرسال",
+                                            tint = if (displayedText.isNotBlank() && !isLoading)
+                                                MaterialTheme.colorScheme.primary
+                                            else
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                        )
+                                    }
+                                }
+                            }
+                        )
                     }
                 }
-            )
+            }
 
-            // رسالة توضيحية صغيرة عند التحسين
+            // رسالة توضيحية عند التحسين
             if (isEnhanced) {
                 Text(
                     text = "💡 تم تحسين السؤال بناءً على الأسلوب المفضّل في الإعدادات. يمكنك تعديله يدوياً أو الرجوع للأصلي.",
@@ -895,6 +870,9 @@ private fun InputBar(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
+        }
+    }
+}
 
 // ============================================================
 // ThinkingBubble
