@@ -24,6 +24,9 @@ class AichatApp : Application() {
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
+    @Volatile var activePort: WebExtension.Port? = null
+        private set
+
     @Volatile private var captureFlag    = false
     @Volatile private var contextPending = ""
 
@@ -34,7 +37,9 @@ class AichatApp : Application() {
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
-    // ── Toast ─────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════
+    // Toast Helper
+    // ══════════════════════════════════════════════════════════════════
 
     fun showToast(msg: String) {
         Handler(Looper.getMainLooper()).post {
@@ -56,6 +61,30 @@ class AichatApp : Application() {
     // المسار 2 — سياق → منصة
     // ══════════════════════════════════════════════════════════════════
 
+    /**
+     * تعيين نص مباشرة للإرسال إلى المنصة
+     * (يُستخدم من Dialog الجديد)
+     */
+    fun setContextPending(text: String) {
+        if (text.isBlank()) {
+            Log.w("AichatApp", "⚠️ Empty text, ignoring")
+            showToast("⚠️ النص فارغ")
+            return
+        }
+        
+        contextPending = text
+        Log.d("AichatApp", "📤 Context pending set: ${text.length} chars")
+        
+        // 🆕 إرسال فوري عبر Port (إن وُجد)
+        activePort?.postMessage(
+            JSONObject().put("type", "INJECT_NOW")
+        )
+    }
+
+    /**
+     * الدالة القديمة - للتوافق مع الكود القديم
+     * (تبني SystemPrompt كامل - مناسب لـ API وليس textarea)
+     */
     fun sendContextToPage(
         memories:              List<MemoryItem>,
         customInstruction:     String  = "",
@@ -69,19 +98,31 @@ class AichatApp : Application() {
             return
         }
 
-        val systemPrompt = SystemPrompt.build(
-            memoryContext     = memoryContext,
-            customInstruction = customInstruction,
-            includeAccuracy   = isSystemPromptEnabled
-        )
+        // ✅ تنسيق مناسب لـ textarea (بدلاً من SystemPrompt الكامل)
+        val contextText = buildString {
+            if (memoryContext.isNotBlank()) {
+                appendLine("السياق من محادثاتي السابقة:")
+                appendLine()
+                appendLine(memoryContext)
+                appendLine()
+                appendLine("───────────")
+                appendLine()
+                appendLine("السؤال:")
+            }
+        }
 
-        contextPending = systemPrompt
+        contextPending = contextText
         Log.d(
             "AichatApp",
-            "📤 contextPending set: ${systemPrompt.length} chars " +
+            "📤 contextPending set: ${contextText.length} chars " +
             "(promptEnabled=$isSystemPromptEnabled, memoryLen=${memoryContext.length})"
         )
-        showToast("📤 السياق جاهز: ${systemPrompt.length} حرف")
+        showToast("📤 السياق جاهز: ${contextText.length} حرف")
+        
+        // 🆕 إرسال فوري عبر Port
+        activePort?.postMessage(
+            JSONObject().put("type", "INJECT_NOW")
+        )
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -103,7 +144,20 @@ class AichatApp : Application() {
 
             return when (type) {
 
-                // ── المسار 1: التقاط يدوي ────────────────────────────
+                // ══════════════════════════════════════════════════════
+                // Port Connection
+                // ══════════════════════════════════════════════════════
+                
+                "PORT_READY" -> {
+                    activePort = sender.port
+                    val domain = json.optString("domain", "unknown")
+                    Log.d("AichatApp", "✅ Port connected from: $domain")
+                    null
+                }
+
+                // ══════════════════════════════════════════════════════
+                // المسار 1: التقاط يدوي
+                // ══════════════════════════════════════════════════════
 
                 "CHECK_CAPTURE" -> {
                     val flag    = captureFlag
@@ -125,7 +179,9 @@ class AichatApp : Application() {
                     null
                 }
 
-                // ── المسار 2: إرسال السياق ───────────────────────────
+                // ══════════════════════════════════════════════════════
+                // المسار 2: إرسال السياق
+                // ══════════════════════════════════════════════════════
 
                 "GET_CONTEXT" -> {
                     val pending    = contextPending
@@ -157,7 +213,9 @@ class AichatApp : Application() {
                     null
                 }
 
-                // ── تشخيص ────────────────────────────────────────────
+                // ══════════════════════════════════════════════════════
+                // تشخيص
+                // ══════════════════════════════════════════════════════
 
                 "DEBUG_INFO" -> {
                     val info = json.optString("info")
@@ -167,7 +225,7 @@ class AichatApp : Application() {
                 }
 
                 else -> {
-                    Log.w("AichatApp", "⚠️ unknown: $type")
+                    Log.w("AichatApp", "⚠️ unknown type: $type")
                     null
                 }
             }
