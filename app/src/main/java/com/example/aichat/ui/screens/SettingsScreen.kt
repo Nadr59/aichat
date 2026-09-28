@@ -101,7 +101,7 @@ fun SettingsScreen(
     var memoryCuratorEnabled by remember { mutableStateOf(settings.memoryCuratorEnabled) }
 var memoryCuratorModel by remember { mutableStateOf(settings.memoryCuratorModel) }
 var memoryCuratorProvider by remember { mutableStateOf(settings.memoryCuratorProvider) }
-var memoryCuratorOllamaModel by remember { mutableStateOf(aiSettings.memoryCuratorOllamaModel) }
+var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCuratorOllamaModel) }
 
     // ✅ نقل هذين المتغيرين إلى مستوى الـ Composable الرئيسي
     var accuracyEnabled by remember { mutableStateOf(settings.accuracyPromptEnabled) }
@@ -1012,7 +1012,7 @@ Spacer(Modifier.height(8.dp))
                     settings.memoryCuratorModel      = memoryCuratorModel
                     settings.memoryCuratorProvider   = memoryCuratorProvider
                     settings.mediatorIdentityText    = mediatorIdentityText  // 🆕 الحقل الجديد
-                    aiSettings.memoryCuratorOllamaModel = memoryCuratorOllamaModel
+                    Settings.memoryCuratorOllamaModel = memoryCuratorOllamaModel
                     saved = true
                 },
                 modifier = Modifier
