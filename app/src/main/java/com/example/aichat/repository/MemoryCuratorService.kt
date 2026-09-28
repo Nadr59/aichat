@@ -271,6 +271,51 @@ class MemoryCuratorService(
             }
         }
     }
+    // ── Ollama (محلي - OpenAI-compatible) ─────────────────────────
+
+private fun callOllama(prompt: String, model: String): String {
+    val json = JSONObject().apply {
+        put("model", model)
+        put("messages", JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "user")
+                put("content", prompt)
+            })
+        })
+        put("temperature", 0.2)
+        put("max_tokens", 2000)
+        put("stream", false)
+    }
+
+    // Ollama يستخدم OpenAI-compatible API على المنفذ 11434
+    val request = Request.Builder()
+        .url("http://127.0.0.1:11434/v1/chat/completions")
+        .addHeader("Content-Type", "application/json")
+        .post(json.toString().toRequestBody("application/json".toMediaType()))
+        .build()
+
+    client.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            throw Exception(
+                "Ollama failed: ${response.code} - ${response.body?.string()}\n" +
+                "تأكد من تشغيل Ollama في Termux: ollama serve"
+            )
+        }
+
+        val body = response.body?.string()
+            ?: throw Exception("Empty response from Ollama")
+
+        return try {
+            JSONObject(body)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+        } catch (e: Exception) {
+            throw Exception("خطأ في تحليل رد Ollama. تأكد من تشغيل النموذج: $model")
+        }
+    }
+}
 
     // ── Gemini Flash ──────────────────────────────────────────────────
 
