@@ -6,7 +6,6 @@ import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import com.example.aichat.data.local.ChatDatabase
-import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
@@ -30,9 +29,9 @@ class AichatApp : Application() {
     @Volatile private var captureFlag    = false
     @Volatile private var contextPending = ""
 
-    var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
+    var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)?               = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
-    var onContextWritten:      ((stage: String, detail: String) -> Unit)? = null
+    var onContextWritten:      ((stage: String, detail: String) -> Unit)?               = null
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
@@ -71,11 +70,11 @@ class AichatApp : Application() {
             showToast("⚠️ النص فارغ")
             return
         }
-        
+
         contextPending = text
         Log.d("AichatApp", "📤 Context pending set: ${text.length} chars")
-        
-        // 🆕 إرسال فوري عبر Port (إن وُجد)
+
+        // إرسال فوري عبر Port (إن وُجد)
         activePort?.postMessage(
             JSONObject().put("type", "INJECT_NOW")
         )
@@ -98,7 +97,6 @@ class AichatApp : Application() {
             return
         }
 
-        // ✅ تنسيق مناسب لـ textarea (بدلاً من SystemPrompt الكامل)
         val contextText = buildString {
             if (memoryContext.isNotBlank()) {
                 appendLine("السياق من محادثاتي السابقة:")
@@ -118,8 +116,8 @@ class AichatApp : Application() {
             "(promptEnabled=$isSystemPromptEnabled, memoryLen=${memoryContext.length})"
         )
         showToast("📤 السياق جاهز: ${contextText.length} حرف")
-        
-        // 🆕 إرسال فوري عبر Port
+
+        // إرسال فوري عبر Port
         activePort?.postMessage(
             JSONObject().put("type", "INJECT_NOW")
         )
@@ -127,7 +125,6 @@ class AichatApp : Application() {
 
     // ══════════════════════════════════════════════════════════════════
     // MessageDelegate — aicapture
-    // كلا المسارين يمران من هنا عبر onMessage + GeckoResult
     // ══════════════════════════════════════════════════════════════════
 
     private val messageDelegateAiCapture = object : WebExtension.MessageDelegate {
@@ -143,17 +140,6 @@ class AichatApp : Application() {
             Log.d("AichatApp", "📩 [aicapture] $type")
 
             return when (type) {
-
-                // ══════════════════════════════════════════════════════
-                // Port Connection
-                // ══════════════════════════════════════════════════════
-                
-                "PORT_READY" -> {
-                    activePort = sender.port
-                    val domain = json.optString("domain", "unknown")
-                    Log.d("AichatApp", "✅ Port connected from: $domain")
-                    null
-                }
 
                 // ══════════════════════════════════════════════════════
                 // المسار 1: التقاط يدوي
@@ -233,6 +219,42 @@ class AichatApp : Application() {
     }
 
     // ══════════════════════════════════════════════════════════════════
+    // PortDelegate — aicapture
+    // ══════════════════════════════════════════════════════════════════
+
+    private val portDelegateAiCapture = object : WebExtension.PortDelegate {
+
+        override fun onPortMessage(
+            message: Any,
+            port:    WebExtension.Port
+        ) {
+            val json = parseMessage(message)
+            val type = json?.optString("type")
+
+            when (type) {
+                "PORT_READY" -> {
+                    activePort = port
+                    val domain = json.optString("domain", "unknown")
+                    Log.d("AichatApp", "✅ Port connected from: $domain")
+                }
+                "INJECT_NOW" -> {
+                    Log.d("AichatApp", "📤 INJECT_NOW via port")
+                }
+                else -> {
+                    Log.w("AichatApp", "⚠️ PortDelegate unknown type: $type")
+                }
+            }
+        }
+
+        override fun onDisconnect(port: WebExtension.Port) {
+            if (activePort == port) {
+                activePort = null
+                Log.d("AichatApp", "⚠️ Port disconnected")
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     // onCreate
     // ══════════════════════════════════════════════════════════════════
 
@@ -282,6 +304,7 @@ class AichatApp : Application() {
                     if (ext != null) {
                         aiChatExtension = ext
                         ext.setMessageDelegate(messageDelegateAiCapture, "browser")
+                        ext.setPortDelegate(portDelegateAiCapture, "browser")
                         Log.d("AichatApp", "✅ aicapture loaded: ${ext.id}")
                         showToast("✅ Extension جاهزة")
                     } else {
@@ -312,7 +335,8 @@ class AichatApp : Application() {
         val success = json.optBoolean("success", false)
         val text    = json.optString("text")
         val debug   = json.optJSONObject("debug")
-        Log.d("AichatApp",
+        Log.d(
+            "AichatApp",
             if (success) "🧠 OK: ${text.take(60)}…"
             else         "⚠️ Failed: $debug"
         )
@@ -321,7 +345,7 @@ class AichatApp : Application() {
         }
     }
 
-    private fun parseMessage(message: Any): JSONObject? = try {
+    fun parseMessage(message: Any): JSONObject? = try {
         when (message) {
             is JSONObject -> message
             is Map<*, *>  -> JSONObject(message as Map<*, *>)
