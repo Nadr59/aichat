@@ -1,4 +1,41 @@
 (function () {
+    // ═══════════════════════════════════════════════════════════
+// Port للإرسال الفوري
+// ═══════════════════════════════════════════════════════════
+
+var port = null;
+
+try {
+    port = browser.runtime.connectNative('browser');
+    
+    // إخبار التطبيق أننا جاهزون
+    port.postMessage({
+        type: 'PORT_READY',
+        domain: location.hostname,
+        url: location.href
+    });
+    
+    // استقبال أمر الإرسال الفوري
+    port.onMessage.addListener(function(message) {
+        if (message.type === 'INJECT_NOW' && !contextBusy) {
+            // طلب السياق فوراً
+            browser.runtime.sendMessage({
+                type: 'GET_CONTEXT',
+                domain: location.hostname
+            }).then(function(response) {
+                if (response && response.hasContext) {
+                    contextBusy = true;
+                    writeAndSend(response.context);
+                }
+            }).catch(function(e) {
+                console.error('[AiCapture] GET_CONTEXT error:', e);
+            });
+        }
+    });
+    
+} catch (e) {
+    console.warn('[AiCapture] Port connection failed:', e);
+}
 
     if (window !== window.top) return;
     if (window.__aiCaptureActive) return;
