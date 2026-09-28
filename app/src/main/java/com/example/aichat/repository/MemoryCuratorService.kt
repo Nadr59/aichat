@@ -253,23 +253,35 @@ class MemoryCuratorService(
     // ── Helper: استدعاء الموفر المُختار ──────────────────────────
 
     private suspend fun callConfiguredProvider(prompt: String): String {
-        return when (settings.memoryCuratorProvider) {
-            "custom" -> {
-                val baseUrl = settings.customUrl.trim()
-                val model   = settings.customModel.trim()
-                if (baseUrl.isBlank() || model.isBlank()) {
-                    throw Exception("Custom provider not configured")
-                }
-                callCustomProvider(prompt, baseUrl, settings.customKey, model)
+    return when (settings.memoryCuratorProvider) {
+        "ollama" -> {
+            val model = settings.memoryCuratorOllamaModel.trim()
+            if (model.isBlank()) {
+                throw Exception("Ollama model not configured")
             }
-            else -> {
-                val apiKey = settings.geminiKey
-                if (apiKey.isBlank()) {
-                    throw Exception("Gemini API key is blank")
-                }
-                callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
-            }
+            Log.d(TAG, "🤖 Using Ollama (local): $model")
+            callOllama(prompt, model)
         }
+        
+        "custom" -> {
+            val baseUrl = settings.customUrl.trim()
+            val model   = settings.customModel.trim()
+            if (baseUrl.isBlank() || model.isBlank()) {
+                throw Exception("Custom provider not configured")
+            }
+            Log.d(TAG, "🔧 Using Custom: $baseUrl")
+            callCustomProvider(prompt, baseUrl, settings.customKey, model)
+        }
+        
+        else -> {
+            val apiKey = settings.geminiKey
+            if (apiKey.isBlank()) {
+                throw Exception("Gemini API key is blank")
+            }
+            Log.d(TAG, "✨ Using Gemini: ${settings.memoryCuratorModel}")
+            callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
+        }
+    }
     }
     // ── Ollama (محلي - OpenAI-compatible) ─────────────────────────
 
