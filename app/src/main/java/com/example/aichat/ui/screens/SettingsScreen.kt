@@ -637,163 +637,287 @@ var memoryCuratorProvider by remember { mutableStateOf(settings.memoryCuratorPro
             // وسيط الذاكرة الذكي (Memory Curator)
             // ====================================================
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+          HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+Text(
+    text       = "🧠 وسيط الذاكرة الذكي",
+    fontWeight = FontWeight.Bold,
+    style      = MaterialTheme.typography.titleSmall
+)
+
+Card(
+    colors = CardDefaults.cardColors(
+        containerColor = if (memoryCuratorEnabled)
+            MaterialTheme.colorScheme.primaryContainer
+        else
+            MaterialTheme.colorScheme.surfaceVariant
+    ),
+    shape    = RoundedCornerShape(12.dp),
+    modifier = Modifier.fillMaxWidth()
+) {
+    Column(
+        modifier = Modifier.padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("تفعيل الوسيط الذكي", fontWeight = FontWeight.Bold)
+                Text(
+                    text  = "يحلل الذاكرة قبل إرسالها للنموذج الرئيسي، ويستخلص السياق الأكثر صلة فقط. " +
+                            "إن وُصفت هوية أدناه، يقترح أيضاً نقاط محتوى تخدمها.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked         = memoryCuratorEnabled,
+                onCheckedChange = { memoryCuratorEnabled = it; saved = false }
+            )
+        }
+
+        if (memoryCuratorEnabled) {
+
+            HorizontalDivider()
 
             Text(
-                text       = "🧠 وسيط الذاكرة الذكي",
+                text       = "مزوّد الوسيط:",
                 fontWeight = FontWeight.Bold,
-                style      = MaterialTheme.typography.titleSmall
+                style      = MaterialTheme.typography.bodySmall
             )
 
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = if (memoryCuratorEnabled)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant
-                ),
-                shape    = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+            // ✨ Gemini
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { memoryCuratorProvider = "gemini"; saved = false },
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                RadioButton(
+                    selected = memoryCuratorProvider == "gemini",
+                    onClick  = { memoryCuratorProvider = "gemini"; saved = false }
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("✨ Gemini (سحابي)")
+            }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+            // 🤖 Ollama (محلي)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { memoryCuratorProvider = "ollama"; saved = false },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = memoryCuratorProvider == "ollama",
+                    onClick  = { memoryCuratorProvider = "ollama"; saved = false }
+                )
+                Spacer(Modifier.width(4.dp))
+                Column {
+                    Text("🤖 Ollama (محلي - بدون إنترنت)")
+                    Text(
+                        text  = "يعمل على الهاتف عبر Termux",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // 🔧 Custom
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { memoryCuratorProvider = "custom"; saved = false },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = memoryCuratorProvider == "custom",
+                    onClick  = { memoryCuratorProvider = "custom"; saved = false }
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("🔧 خادم مخصص (Custom) — لتجاوز حدود الطلبات")
+            }
+
+            // عرض الحقول حسب الاختيار
+            when (memoryCuratorProvider) {
+
+                "gemini" -> {
+                    OutlinedTextField(
+                        value         = memoryCuratorModel,
+                        onValueChange = { memoryCuratorModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("موديل Gemini للوسيط") },
+                        placeholder   = { Text("gemini-2.0-flash-exp") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                    Text(
+                        text  = "يستخدم مفتاح Gemini API المُدخل في قسم Gemini أعلاه.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                "ollama" -> {
+                    OutlinedTextField(
+                        value         = memoryCuratorOllamaModel,
+                        onValueChange = { memoryCuratorOllamaModel = it; saved = false },
+                        modifier      = Modifier.fillMaxWidth(),
+                        label         = { Text("نموذج Ollama") },
+                        placeholder   = { Text("qwen2.5:1.5b") },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(12.dp),
+                        leadingIcon   = {
+                            Icon(
+                                imageVector = Icons.Default.Computer,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    )
+                    
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        ),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("تفعيل الوسيط الذكي", fontWeight = FontWeight.Bold)
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             Text(
-                                text  = "يحلل الذاكرة قبل إرسالها للنموذج الرئيسي، ويستخلص السياق الأكثر صلة فقط. " +
-                                        "إن وُصفت هوية أدناه، يقترح أيضاً نقاط محتوى تخدمها.",
-                                style = MaterialTheme.typography.bodySmall
+                                text  = "ℹ️ متطلبات التشغيل:",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text  = "• المنفذ: 127.0.0.1:11434",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text  = "• تأكد من تشغيل Ollama في Termux: ollama serve",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text  = "• تحميل النموذج: ollama pull qwen2.5:1.5b",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text  = "✅ لا يحتاج API key ولا اتصال إنترنت",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
-                        Switch(
-                            checked         = memoryCuratorEnabled,
-                            onCheckedChange = { memoryCuratorEnabled = it; saved = false }
-                        )
                     }
-
-                    if (memoryCuratorEnabled) {
-
-                        HorizontalDivider()
-
+                    
+                    // نماذج موصى بها
+                    Text(
+                        text  = "📌 نماذج موصى بها:",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    Column(
+                        modifier = Modifier.padding(start = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
                         Text(
-                            text       = "مزوّد الوسيط:",
-                            fontWeight = FontWeight.Bold,
-                            style      = MaterialTheme.typography.bodySmall
-                        )
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { memoryCuratorProvider = "gemini"; saved = false },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = memoryCuratorProvider == "gemini",
-                                onClick  = { memoryCuratorProvider = "gemini"; saved = false }
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text("Gemini (افتراضي)")
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { memoryCuratorProvider = "custom"; saved = false },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = memoryCuratorProvider == "custom",
-                                onClick  = { memoryCuratorProvider = "custom"; saved = false }
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text("خادم مخصص (Custom) — لتجاوز حدود الطلبات")
-                        }
-
-                        when (memoryCuratorProvider) {
-
-                            "gemini" -> {
-                                OutlinedTextField(
-                                    value         = memoryCuratorModel,
-                                    onValueChange = { memoryCuratorModel = it; saved = false },
-                                    modifier      = Modifier.fillMaxWidth(),
-                                    label         = { Text("موديل Gemini للوسيط") },
-                                    placeholder   = { Text("gemini-2.0-flash-exp") },
-                                    singleLine    = true,
-                                    shape         = RoundedCornerShape(12.dp)
-                                )
-                                Text(
-                                    text  = "يستخدم مفتاح Gemini API المُدخل في قسم Gemini أعلاه.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            "custom" -> {
-                                Text(
-                                    text  = "يُعاد استخدام إعدادات \"Custom\" (Server URL / API Key / النموذج) " +
-                                            "المضبوطة أعلاه عند اختيار \"Custom\" كمزوّد محادثة — لا حاجة لإدخالها مرتين.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
-                                if (customUrl.isBlank() || customModel.isBlank()) {
-                                    Card(
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = MaterialTheme.colorScheme.errorContainer
-                                        ),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Text(
-                                            text     = "⚠️ Server URL أو اسم النموذج فارغ حالياً — سيُستخدم " +
-                                                       "المسار الاحتياطي (بلا وسيط ذكي) حتى يتم ضبطهما من قسم \"Custom\" أعلاه.",
-                                            modifier = Modifier.padding(10.dp),
-                                            style    = MaterialTheme.typography.bodySmall,
-                                            color    = MaterialTheme.colorScheme.onErrorContainer
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // 🆕 القسم الجديد: هوية/أسلوب الوسيط — حقل نص حر
-                        HorizontalDivider()
-
-                        Text(
-                            text       = "هوية/أسلوب الوسيط (اختياري):",
-                            fontWeight = FontWeight.Bold,
-                            style      = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text  = "إن تُرك فارغاً: الوسيط يقتصر على تنقية سياق الذاكرة فقط. " +
-                                    "إن كُتب وصف هنا: يتحول الوسيط أيضاً لمحسّن يقترح نقاط محتوى ملموسة " +
-                                    "تخدم هذا الوصف، مع الحفاظ الكامل على سؤالك كما هو دون أي تغيير.",
+                            text  = "• qwen2.5:0.5b - أسرع (~300MB)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-
-                        OutlinedTextField(
-                            value         = mediatorIdentityText,
-                            onValueChange = { mediatorIdentityText = it; saved = false },
-                            modifier      = Modifier.fillMaxWidth(),
-                            label         = { Text("وصف الهوية (اختياري)") },
-                            placeholder   = { Text("مثال: مبرمج يفضل الأمثلة العملية والكود المباشر") },
-                            minLines      = 2,
-                            maxLines      = 4,
-                            shape         = RoundedCornerShape(12.dp)
+                        Text(
+                            text  = "• qwen2.5:1.5b - متوازن (~900MB) ⭐",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Text(
+                            text  = "• qwen2.5:3b - جودة عالية (~2GB)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text  = "• gemma2:2b - بديل من Google (~1.6GB)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                "custom" -> {
+                    Text(
+                        text  = "يُعاد استخدام إعدادات \"Custom\" (Server URL / API Key / النموذج) " +
+                                "المضبوطة أعلاه عند اختيار \"Custom\" كمزوّد محادثة — لا حاجة لإدخالها مرتين.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (customUrl.isBlank() || customModel.isBlank()) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text     = "⚠️ Server URL أو اسم النموذج فارغ حالياً — سيُستخدم " +
+                                           "المسار الاحتياطي (بلا وسيط ذكي) حتى يتم ضبطهما من قسم \"Custom\" أعلاه.",
+                                modifier = Modifier.padding(10.dp),
+                                style    = MaterialTheme.typography.bodySmall,
+                                color    = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            // 🆕 القسم الجديد: هوية/أسلوب الوسيط — حقل نص حر
+            HorizontalDivider()
 
+            Text(
+                text       = "هوية/أسلوب الوسيط (اختياري):",
+                fontWeight = FontWeight.Bold,
+                style      = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text  = "إن تُرك فارغاً: الوسيط يقتصر على تنقية سياق الذاكرة فقط. " +
+                        "إن كُتب وصف هنا: يتحول الوسيط أيضاً لمحسّن يقترح نقاط محتوى ملموسة " +
+                        "تخدم هذا الوصف، مع الحفاظ الكامل على سؤالك كما هو دون أي تغيير.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            OutlinedTextField(
+                value         = mediatorIdentityText,
+                onValueChange = { mediatorIdentityText = it; saved = false },
+                modifier      = Modifier.fillMaxWidth(),
+                label         = { Text("وصف الهوية (اختياري)") },
+                placeholder   = { Text("مثال: مبرمج يفضل الأمثلة العملية والكود المباشر") },
+                minLines      = 2,
+                maxLines      = 4,
+                shape         = RoundedCornerShape(12.dp)
+            )
+        }
+    }
+}
+
+Spacer(Modifier.height(8.dp))
+
+
+
+              
+                    
+
+                        
             // ====================================================
             // System Prompt Section
             // ====================================================
