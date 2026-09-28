@@ -33,7 +33,16 @@ import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.ui.viewmodel.ChatViewModel
-
+import com.example.aichat.data.model.QueryStyle
+import com.example.aichat.data.local.AiSettings
+import com.example.aichat.repository.MemoryCuratorService
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Dialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -220,29 +229,32 @@ fun GeckoTestScreen(
 
     // ── المسار 2: زر 📤 ──────────────────────────────────────────────
 
-    val sendContext: () -> Unit = ctx@{
-        if (isLoading) return@ctx
-        if (platform == null || !platform.memoryEnabled) return@ctx
-        if (chatViewModel == null) return@ctx
+    // حالة Dialog
+var showSendDialog by remember { mutableStateOf(false) }
 
-        Toast.makeText(context, "📤 جاري تحضير السياق...", Toast.LENGTH_SHORT).show()
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val memories = chatViewModel.getSharedMemories()
-                mainHandler.post {
-                    app.sendContextToPage(
-                        memories              = memories,
-                        isSystemPromptEnabled = isSystemPromptEnabled   // ← يُمرَّر الآن
-                    )
-                }
-            } catch (e: Exception) {
-                mainHandler.post {
-                    Toast.makeText(context, "❌ ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
+// دالة مبسطة
+val sendContext: () -> Unit = {
+    if (!isLoading && platform != null && platform.memoryEnabled && chatViewModel != null) {
+        showSendDialog = true
     }
+}
+
+// Dialog الشامل
+if (showSendDialog) {
+    SendToWebDialog(
+        chatViewModel = chatViewModel!!,
+        onDismiss = { showSendDialog = false },
+        onSend = { finalText ->
+            app.setContextPending(finalText)
+            showSendDialog = false
+            Toast.makeText(
+                context,
+                "📤 جاهز للإرسال (${finalText.length} حرف)",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    )
+}
 
     // ── رجوع ذكي ─────────────────────────────────────────────────────
     val handleBack: () -> Unit = {
@@ -456,4 +468,352 @@ private fun GeckoUnavailableDialog(
             OutlinedButton(onClick = onBack) { Text("رجوع") }
         }
     )
+    // ══════════════════════════════════════════════════════════════════════════════
+// Dialog شامل: سؤال + تحسين + صياغة + سياق
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun SendToWebDialog(
+    chatViewModel: ChatViewModel,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var enhancedQuery by remember { mutableStateOf<String?>(null) }
+    var isEnhancing by remember { mutableStateOf(false) }
+    var showStyleMenu by remember { mutableStateOf(false) }
+    
+    var includeContext by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<MemoryItem>>(emptyList()) }
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val aiSettings = remember { AiSettings(context) }
+    val memoryCuratorService = remember {
+        MemoryCuratorService(
+            settings = aiSettings,
+            fallbackBuilder = MemoryContextBuilder()
+        )
+    }
+    
+    // النص المعروض (محسّن أو أصلي)
+    val displayedText = enhancedQuery ?: query
+    
+    // بحث تلقائي عند تفعيل السياق
+    LaunchedEffect(includeContext, displayedText) {
+        if (includeContext && displayedText.length > 2) {
+            try {
+                searchResults = chatViewModel.searchSharedMemories(displayedText)
+                // اختيار أفضل 3 تلقائياً
+                selectedIds = searchResults.take(3).map { it.id }.toSet()
+            } catch (e: Exception) {
+                searchResults = emptyList()
+                selectedIds = emptySet()
+            }
+        } else {
+            searchResults = emptyList()
+            selectedIds = emptySet()
+        }
+    }
+    
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 650.dp),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // ═══════════════════════════════════════
+                // العنوان
+                // ═══════════════════════════════════════
+                Text(
+                    text = "💬 إرسال سؤال إلى المنصة",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                // ═══════════════════════════════════════
+                // حقل السؤال
+                // ═══════════════════════════════════════
+                OutlinedTextField(
+                    value = displayedText,
+                    onValueChange = { 
+                        if (enhancedQuery != null) {
+                            enhancedQuery = it  // تعديل المحسّن
+                        } else {
+                            query = it  // تعديل الأصلي
+                        }
+                    },
+                    label = { 
+                        Text(
+                            if (enhancedQuery != null) "السؤال المُحسّن ✨"
+                            else "اكتب سؤالك"
+                        )
+                    },
+                    placeholder = { Text("مثال: ما الطقس اليوم؟") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 6,
+                    enabled = !isEnhancing
+                )
+                
+                // ═══════════════════════════════════════
+                // أزرار التحسين
+                // ═══════════════════════════════════════
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // ⚡ توسيع الطلب
+                    if (aiSettings.mediatorIdentityText.isNotBlank()) {
+                        OutlinedButton(
+                            onClick = {
+                                if (query.isBlank()) return@OutlinedButton
+                                isEnhancing = true
+                                scope.launch {
+                                    try {
+                                        val enhanced = memoryCuratorService.enhanceQuery(
+                                            userQuery = query,
+                                            mediatorIdentityText = aiSettings.mediatorIdentityText
+                                        )
+                                        enhancedQuery = enhanced
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            context,
+                                            "❌ فشل التحسين: ${e.message}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    } finally {
+                                        isEnhancing = false
+                                    }
+                                }
+                            },
+                            enabled = query.isNotBlank() && !isEnhancing,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (isEnhancing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.width(4.dp))
+                            }
+                            Text("⚡ توسيع")
+                        }
+                    }
+                    
+                    // 🎨 تحسين الصياغة
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedButton(
+                            onClick = { showStyleMenu = true },
+                            enabled = query.isNotBlank() && !isEnhancing,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("🎨 صياغة")
+                        }
+                        
+                        DropdownMenu(
+                            expanded = showStyleMenu,
+                            onDismissRequest = { showStyleMenu = false }
+                        ) {
+                            QueryStyle.entries.forEach { style ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = style.emoji,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                            Column {
+                                                Text(
+                                                    text = style.displayName,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = style.description,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        showStyleMenu = false
+                                        if (query.isBlank()) return@DropdownMenuItem
+                                        isEnhancing = true
+                                        scope.launch {
+                                            try {
+                                                val refined = memoryCuratorService.refineQueryStyle(
+                                                    userQuery = query,
+                                                    style = style
+                                                )
+                                                enhancedQuery = refined
+                                            } catch (e: Exception) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "❌ فشل التحسين: ${e.message}",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            } finally {
+                                                isEnhancing = false
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
+                    // 🧹 مسح التحسين
+                    if (enhancedQuery != null) {
+                        OutlinedButton(
+                            onClick = { enhancedQuery = null },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("🧹 مسح")
+                        }
+                    }
+                }
+                
+                // ═══════════════════════════════════════
+                // خيار السياق
+                // ═══════════════════════════════════════
+                HorizontalDivider()
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { includeContext = !includeContext }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = includeContext,
+                        onCheckedChange = { includeContext = it }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            "🧠 إضافة سياق من الذاكرة",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (includeContext) {
+                            Text(
+                                "سيتم البحث عن ذكريات ذات صلة تلقائياً",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                
+                // ═══════════════════════════════════════
+                // اختيار الذكريات
+                // ═══════════════════════════════════════
+                if (includeContext && searchResults.isNotEmpty()) {
+                    Text(
+                        text = "ذكريات ذات صلة (${searchResults.size}):",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    searchResults.take(5).forEach { memory ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedIds = if (memory.id in selectedIds) {
+                                        selectedIds - memory.id
+                                    } else {
+                                        selectedIds + memory.id
+                                    }
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = memory.id in selectedIds,
+                                onCheckedChange = null
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = memory.content.take(80) + 
+                                       if (memory.content.length > 80) "..." else "",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                } else if (includeContext && displayedText.length > 2) {
+                    Text(
+                        text = "⚠️ لم توجد ذكريات ذات صلة بهذا السؤال",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+                
+                // ═══════════════════════════════════════
+                // الأزرار النهائية
+                // ═══════════════════════════════════════
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("❌ إلغاء")
+                    }
+                    
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val finalText = if (includeContext && selectedIds.isNotEmpty()) {
+                                    // مع السياق
+                                    val selected = searchResults.filter { it.id in selectedIds }
+                                    val contextBuilder = MemoryContextBuilder()
+                                    val context = contextBuilder.build(selected)
+                                    
+                                    buildString {
+                                        appendLine("السياق من محادثاتي السابقة:")
+                                        appendLine()
+                                        appendLine(context)
+                                        appendLine()
+                                        appendLine("───────────")
+                                        appendLine()
+                                        appendLine("السؤال:")
+                                        append(displayedText)
+                                    }
+                                } else {
+                                    // السؤال فقط
+                                    displayedText
+                                }
+                                
+                                onSend(finalText)
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = displayedText.isNotBlank() && !isEnhancing
+                    ) {
+                        Text("📤 إرسال للمنصة")
+                    }
+                }
+            }
+        }
+    }
+}
 }
