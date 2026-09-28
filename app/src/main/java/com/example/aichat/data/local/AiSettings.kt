@@ -203,59 +203,64 @@ class AiSettings(context: Context) {
 
     // ── Memory Curator (وسيط الذاكرة الذكي) ──────────────────────────
 
-    var memoryCuratorEnabled: Boolean
-        get() = prefs.getBoolean("memory_curator_enabled", true)
-        set(value) = prefs.edit()
-            .putBoolean("memory_curator_enabled", value)
-            .apply()
 
-    var memoryCuratorModel: String
-        get() = prefs.getString(
-            "memory_curator_model",
-            "gemini-3.6-flash"
-        )?.trim() ?: "gemini-3.6-flash"
-        set(value) = prefs.edit()
-            .putString("memory_curator_model", value.trim())
-            .apply()
+var memoryCuratorEnabled: Boolean
+    get() = prefs.getBoolean("memory_curator_enabled", true)
+    set(value) = prefs.edit()
+        .putBoolean("memory_curator_enabled", value)
+        .apply()
 
-    /**
-     * مزوّد الوسيط الذكي — مستقل تماماً عن [provider] الرئيسي المستخدَم
-     * في المحادثة. يسمح للمستخدم بتبديل الوسيط إلى مزوّد آخر (مثل "custom")
-     * دون التأثير على مزوّد المحادثة الأساسي، ودون أي تعديل كود مستقبلي —
-     * فقط تبديل هذه القيمة من واجهة الإعدادات.
-     *
-     * القيم المدعومة حالياً: "gemini" (افتراضي، يحافظ على السلوك القديم)
-     * و "custom" (يعيد استخدام customUrl/customKey/customModel الموجودة
-     * أصلاً، بلا ازدواج إعدادات).
-     */
-    var memoryCuratorProvider: String
-        get() = prefs.getString("memory_curator_provider", "gemini")
-            ?.trim()
-            ?.lowercase()
-            ?: "gemini"
-        set(value) = prefs.edit()
-            .putString("memory_curator_provider", value.trim().lowercase())
-            .apply()
+var memoryCuratorModel: String
+    get() = prefs.getString(
+        "memory_curator_model",
+        "gemini-3.6-flash"
+    )?.trim() ?: "gemini-3.6-flash"
+    set(value) = prefs.edit()
+        .putString("memory_curator_model", value.trim())
+        .apply()
 
-    /**
-     * 🆕 نص هوية/أسلوب الوسيط — حقل حر اختياري.
-     *
-     * - فارغ (الافتراضي): الوسيط يعمل بنفس سلوكه الأصلي تماماً
-     *   (تنقية سياق الذاكرة فقط، بلا أي تغيير سلوكي أو كسر توافق).
-     * - غير فارغ: يتحول دور الوسيط أيضاً إلى "محسّن طلبات" يقترح نقاط
-     *   محتوى ملموسة تخدم هذا الوصف، ضمن نفس استدعاء LLM الواحد
-     *   (لا يضيف أي استدعاء شبكة إضافي).
-     *
-     * حماية مهمة: هذا النص لا يُستخدَم أبداً لإعادة صياغة سؤال المستخدم
-     * نفسه — فقط يُوجّه الوسيط لإنتاج توجيه/سياق مرافق. يُنفَّذ هذا الشرط
-     * داخل MemoryCuratorPrompt.build()، وليس في هذا الملف.
-     */
-    var mediatorIdentityText: String
-        get() = prefs.getString("mediator_identity_text", "") ?: ""
-        set(value) = prefs.edit()
-            .putString("mediator_identity_text", value.trim())
-            .apply()
+/**
+ * مزوّد الوسيط الذكي — مستقل تماماً عن [provider] الرئيسي المستخدَم
+ * في المحادثة. يسمح للمستخدم بتبديل الوسيط إلى مزوّد آخر (مثل "custom")
+ * دون التأثير على مزوّد المحادثة الأساسي، ودون أي تعديل كود مستقبلي —
+ * فقط تبديل هذه القيمة من واجهة الإعدادات.
+ *
+ * القيم المدعومة حالياً: 
+ * - "gemini" (افتراضي، يحافظ على السلوك القديم)
+ * - "custom" (يعيد استخدام customUrl/customKey/customModel الموجودة)
+ * - "ollama" (محلي على 127.0.0.1:11434، بدون API key)
+ */
+var memoryCuratorProvider: String
+    get() = prefs.getString("memory_curator_provider", "gemini")
+        ?.trim()
+        ?.lowercase()
+        ?: "gemini"
+    set(value) = prefs.edit()
+        .putString("memory_curator_provider", value.trim().lowercase())
+        .apply()
 
+/**
+ * 🆕 نموذج Ollama المحلي المستخدم للوسيط الذكي
+ * (يُستخدَم فقط عند memoryCuratorProvider = "ollama")
+ */
+var memoryCuratorOllamaModel: String
+    get() = prefs.getString(
+        "memory_curator_ollama_model",
+        "qwen2.5:1.5b"
+    )?.trim() ?: "qwen2.5:1.5b"
+    set(value) = prefs.edit()
+        .putString("memory_curator_ollama_model", value.trim())
+        .apply()
+
+/**
+ * نص هوية/أسلوب الوسيط — حقل حر اختياري.
+ * ... باقي التعليق كما هو
+ */
+var mediatorIdentityText: String
+    get() = prefs.getString("mediator_identity_text", "") ?: ""
+    set(value) = prefs.edit()
+        .putString("mediator_identity_text", value.trim())
+        .apply()
     // Web
 
     var webPlatform: String
