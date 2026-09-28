@@ -1,5 +1,6 @@
 package com.example.aichat.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -18,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
@@ -39,12 +41,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch          // ✅ الاستيراد المفقود
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material.icons.filled.Computer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,7 +59,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.clickable
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.ModelInfo
 import com.example.aichat.repository.ModelCatalogRepository
@@ -98,12 +98,12 @@ fun SettingsScreen(
     var customUrl by remember { mutableStateOf(settings.customUrl) }
     var customKey by remember { mutableStateOf(settings.customKey) }
     var customModel by remember { mutableStateOf(settings.customModel) }
-    var memoryCuratorEnabled by remember { mutableStateOf(settings.memoryCuratorEnabled) }
-var memoryCuratorModel by remember { mutableStateOf(settings.memoryCuratorModel) }
-var memoryCuratorProvider by remember { mutableStateOf(settings.memoryCuratorProvider) }
-var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCuratorOllamaModel) }
 
-    // ✅ نقل هذين المتغيرين إلى مستوى الـ Composable الرئيسي
+    var memoryCuratorEnabled by remember { mutableStateOf(settings.memoryCuratorEnabled) }
+    var memoryCuratorModel by remember { mutableStateOf(settings.memoryCuratorModel) }
+    var memoryCuratorProvider by remember { mutableStateOf(settings.memoryCuratorProvider) }
+    var memoryCuratorOllamaModel by remember { mutableStateOf(settings.memoryCuratorOllamaModel) }
+
     var accuracyEnabled by remember { mutableStateOf(settings.accuracyPromptEnabled) }
     var customInstruction by remember { mutableStateOf(settings.customSystemInstruction) }
     var mediatorIdentityText by remember { mutableStateOf(settings.mediatorIdentityText) }
@@ -191,10 +191,10 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
         } else {
             listOf(
                 ModelInfo(
-                    id         = currentModel,
-                    name       = "$currentModel 💾",
-                    provider   = provider,
-                    isFree     = currentModel.contains(":free"),
+                    id          = currentModel,
+                    name        = "$currentModel 💾",
+                    provider    = provider,
+                    isFree      = currentModel.contains(":free"),
                     recommended = false
                 )
             ) + models
@@ -291,13 +291,13 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
                 Card(
                     onClick = {
                         if (provider != key) {
-                            provider       = key
-                            saved          = false
-                            onlyFree       = false
+                            provider        = key
+                            saved           = false
+                            onlyFree        = false
                             onlyRecommended = false
-                            onlyVision     = false
-                            models         = emptyList()
-                            modelsError    = null
+                            onlyVision      = false
+                            models          = emptyList()
+                            modelsError     = null
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -367,18 +367,18 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
                         placeholder   = "AIza..."
                     )
                     DynamicModelSelector(
-                        models           = filteredModels,
-                        selected         = geminiModel,
-                        loading          = loadingModels,
-                        error            = modelsError,
-                        onlyFree         = onlyFree,
-                        onlyRecommended  = onlyRecommended,
-                        onlyVision       = onlyVision,
-                        onFreeChange     = { onlyFree = it },
+                        models              = filteredModels,
+                        selected            = geminiModel,
+                        loading             = loadingModels,
+                        error               = modelsError,
+                        onlyFree            = onlyFree,
+                        onlyRecommended     = onlyRecommended,
+                        onlyVision          = onlyVision,
+                        onFreeChange        = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange   = { onlyVision = it },
-                        onSelect         = { geminiModel = it; saved = false },
-                        onRefresh        = { refreshTrigger++ }
+                        onVisionChange      = { onlyVision = it },
+                        onSelect            = { geminiModel = it; saved = false },
+                        onRefresh           = { refreshTrigger++ }
                     )
                 }
 
@@ -395,18 +395,18 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
                         placeholder   = "sk-or-..."
                     )
                     DynamicModelSelector(
-                        models           = filteredModels,
-                        selected         = openrouterModel,
-                        loading          = loadingModels,
-                        error            = modelsError,
-                        onlyFree         = onlyFree,
-                        onlyRecommended  = onlyRecommended,
-                        onlyVision       = onlyVision,
-                        onFreeChange     = { onlyFree = it },
+                        models              = filteredModels,
+                        selected            = openrouterModel,
+                        loading             = loadingModels,
+                        error               = modelsError,
+                        onlyFree            = onlyFree,
+                        onlyRecommended     = onlyRecommended,
+                        onlyVision          = onlyVision,
+                        onFreeChange        = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange   = { onlyVision = it },
-                        onSelect         = { openrouterModel = it; saved = false },
-                        onRefresh        = { refreshTrigger++ }
+                        onVisionChange      = { onlyVision = it },
+                        onSelect            = { openrouterModel = it; saved = false },
+                        onRefresh           = { refreshTrigger++ }
                     )
                     OutlinedTextField(
                         value         = openrouterModel,
@@ -428,18 +428,18 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
                         placeholder   = "sk-..."
                     )
                     DynamicModelSelector(
-                        models           = filteredModels,
-                        selected         = openaiModel,
-                        loading          = loadingModels,
-                        error            = modelsError,
-                        onlyFree         = onlyFree,
-                        onlyRecommended  = onlyRecommended,
-                        onlyVision       = onlyVision,
-                        onFreeChange     = { onlyFree = it },
+                        models              = filteredModels,
+                        selected            = openaiModel,
+                        loading             = loadingModels,
+                        error               = modelsError,
+                        onlyFree            = onlyFree,
+                        onlyRecommended     = onlyRecommended,
+                        onlyVision          = onlyVision,
+                        onFreeChange        = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange   = { onlyVision = it },
-                        onSelect         = { openaiModel = it; saved = false },
-                        onRefresh        = { refreshTrigger++ }
+                        onVisionChange      = { onlyVision = it },
+                        onSelect            = { openaiModel = it; saved = false },
+                        onRefresh           = { refreshTrigger++ }
                     )
                 }
 
@@ -456,18 +456,18 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
                         placeholder   = "key..."
                     )
                     DynamicModelSelector(
-                        models           = filteredModels,
-                        selected         = mistralModel,
-                        loading          = loadingModels,
-                        error            = modelsError,
-                        onlyFree         = onlyFree,
-                        onlyRecommended  = onlyRecommended,
-                        onlyVision       = onlyVision,
-                        onFreeChange     = { onlyFree = it },
+                        models              = filteredModels,
+                        selected            = mistralModel,
+                        loading             = loadingModels,
+                        error               = modelsError,
+                        onlyFree            = onlyFree,
+                        onlyRecommended     = onlyRecommended,
+                        onlyVision          = onlyVision,
+                        onFreeChange        = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange   = { onlyVision = it },
-                        onSelect         = { mistralModel = it; saved = false },
-                        onRefresh        = { refreshTrigger++ }
+                        onVisionChange      = { onlyVision = it },
+                        onSelect            = { mistralModel = it; saved = false },
+                        onRefresh           = { refreshTrigger++ }
                     )
                 }
 
@@ -481,18 +481,18 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
                         placeholder   = "gsk_..."
                     )
                     DynamicModelSelector(
-                        models           = filteredModels,
-                        selected         = groqModel,
-                        loading          = loadingModels,
-                        error            = modelsError,
-                        onlyFree         = onlyFree,
-                        onlyRecommended  = onlyRecommended,
-                        onlyVision       = onlyVision,
-                        onFreeChange     = { onlyFree = it },
+                        models              = filteredModels,
+                        selected            = groqModel,
+                        loading             = loadingModels,
+                        error               = modelsError,
+                        onlyFree            = onlyFree,
+                        onlyRecommended     = onlyRecommended,
+                        onlyVision          = onlyVision,
+                        onFreeChange        = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange   = { onlyVision = it },
-                        onSelect         = { groqModel = it; saved = false },
-                        onRefresh        = { refreshTrigger++ }
+                        onVisionChange      = { onlyVision = it },
+                        onSelect            = { groqModel = it; saved = false },
+                        onRefresh           = { refreshTrigger++ }
                     )
                     OutlinedTextField(
                         value         = groqModel,
@@ -518,18 +518,18 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
                         placeholder   = "nvapi-..."
                     )
                     DynamicModelSelector(
-                        models           = filteredModels,
-                        selected         = nvidiaModel,
-                        loading          = loadingModels,
-                        error            = modelsError,
-                        onlyFree         = onlyFree,
-                        onlyRecommended  = onlyRecommended,
-                        onlyVision       = onlyVision,
-                        onFreeChange     = { onlyFree = it },
+                        models              = filteredModels,
+                        selected            = nvidiaModel,
+                        loading             = loadingModels,
+                        error               = modelsError,
+                        onlyFree            = onlyFree,
+                        onlyRecommended     = onlyRecommended,
+                        onlyVision          = onlyVision,
+                        onFreeChange        = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange   = { onlyVision = it },
-                        onSelect         = { nvidiaModel = it; saved = false },
-                        onRefresh        = { refreshTrigger++ }
+                        onVisionChange      = { onlyVision = it },
+                        onSelect            = { nvidiaModel = it; saved = false },
+                        onRefresh           = { refreshTrigger++ }
                     )
                     OutlinedTextField(
                         value         = nvidiaModel,
@@ -557,18 +557,18 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
                         placeholder   = "hf_..."
                     )
                     DynamicModelSelector(
-                        models           = filteredModels,
-                        selected         = huggingfaceModel,
-                        loading          = loadingModels,
-                        error            = modelsError,
-                        onlyFree         = onlyFree,
-                        onlyRecommended  = onlyRecommended,
-                        onlyVision       = onlyVision,
-                        onFreeChange     = { onlyFree = it },
+                        models              = filteredModels,
+                        selected            = huggingfaceModel,
+                        loading             = loadingModels,
+                        error               = modelsError,
+                        onlyFree            = onlyFree,
+                        onlyRecommended     = onlyRecommended,
+                        onlyVision          = onlyVision,
+                        onFreeChange        = { onlyFree = it },
                         onRecommendedChange = { onlyRecommended = it },
-                        onVisionChange   = { onlyVision = it },
-                        onSelect         = { huggingfaceModel = it; saved = false },
-                        onRefresh        = { refreshTrigger++ }
+                        onVisionChange      = { onlyVision = it },
+                        onSelect            = { huggingfaceModel = it; saved = false },
+                        onRefresh           = { refreshTrigger++ }
                     )
                     OutlinedTextField(
                         value         = huggingfaceModel,
@@ -634,292 +634,285 @@ var memoryCuratorOllamaModel by remember { mutableStateOf(Settings.memoryCurator
             }
 
             Spacer(Modifier.height(8.dp))
-    
+
             // ====================================================
             // وسيط الذاكرة الذكي (Memory Curator)
             // ====================================================
 
-          HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-Text(
-    text       = "🧠 وسيط الذاكرة الذكي",
-    fontWeight = FontWeight.Bold,
-    style      = MaterialTheme.typography.titleSmall
-)
-
-Card(
-    colors = CardDefaults.cardColors(
-        containerColor = if (memoryCuratorEnabled)
-            MaterialTheme.colorScheme.primaryContainer
-        else
-            MaterialTheme.colorScheme.surfaceVariant
-    ),
-    shape    = RoundedCornerShape(12.dp),
-    modifier = Modifier.fillMaxWidth()
-) {
-    Column(
-        modifier = Modifier.padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("تفعيل الوسيط الذكي", fontWeight = FontWeight.Bold)
-                Text(
-                    text  = "يحلل الذاكرة قبل إرسالها للنموذج الرئيسي، ويستخلص السياق الأكثر صلة فقط. " +
-                            "إن وُصفت هوية أدناه، يقترح أيضاً نقاط محتوى تخدمها.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            Switch(
-                checked         = memoryCuratorEnabled,
-                onCheckedChange = { memoryCuratorEnabled = it; saved = false }
-            )
-        }
-
-        if (memoryCuratorEnabled) {
-
-            HorizontalDivider()
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Text(
-                text       = "مزوّد الوسيط:",
+                text       = "🧠 وسيط الذاكرة الذكي",
                 fontWeight = FontWeight.Bold,
-                style      = MaterialTheme.typography.bodySmall
+                style      = MaterialTheme.typography.titleSmall
             )
 
-            // ✨ Gemini
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { memoryCuratorProvider = "gemini"; saved = false },
-                verticalAlignment = Alignment.CenterVertically
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (memoryCuratorEnabled)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
+                ),
+                shape    = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                RadioButton(
-                    selected = memoryCuratorProvider == "gemini",
-                    onClick  = { memoryCuratorProvider = "gemini"; saved = false }
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("✨ Gemini (سحابي)")
-            }
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
 
-            // 🤖 Ollama (محلي)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { memoryCuratorProvider = "ollama"; saved = false },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RadioButton(
-                    selected = memoryCuratorProvider == "ollama",
-                    onClick  = { memoryCuratorProvider = "ollama"; saved = false }
-                )
-                Spacer(Modifier.width(4.dp))
-                Column {
-                    Text("🤖 Ollama (محلي - بدون إنترنت)")
-                    Text(
-                        text  = "يعمل على الهاتف عبر Termux",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // 🔧 Custom
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { memoryCuratorProvider = "custom"; saved = false },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RadioButton(
-                    selected = memoryCuratorProvider == "custom",
-                    onClick  = { memoryCuratorProvider = "custom"; saved = false }
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("🔧 خادم مخصص (Custom) — لتجاوز حدود الطلبات")
-            }
-
-            // عرض الحقول حسب الاختيار
-            when (memoryCuratorProvider) {
-
-                "gemini" -> {
-                    OutlinedTextField(
-                        value         = memoryCuratorModel,
-                        onValueChange = { memoryCuratorModel = it; saved = false },
-                        modifier      = Modifier.fillMaxWidth(),
-                        label         = { Text("موديل Gemini للوسيط") },
-                        placeholder   = { Text("gemini-2.0-flash-exp") },
-                        singleLine    = true,
-                        shape         = RoundedCornerShape(12.dp)
-                    )
-                    Text(
-                        text  = "يستخدم مفتاح Gemini API المُدخل في قسم Gemini أعلاه.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                "ollama" -> {
-                    OutlinedTextField(
-                        value         = memoryCuratorOllamaModel,
-                        onValueChange = { memoryCuratorOllamaModel = it; saved = false },
-                        modifier      = Modifier.fillMaxWidth(),
-                        label         = { Text("نموذج Ollama") },
-                        placeholder   = { Text("qwen2.5:1.5b") },
-                        singleLine    = true,
-                        shape         = RoundedCornerShape(12.dp),
-                        leadingIcon   = {
-                            Icon(
-                                imageVector = Icons.Default.Computer,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    )
-                    
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                        ),
-                        shape = RoundedCornerShape(8.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("تفعيل الوسيط الذكي", fontWeight = FontWeight.Bold)
                             Text(
-                                text  = "ℹ️ متطلبات التشغيل:",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                            Text(
-                                text  = "• المنفذ: 127.0.0.1:11434",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                            Text(
-                                text  = "• تأكد من تشغيل Ollama في Termux: ollama serve",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                            Text(
-                                text  = "• تحميل النموذج: ollama pull qwen2.5:1.5b",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                            Text(
-                                text  = "✅ لا يحتاج API key ولا اتصال إنترنت",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                text  = "يحلل الذاكرة قبل إرسالها للنموذج الرئيسي، ويستخلص السياق الأكثر صلة فقط. " +
+                                        "إن وُصفت هوية أدناه، يقترح أيضاً نقاط محتوى تخدمها.",
+                                style = MaterialTheme.typography.bodySmall
                             )
                         }
-                    }
-                    
-                    // نماذج موصى بها
-                    Text(
-                        text  = "📌 نماذج موصى بها:",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    Column(
-                        modifier = Modifier.padding(start = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(
-                            text  = "• qwen2.5:0.5b - أسرع (~300MB)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text  = "• qwen2.5:1.5b - متوازن (~900MB) ⭐",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text  = "• qwen2.5:3b - جودة عالية (~2GB)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text  = "• gemma2:2b - بديل من Google (~1.6GB)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Switch(
+                            checked         = memoryCuratorEnabled,
+                            onCheckedChange = { memoryCuratorEnabled = it; saved = false }
                         )
                     }
-                }
 
-                "custom" -> {
-                    Text(
-                        text  = "يُعاد استخدام إعدادات \"Custom\" (Server URL / API Key / النموذج) " +
-                                "المضبوطة أعلاه عند اختيار \"Custom\" كمزوّد محادثة — لا حاجة لإدخالها مرتين.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (memoryCuratorEnabled) {
 
-                    if (customUrl.isBlank() || customModel.isBlank()) {
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            ),
-                            shape = RoundedCornerShape(8.dp)
+                        HorizontalDivider()
+
+                        Text(
+                            text       = "مزوّد الوسيط:",
+                            fontWeight = FontWeight.Bold,
+                            style      = MaterialTheme.typography.bodySmall
+                        )
+
+                        // ✨ Gemini
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { memoryCuratorProvider = "gemini"; saved = false },
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text     = "⚠️ Server URL أو اسم النموذج فارغ حالياً — سيُستخدم " +
-                                           "المسار الاحتياطي (بلا وسيط ذكي) حتى يتم ضبطهما من قسم \"Custom\" أعلاه.",
-                                modifier = Modifier.padding(10.dp),
-                                style    = MaterialTheme.typography.bodySmall,
-                                color    = MaterialTheme.colorScheme.onErrorContainer
+                            RadioButton(
+                                selected = memoryCuratorProvider == "gemini",
+                                onClick  = { memoryCuratorProvider = "gemini"; saved = false }
                             )
+                            Spacer(Modifier.width(4.dp))
+                            Text("✨ Gemini (سحابي)")
                         }
+
+                        // 🤖 Ollama (محلي)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { memoryCuratorProvider = "ollama"; saved = false },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = memoryCuratorProvider == "ollama",
+                                onClick  = { memoryCuratorProvider = "ollama"; saved = false }
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Column {
+                                Text("🤖 Ollama (محلي - بدون إنترنت)")
+                                Text(
+                                    text  = "يعمل على الهاتف عبر Termux",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // 🔧 Custom
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { memoryCuratorProvider = "custom"; saved = false },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = memoryCuratorProvider == "custom",
+                                onClick  = { memoryCuratorProvider = "custom"; saved = false }
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("🔧 خادم مخصص (Custom) — لتجاوز حدود الطلبات")
+                        }
+
+                        // عرض الحقول حسب الاختيار
+                        when (memoryCuratorProvider) {
+
+                            "gemini" -> {
+                                OutlinedTextField(
+                                    value         = memoryCuratorModel,
+                                    onValueChange = { memoryCuratorModel = it; saved = false },
+                                    modifier      = Modifier.fillMaxWidth(),
+                                    label         = { Text("موديل Gemini للوسيط") },
+                                    placeholder   = { Text("gemini-2.0-flash-exp") },
+                                    singleLine    = true,
+                                    shape         = RoundedCornerShape(12.dp)
+                                )
+                                Text(
+                                    text  = "يستخدم مفتاح Gemini API المُدخل في قسم Gemini أعلاه.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            "ollama" -> {
+                                OutlinedTextField(
+                                    value         = memoryCuratorOllamaModel,
+                                    onValueChange = { memoryCuratorOllamaModel = it; saved = false },
+                                    modifier      = Modifier.fillMaxWidth(),
+                                    label         = { Text("نموذج Ollama") },
+                                    placeholder   = { Text("qwen2.5:1.5b") },
+                                    singleLine    = true,
+                                    shape         = RoundedCornerShape(12.dp),
+                                    leadingIcon   = {
+                                        Icon(
+                                            imageVector        = Icons.Default.Computer,
+                                            contentDescription = null,
+                                            tint               = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                )
+
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text       = "ℹ️ متطلبات التشغيل:",
+                                            style      = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color      = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                        Text(
+                                            text  = "• المنفذ: 127.0.0.1:11434",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                        Text(
+                                            text  = "• تأكد من تشغيل Ollama في Termux: ollama serve",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                        Text(
+                                            text  = "• تحميل النموذج: ollama pull qwen2.5:1.5b",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                        Text(
+                                            text       = "✅ لا يحتاج API key ولا اتصال إنترنت",
+                                            style      = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color      = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    text       = "📌 نماذج موصى بها:",
+                                    style      = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color      = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Column(
+                                    modifier = Modifier.padding(start = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text  = "• qwen2.5:0.5b - أسرع (~300MB)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text  = "• qwen2.5:1.5b - متوازن (~900MB) ⭐",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text  = "• qwen2.5:3b - جودة عالية (~2GB)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text  = "• gemma2:2b - بديل من Google (~1.6GB)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            "custom" -> {
+                                Text(
+                                    text  = "يُعاد استخدام إعدادات \"Custom\" (Server URL / API Key / النموذج) " +
+                                            "المضبوطة أعلاه عند اختيار \"Custom\" كمزوّد محادثة — لا حاجة لإدخالها مرتين.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                if (customUrl.isBlank() || customModel.isBlank()) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text     = "⚠️ Server URL أو اسم النموذج فارغ حالياً — سيُستخدم " +
+                                                       "المسار الاحتياطي (بلا وسيط ذكي) حتى يتم ضبطهما من قسم \"Custom\" أعلاه.",
+                                            modifier = Modifier.padding(10.dp),
+                                            style    = MaterialTheme.typography.bodySmall,
+                                            color    = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // هوية/أسلوب الوسيط
+                        HorizontalDivider()
+
+                        Text(
+                            text       = "هوية/أسلوب الوسيط (اختياري):",
+                            fontWeight = FontWeight.Bold,
+                            style      = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text  = "إن تُرك فارغاً: الوسيط يقتصر على تنقية سياق الذاكرة فقط. " +
+                                    "إن كُتب وصف هنا: يتحول الوسيط أيضاً لمحسّن يقترح نقاط محتوى ملموسة " +
+                                    "تخدم هذا الوصف، مع الحفاظ الكامل على سؤالك كما هو دون أي تغيير.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        OutlinedTextField(
+                            value         = mediatorIdentityText,
+                            onValueChange = { mediatorIdentityText = it; saved = false },
+                            modifier      = Modifier.fillMaxWidth(),
+                            label         = { Text("وصف الهوية (اختياري)") },
+                            placeholder   = { Text("مثال: مبرمج يفضل الأمثلة العملية والكود المباشر") },
+                            minLines      = 2,
+                            maxLines      = 4,
+                            shape         = RoundedCornerShape(12.dp)
+                        )
                     }
                 }
             }
 
-            // 🆕 القسم الجديد: هوية/أسلوب الوسيط — حقل نص حر
-            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
 
-            Text(
-                text       = "هوية/أسلوب الوسيط (اختياري):",
-                fontWeight = FontWeight.Bold,
-                style      = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                text  = "إن تُرك فارغاً: الوسيط يقتصر على تنقية سياق الذاكرة فقط. " +
-                        "إن كُتب وصف هنا: يتحول الوسيط أيضاً لمحسّن يقترح نقاط محتوى ملموسة " +
-                        "تخدم هذا الوصف، مع الحفاظ الكامل على سؤالك كما هو دون أي تغيير.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            OutlinedTextField(
-                value         = mediatorIdentityText,
-                onValueChange = { mediatorIdentityText = it; saved = false },
-                modifier      = Modifier.fillMaxWidth(),
-                label         = { Text("وصف الهوية (اختياري)") },
-                placeholder   = { Text("مثال: مبرمج يفضل الأمثلة العملية والكود المباشر") },
-                minLines      = 2,
-                maxLines      = 4,
-                shape         = RoundedCornerShape(12.dp)
-            )
-        }
-    }
-}
-
-Spacer(Modifier.height(8.dp))
-
-
-
-              
-                    
-
-                        
             // ====================================================
             // System Prompt Section
             // ====================================================
@@ -987,32 +980,32 @@ Spacer(Modifier.height(8.dp))
 
             Button(
                 onClick = {
-                    settings.provider                = provider
-                    settings.geminiKey               = geminiKey
-                    settings.geminiModel             = geminiModel
-                    settings.openrouterKey           = openrouterKey
-                    settings.openrouterModel         = openrouterModel
-                    settings.openaiKey               = openaiKey
-                    settings.openaiModel             = openaiModel
-                    settings.mistralKey              = mistralKey
-                    settings.mistralModel            = mistralModel
-                    settings.groqKey                 = groqKey
-                    settings.groqModel               = groqModel
-                    settings.nvidiaKey               = nvidiaKey
-                    settings.nvidiaModel             = nvidiaModel
-                    settings.huggingfaceKey          = huggingfaceKey
-                    settings.huggingfaceModel        = huggingfaceModel
-                    settings.ollamaModel             = ollamaModel
-                    settings.customUrl               = customUrl
-                    settings.customKey               = customKey
-                    settings.customModel             = customModel
-                    settings.accuracyPromptEnabled   = accuracyEnabled
-                    settings.customSystemInstruction = customInstruction
-                    settings.memoryCuratorEnabled    = memoryCuratorEnabled
-                    settings.memoryCuratorModel      = memoryCuratorModel
-                    settings.memoryCuratorProvider   = memoryCuratorProvider
-                    settings.mediatorIdentityText    = mediatorIdentityText  // 🆕 الحقل الجديد
-                    Settings.memoryCuratorOllamaModel = memoryCuratorOllamaModel
+                    settings.provider                  = provider
+                    settings.geminiKey                 = geminiKey
+                    settings.geminiModel               = geminiModel
+                    settings.openrouterKey             = openrouterKey
+                    settings.openrouterModel           = openrouterModel
+                    settings.openaiKey                 = openaiKey
+                    settings.openaiModel               = openaiModel
+                    settings.mistralKey                = mistralKey
+                    settings.mistralModel              = mistralModel
+                    settings.groqKey                   = groqKey
+                    settings.groqModel                 = groqModel
+                    settings.nvidiaKey                 = nvidiaKey
+                    settings.nvidiaModel               = nvidiaModel
+                    settings.huggingfaceKey            = huggingfaceKey
+                    settings.huggingfaceModel          = huggingfaceModel
+                    settings.ollamaModel               = ollamaModel
+                    settings.customUrl                 = customUrl
+                    settings.customKey                 = customKey
+                    settings.customModel               = customModel
+                    settings.accuracyPromptEnabled     = accuracyEnabled
+                    settings.customSystemInstruction   = customInstruction
+                    settings.memoryCuratorEnabled      = memoryCuratorEnabled
+                    settings.memoryCuratorModel        = memoryCuratorModel
+                    settings.memoryCuratorProvider     = memoryCuratorProvider
+                    settings.memoryCuratorOllamaModel  = memoryCuratorOllamaModel
+                    settings.mediatorIdentityText      = mediatorIdentityText
                     saved = true
                 },
                 modifier = Modifier
@@ -1156,7 +1149,7 @@ private fun DynamicModelSelector(
         }
 
         ExposedDropdownMenuBox(
-            expanded        = expanded,
+            expanded         = expanded,
             onExpandedChange = { expanded = !expanded }
         ) {
             OutlinedTextField(
@@ -1175,7 +1168,7 @@ private fun DynamicModelSelector(
             )
 
             ExposedDropdownMenu(
-                expanded        = expanded,
+                expanded         = expanded,
                 onDismissRequest = { expanded = false }
             ) {
                 if (models.isEmpty()) {
@@ -1230,7 +1223,7 @@ private fun modelLabel(model: ModelInfo): String = buildString {
         append(model.name)
         return@buildString
     }
-    if (model.isFree)     append("🟢 ")
+    if (model.isFree)      append("🟢 ")
     if (model.recommended) append("⭐ ")
     append(model.name)
     if (model.supportsVision) append(" 🖼️")
@@ -1271,12 +1264,12 @@ private fun KeyField(
     placeholder: String
 ) {
     OutlinedTextField(
-        value               = value,
-        onValueChange       = onValueChange,
-        modifier            = Modifier.fillMaxWidth(),
-        label               = { Text(label) },
-        placeholder         = { Text(placeholder) },
-        singleLine          = true,
+        value                = value,
+        onValueChange        = onValueChange,
+        modifier             = Modifier.fillMaxWidth(),
+        label                = { Text(label) },
+        placeholder          = { Text(placeholder) },
+        singleLine           = true,
         visualTransformation = if (showKey)
             VisualTransformation.None
         else
