@@ -38,7 +38,7 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         return;
     }
 
-    // ── جديد: GET_CONTEXT ─────────────────────────────────────────────
+    // ── GET_CONTEXT ──────────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
         return browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "GET_CONTEXT",
@@ -50,7 +50,7 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         });
     }
 
-    // ── جديد: CONTEXT_WRITTEN ─────────────────────────────────────────
+    // ── CONTEXT_WRITTEN ──────────────────────────────────────────────
     if (type === "CONTEXT_WRITTEN") {
         browser.runtime.sendNativeMessage(NATIVE_APP, {
             type:   "CONTEXT_WRITTEN",
@@ -60,4 +60,24 @@ browser.runtime.onMessage.addListener(function (message, sender) {
         });
         return;
     }
+
+    // ── DEBUG_INFO ───────────────────────────────────────────────────
+    // 🆕 هذا الفرع كان مفقوداً بالكامل — سبب اختفاء كل رسائل التشخيص
+    // القادمة من content.js (DEBUG_INFO) بصمت دون وصولها إلى Kotlin.
+    if (type === "DEBUG_INFO") {
+        browser.runtime.sendNativeMessage(NATIVE_APP, {
+            type: "DEBUG_INFO",
+            info: message.info || ""
+        }).catch(function () {});
+        return;
+    }
+
+    // ── Fallback: أي نوع غير معروف ───────────────────────────────────
+    // 🆕 لمنع إسقاط أي رسالة مستقبلية بصمت دون أي أثر أو استجابة،
+    // نمرّرها كما هي إلى الجهة الأصلية (Kotlin) لأغراض التشخيص.
+    browser.runtime.sendNativeMessage(NATIVE_APP, {
+        type:    "UNKNOWN_TYPE",
+        original: type,
+        payload: JSON.stringify(message)
+    }).catch(function () {});
 });
