@@ -321,6 +321,38 @@ fun GeckoTestScreen(
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
+                    // في TopAppBar actions، أضف زر تشخيص
+IconButton(
+    onClick = {
+        scope.launch {
+            val result = try {
+                // إرسال رسالة test مباشرة
+                val testMsg = JSONObject().apply {
+                    put("type", "DEBUG_INFO")
+                    put("info", "Test from Kotlin at ${System.currentTimeMillis()}")
+                }
+                
+                app.aiChatExtension?.let { ext ->
+                    // محاولة إرسال
+                    Toast.makeText(
+                        context,
+                        "Extension: ${ext.id} - trying to send test...",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                
+            } catch (e: Exception) {
+                Toast.makeText(
+                    context,
+                    "Error: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+) {
+    Text("🔍", style = MaterialTheme.typography.titleMedium)
+}
 
                     // زر تفعيل/تعطيل الوثيقة
                     IconButton(
