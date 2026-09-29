@@ -1,6 +1,8 @@
 package com.example.aichat.ui.screens
 
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -12,6 +14,8 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
@@ -41,9 +46,6 @@ import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.ui.viewmodel.ChatViewModel
-import androidx.compose.runtime.rememberCoroutineScope
-import org.json.JSONObject
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.*
 
@@ -61,9 +63,8 @@ fun GeckoTestScreen(
     val app            = context.applicationContext as AichatApp
     val mainHandler    = remember { Handler(Looper.getMainLooper()) }
     val runtime        = remember { app.getOrCreateGeckoRuntime() }
-    val scope          = rememberCoroutineScope()  // 🆕 أضف هذا السطر
+    val scope          = rememberCoroutineScope()
 
-    
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
@@ -87,6 +88,7 @@ fun GeckoTestScreen(
     var timeoutRunnable       by remember { mutableStateOf<Runnable?>(null) }
     var isSystemPromptEnabled by remember { mutableStateOf(true) }
     var showSendDialog        by remember { mutableStateOf(false) }
+    var showDebugLog          by remember { mutableStateOf(false) }   // 🆕 سجل التشخيص
 
     // ── Session ──────────────────────────────────────────────────────
     val session = remember { GeckoSession() }
@@ -243,12 +245,15 @@ fun GeckoTestScreen(
             onSend        = { finalText ->
                 app.setContextPending(finalText)
                 showSendDialog = false
-                Toast.makeText(
-                    context,
-                    "📤 جاهز للإرسال (${finalText.length} حرف)",
-                    Toast.LENGTH_SHORT
-                ).show()
             }
+        )
+    }
+
+    // ── 🆕 نافذة سجل التشخيص ─────────────────────────────────────────
+    if (showDebugLog) {
+        DebugLogDialog(
+            app        = app,
+            onDismiss  = { showDebugLog = false }
         )
     }
 
@@ -326,38 +331,11 @@ fun GeckoTestScreen(
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
-                    // في TopAppBar actions، أضف زر تشخيص
-IconButton(
-    onClick = {
-        scope.launch {
-            val result = try {
-                // إرسال رسالة test مباشرة
-                val testMsg = JSONObject().apply {
-                    put("type", "DEBUG_INFO")
-                    put("info", "Test from Kotlin at ${System.currentTimeMillis()}")
-                }
-                
-                app.aiChatExtension?.let { ext ->
-                    // محاولة إرسال
-                    Toast.makeText(
-                        context,
-                        "Extension: ${ext.id} - trying to send test...",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                
-            } catch (e: Exception) {
-                Toast.makeText(
-                    context,
-                    "Error: ${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-    }
-) {
-    Text("🔍", style = MaterialTheme.typography.titleMedium)
-}
+
+                    // 🆕 زر سجل التشخيص (يستبدل زر 🔍 التشخيصي القديم غير الفعّال)
+                    IconButton(onClick = { showDebugLog = true }) {
+                        Text("📋", style = MaterialTheme.typography.titleMedium)
+                    }
 
                     // زر تفعيل/تعطيل الوثيقة
                     IconButton(
@@ -434,6 +412,62 @@ IconButton(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// 🆕 Dialog سجل التشخيص — بديل دائم لـ Logcat (غير متاح في بيئة GitHub Actions)
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun DebugLogDialog(
+    app:       AichatApp,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val logs    = app.debugLog   // SnapshotStateList<String> - يُحدَّث تلقائياً
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("📋 سجل التشخيص (${logs.size})")
+        },
+        text = {
+            if (logs.isEmpty()) {
+                Text(
+                    "لا توجد رسائل تشخيص بعد.\nجرّب زر 🧠 أو 📤 ثم افتح هذا السجل.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(420.dp)
+                ) {
+                    items(logs) { line ->
+                        Text(
+                            text     = line,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                        HorizontalDivider()
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("debug_log", logs.joinToString("\n")))
+                    Toast.makeText(context, "✅ تم النسخ", Toast.LENGTH_SHORT).show()
+                }) { Text("نسخ الكل") }
+
+                TextButton(onClick = { app.clearDebugLog() }) { Text("مسح") }
+
+                TextButton(onClick = onDismiss) { Text("إغلاق") }
+            }
+        }
+    )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // Dialog شامل: سؤال + تحسين + صياغة + سياق
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -451,10 +485,10 @@ private fun SendToWebDialog(
     var searchResults  by remember { mutableStateOf(emptyList<MemoryItem>()) }
     var selectedIds    by remember { mutableStateOf(setOf<Long>()) }
 
-    val scope               = rememberCoroutineScope()
-    val context             = LocalContext.current
-    val aiSettings          = remember { AiSettings(context) }
-    val memoryCuratorService = remember {
+    val scope                = rememberCoroutineScope()
+    val context               = LocalContext.current
+    val aiSettings            = remember { AiSettings(context) }
+    val memoryCuratorService  = remember {
         MemoryCuratorService(
             settings        = aiSettings,
             fallbackBuilder = MemoryContextBuilder()
@@ -529,7 +563,7 @@ private fun SendToWebDialog(
                 // أزرار التحسين
                 // ═══════════════════════════════════════
                 Row(
-                    modifier            = Modifier.fillMaxWidth(),
+                    modifier              = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // ⚡ توسيع الطلب
