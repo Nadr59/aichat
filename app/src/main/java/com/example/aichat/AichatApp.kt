@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.MemoryItem
@@ -15,6 +17,9 @@ import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.WebExtension
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class AichatApp : Application() {
 
@@ -35,7 +40,27 @@ class AichatApp : Application() {
         private set
 
     // ══════════════════════════════════════════════════════════════════
-    // Toast Helper
+    // 🆕 سجل تشخيص دائم داخل التطبيق (بديل لـ Logcat غير المتاح في CI)
+    // ══════════════════════════════════════════════════════════════════
+
+    val debugLog: SnapshotStateList<String> = mutableStateListOf()
+
+    fun logDebug(msg: String) {
+        Log.d("AichatApp", msg)
+        Handler(Looper.getMainLooper()).post {
+            val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+            debugLog.add(0, "$time  $msg")
+            if (debugLog.size > 150) debugLog.removeAt(debugLog.lastIndex)
+            Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun clearDebugLog() {
+        debugLog.clear()
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Toast Helper (بدون تسجيل - للرسائل العادية غير التشخيصية)
     // ══════════════════════════════════════════════════════════════════
 
     fun showToast(msg: String) {
@@ -50,8 +75,7 @@ class AichatApp : Application() {
 
     fun triggerCapture() {
         captureFlag = true
-        Log.d("AichatApp", "📌 captureFlag = true")
-        showToast("🔍 جاري البحث في الصفحة...")
+        logDebug("📌 captureFlag = true")
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -61,19 +85,17 @@ class AichatApp : Application() {
     /**
      * تعيين نص مباشرة للإرسال إلى المنصة
      * (يُستخدم من Dialog الجديد)
-     * 
+     *
      * ملاحظة: content.js سيلتقطه عبر GET_CONTEXT polling (كل ثانية)
      */
     fun setContextPending(text: String) {
         if (text.isBlank()) {
-            Log.w("AichatApp", "⚠️ Empty text, ignoring")
-            showToast("⚠️ النص فارغ")
+            logDebug("⚠️ Empty text, ignoring")
             return
         }
-        
+
         contextPending = text
-        Log.d("AichatApp", "📤 Context pending set: ${text.length} chars")
-        showToast("📤 جاهز للإرسال (سيُرسل خلال ثانية)")
+        logDebug("📤 Context pending set: ${text.length} chars")
     }
 
     /**
@@ -87,8 +109,7 @@ class AichatApp : Application() {
         val memoryContext = MemoryContextBuilder().build(memories)
 
         if (memoryContext.isBlank()) {
-            showToast("⚠️ لا توجد ذكريات لإرسالها")
-            Log.w("AichatApp", "⚠️ Empty memory context")
+            logDebug("⚠️ لا توجد ذكريات لإرسالها")
             return
         }
 
@@ -104,8 +125,7 @@ class AichatApp : Application() {
         }
 
         contextPending = contextText
-        Log.d("AichatApp", "📤 contextPending set: ${contextText.length} chars")
-        showToast("📤 السياق جاهز (سيُرسل خلال ثانية)")
+        logDebug("📤 contextPending set: ${contextText.length} chars")
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -120,9 +140,14 @@ class AichatApp : Application() {
             sender:    WebExtension.MessageSender
         ): GeckoResult<Any>? {
 
-            val json = parseMessage(message) ?: return null
+            val json = parseMessage(message)
+            if (json == null) {
+                logDebug("❌ parseMessage=null raw=$message")
+                return GeckoResult.fromValue(null)
+            }
+
             val type = json.optString("type")
-            Log.d("AichatApp", "📩 [aicapture] $type")
+            logDebug("📩 [aicapture] $type")
 
             return when (type) {
 
@@ -133,8 +158,7 @@ class AichatApp : Application() {
                 "CHECK_CAPTURE" -> {
                     val flag    = captureFlag
                     captureFlag = false
-                    if (flag) showToast("📡 جاري الاستخراج...")
-                    Log.d("AichatApp", "✅ CHECK_CAPTURE flag=$flag")
+                    if (flag) logDebug("📡 جاري الاستخراج...")
                     GeckoResult.fromValue(
                         JSONObject().put("capture", flag)
                     )
@@ -142,12 +166,12 @@ class AichatApp : Application() {
 
                 "AI_RESPONSE" -> {
                     handleAutoResponse(json)
-                    null
+                    GeckoResult.fromValue(null)
                 }
 
                 "CAPTURE_RESULT" -> {
                     handleCaptureResult(json)
-                    null
+                    GeckoResult.fromValue(null)
                 }
 
                 // ══════════════════════════════════════════════════════
@@ -158,7 +182,7 @@ class AichatApp : Application() {
                     val pending    = contextPending
                     contextPending = ""
                     val has        = pending.isNotBlank()
-                    Log.d("AichatApp", "📤 GET_CONTEXT has=$has len=${pending.length}")
+                    logDebug("📤 GET_CONTEXT has=$has len=${pending.length}")
                     GeckoResult.fromValue(
                         JSONObject()
                             .put("hasContext", has)
@@ -170,18 +194,17 @@ class AichatApp : Application() {
                     val stage  = json.optString("stage")
                     val detail = json.optString("detail")
                     val domain = json.optString("domain")
-                    Log.d("AichatApp", "✅ CONTEXT_WRITTEN stage=$stage domain=$domain")
                     val msg = when (stage) {
                         "clicked"       -> "✅ تم الإرسال للمنصة"
                         "enter_pressed" -> "✅ تم الضغط Enter"
                         "write_failed"  -> "❌ فشل الكتابة: $detail"
                         else            -> "⚠️ $stage: $detail"
                     }
-                    showToast(msg)
+                    logDebug("$msg (domain=$domain)")
                     Handler(Looper.getMainLooper()).post {
                         onContextWritten?.invoke(stage, detail)
                     }
-                    null
+                    GeckoResult.fromValue(null)
                 }
 
                 // ══════════════════════════════════════════════════════
@@ -190,14 +213,24 @@ class AichatApp : Application() {
 
                 "DEBUG_INFO" -> {
                     val info = json.optString("info")
-                    Log.d("AichatApp", "🔍 $info")
-                    showToast("🔍 $info")
-                    null
+                    logDebug("🔍 JS: $info")
+                    GeckoResult.fromValue(null)
+                }
+
+                // ══════════════════════════════════════════════════════
+                // 🆕 أي نوع غير معروف/غير متوقع - لا يُسقط بصمت أبداً
+                // ══════════════════════════════════════════════════════
+
+                "UNKNOWN_TYPE" -> {
+                    val original = json.optString("original")
+                    val payload  = json.optString("payload")
+                    logDebug("⚠️ UNKNOWN_TYPE from background.js: $original | $payload")
+                    GeckoResult.fromValue(null)
                 }
 
                 else -> {
-                    Log.w("AichatApp", "⚠️ unknown type: $type")
-                    null
+                    logDebug("⚠️ unknown type: $type")
+                    GeckoResult.fromValue(null)
                 }
             }
         }
@@ -275,7 +308,7 @@ class AichatApp : Application() {
         val text   = json.optString("text")
         val domain = json.optString("domain", "unknown")
         if (text.length < 80) return
-        Log.d("AichatApp", "📨 Auto: ${text.take(60)}…")
+        logDebug("📨 Auto captured: ${text.take(60)}…")
         onAiResponseCaptured?.invoke(domain, text)
     }
 
@@ -283,7 +316,7 @@ class AichatApp : Application() {
         val success = json.optBoolean("success", false)
         val text    = json.optString("text")
         val debug   = json.optJSONObject("debug")
-        Log.d("AichatApp",
+        logDebug(
             if (success) "🧠 OK: ${text.take(60)}…"
             else         "⚠️ Failed: $debug"
         )
