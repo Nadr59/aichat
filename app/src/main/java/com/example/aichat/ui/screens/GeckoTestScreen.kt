@@ -41,6 +41,9 @@ import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import androidx.compose.runtime.rememberCoroutineScope
+import org.json.JSONObject
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.*
 
@@ -58,7 +61,9 @@ fun GeckoTestScreen(
     val app            = context.applicationContext as AichatApp
     val mainHandler    = remember { Handler(Looper.getMainLooper()) }
     val runtime        = remember { app.getOrCreateGeckoRuntime() }
+    val scope          = rememberCoroutineScope()  // 🆕 أضف هذا السطر
 
+    
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
