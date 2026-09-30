@@ -79,12 +79,6 @@ class AichatApp : Application() {
         contextPending = text
         lastContextId = System.currentTimeMillis()
         logDebug("📤 Context pending set: ${text.length} chars, id=$lastContextId")
-        
-        // 🆕 أرسل رسالة إلى JavaScript فوراً
-        sendToContent("CONTEXT_UPDATED", JSONObject().apply {
-            put("hasContext", true)
-            put("id", lastContextId)
-        })
     }
 
     fun sendContextToPage(
@@ -115,41 +109,6 @@ class AichatApp : Application() {
         }
 
         setContextPending(contextText)
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    // Send to Content Script (NEW - CRITICAL)
-    // ══════════════════════════════════════════════════════════════════
-
-    private fun sendToContent(type: String, data: JSONObject) {
-        logDebug("📤 sendToContent: type=$type")
-        
-        try {
-            aiChatExtension?.setMessageDelegate(
-                object : WebExtension.MessageDelegate {
-                    override fun onMessage(
-                        nativeApp: String,
-                        message: Any,
-                        sender: WebExtension.MessageSender
-                    ): GeckoResult<Any>? {
-                        // لا نفعل شيء هنا — فقط للاستقبال
-                        return null
-                    }
-                },
-                "content"
-            )
-            
-            // أرسل الرسالة
-            val payload = JSONObject().apply {
-                put("type", type)
-                putOpt("data", data)
-            }
-            
-            aiChatExtension?.broadcastMessage("browser", payload, null)
-            logDebug("✅ sendToContent: message sent")
-        } catch (e: Exception) {
-            logDebug("❌ sendToContent error: ${e.message}")
-        }
     }
 
     // ══════════════════════════════════════════════════════════════════
