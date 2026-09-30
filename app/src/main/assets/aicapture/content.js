@@ -12,12 +12,38 @@
     // المتغيرات العامة
     // ══════════════════════════════════════════════════════════════════
 
-    var lastSentText  = '';
-    var debounceTimer = null;
-    var DEBOUNCE_MS   = 1800;
-    var MIN_LEN       = 30;
-    var MAX_LEN       = 3000;
-    var contextBusy   = false;  // منع تكرار writeAndSend
+    var lastSentText      = '';
+    var debounceTimer     = null;
+    var DEBOUNCE_MS       = 1800;
+    var MIN_LEN           = 30;
+    var MAX_LEN           = 3000;
+    var contextBusy       = false;           // منع تكرار writeAndSend
+    var pendingContextId  = null;            // تتبع معرف الـ context الحالي
+    var contextWriteTimer = null;            // timeout لتأكيد الكتابة
+
+    // ══════════════════════════════════════════════════════════════════
+    // Debug Helper — تسجيل شامل
+    // ══════════════════════════════════════════════════════════════════
+
+    function logDebug(message) {
+        var timestamp = new Date().toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
+        var fullMsg = timestamp + '  ' + message;
+        console.log('[AiCapture] ' + fullMsg);
+        
+        // أرسل لـ Kotlin للتسجيل المركزي
+        browser.runtime.sendMessage({
+            type: 'DEBUG_INFO',
+            info: fullMsg
+        }).catch(function () {
+            // خطأ في الإرسال — لا نفعل شيء
+        });
+    }
 
     // ══════════════════════════════════════════════════════════════════
     // Helpers
@@ -136,7 +162,6 @@
         var host = location.hostname;
 
         if (/chatgpt\.com|openai\.com/.test(host)) {
-            // ChatGPT 2024 - محدث
             var selectors = [
                 '#prompt-textarea',
                 'textarea[placeholder*="Message"]',
@@ -148,12 +173,9 @@
             for (var i = 0; i < selectors.length; i++) {
                 var el = document.querySelector(selectors[i]);
                 if (el) {
-                    console.log('[AiCapture] ✅ Found input:', selectors[i]);
                     return el;
                 }
             }
-            
-            console.error('[AiCapture] ❌ No input found!');
             return null;
         }
         
@@ -176,17 +198,17 @@
     // ══════════════════════════════════════════════════════════════════
 
     function writeToInputBox(text) {
-        console.log('[AiCapture] 📝 writeToInputBox called, text length:', text.length);
+        logDebug('📝 writeToInputBox called, text length: ' + text.length);
         
         var input = findInputBox();
         if (!input) {
-            console.error('[AiCapture] ❌ No input box found');
+            logDebug('❌ writeToInputBox: No input box found');
             return { ok: false, stage: 'find=NULL' };
         }
 
-        console.log('[AiCapture] ✅ Input found:', input.tagName, input.id || input.className);
+        logDebug('✅ writeToInputBox: Input found (' + input.tagName + ')');
 
-        // TEXTAREA
+        // TEXTAREA أو INPUT
         if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
             try {
                 input.focus();
@@ -196,22 +218,22 @@
                 setter.call(input, text);
                 input.dispatchEvent(new Event('input',  { bubbles: true }));
                 input.dispatchEvent(new Event('change', { bubbles: true }));
-                console.log('[AiCapture] ✅ Written to textarea');
+                logDebug('✅ writeToInputBox: Text written to textarea');
                 return { ok: true, stage: 'textarea' };
             } catch (e) {
-                console.error('[AiCapture] ❌ Textarea error:', e);
+                logDebug('❌ writeToInputBox: Textarea error: ' + e.message);
                 return { ok: false, stage: 'textarea-err=' + e.message };
             }
         }
 
         // contenteditable
-        console.log('[AiCapture] Trying contenteditable...');
+        logDebug('📝 writeToInputBox: Trying contenteditable...');
         input.focus();
         
         var activeOk = document.activeElement === input
                     || input.contains(document.activeElement);
         if (!activeOk) {
-            console.error('[AiCapture] ❌ Focus failed');
+            logDebug('❌ writeToInputBox: Focus failed');
             return { ok: false, stage: 'focus-failed' };
         }
 
@@ -223,24 +245,24 @@
             range.collapse(false);
             sel.addRange(range);
         } catch (e) {
-            console.error('[AiCapture] ❌ Caret error:', e);
+            logDebug('❌ writeToInputBox: Caret error: ' + e.message);
             return { ok: false, stage: 'caret-err=' + e.message };
         }
 
         var done = document.execCommand('insertText', false, text);
         if (!done) {
-            console.error('[AiCapture] ❌ execCommand failed');
+            logDebug('❌ writeToInputBox: execCommand failed');
             return { ok: false, stage: 'execCommand=false' };
         }
 
         var preview = text.slice(0, 20);
         var content = input.textContent || input.innerText || '';
         if (!content.includes(preview)) {
-            console.error('[AiCapture] ❌ Text verification failed');
+            logDebug('❌ writeToInputBox: Text verification failed');
             return { ok: false, stage: 'reverted' };
         }
 
-        console.log('[AiCapture] ✅ Written to contenteditable');
+        logDebug('✅ writeToInputBox: Text written to contenteditable');
         return { ok: true, stage: 'contenteditable' };
     }
 
@@ -272,82 +294,126 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // ضغط زر الإرسال
+    // ضغط زر الإرسال (async)
     // ══════════════════════════════════════════════════════════════════
 
     function clickSendButton() {
-        console.log('[AiCapture] 🔘 Trying to click send button...');
-        var attempts = 0;
-        var interval = setInterval(function () {
-            attempts++;
-            var btn = findSendButton();
-            
-            if (btn && !btn.disabled) {
-                clearInterval(interval);
-                console.log('[AiCapture] ✅ Button found and clicked');
-                btn.click();
-                browser.runtime.sendMessage({
-                    type:   'CONTEXT_WRITTEN',
-                    stage:  'clicked',
-                    detail: '',
-                    domain: location.hostname
-                }).catch(function () {});
-                contextBusy = false;
-            } else if (attempts >= 15) {
-                clearInterval(interval);
-                console.warn('[AiCapture] ⚠️ Button not found, trying Enter');
-                // محاولة Enter
-                var input = findInputBox();
-                if (input) {
-                    input.dispatchEvent(new KeyboardEvent('keydown', {
-                        key: 'Enter', keyCode: 13,
-                        bubbles: true, composed: true
-                    }));
+        logDebug('🔘 Trying to click send button...');
+        
+        return new Promise(function (resolve) {
+            var attempts = 0;
+            var maxAttempts = 15;
+            var interval = setInterval(function () {
+                attempts++;
+                var btn = findSendButton();
+                
+                if (btn && !btn.disabled) {
+                    clearInterval(interval);
+                    logDebug('✅ Button found and clicked');
+                    btn.click();
+                    resolve(true);
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(interval);
+                    logDebug('⚠️ Button not found after ' + maxAttempts + ' attempts, trying Enter');
+                    
+                    var input = findInputBox();
+                    if (input) {
+                        input.dispatchEvent(new KeyboardEvent('keydown', {
+                            key: 'Enter',
+                            keyCode: 13,
+                            bubbles: true,
+                            composed: true
+                        }));
+                    }
+                    resolve(true);
                 }
-                browser.runtime.sendMessage({
-                    type:   'CONTEXT_WRITTEN',
-                    stage:  'enter_pressed',
-                    detail: '',
-                    domain: location.hostname
-                }).catch(function () {});
-                contextBusy = false;
-            }
-        }, 200);
+            }, 200);
+
+            // timeout جمالي بعد 5 ثواني
+            setTimeout(function () {
+                if (interval) {
+                    clearInterval(interval);
+                    logDebug('⏱️ clickSendButton timeout');
+                    resolve(false);
+                }
+            }, 5000);
+        });
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // تنفيذ الكتابة والإرسال
+    // تنفيذ الكتابة والإرسال (async)
     // ══════════════════════════════════════════════════════════════════
 
-    function writeAndSend(context) {
-        console.log('[AiCapture] 🚀 writeAndSend called, length:', context.length);
-        console.log('[AiCapture] First 100 chars:', context.substring(0, 100));
+    function writeAndSend(context, contextId) {
+        logDebug('🚀 writeAndSend START: length=' + context.length + ', id=' + contextId);
+        logDebug('🚀 First 100 chars: ' + context.substring(0, 100));
         
+        // ألغِ أي timeout سابق
+        if (contextWriteTimer) {
+            clearTimeout(contextWriteTimer);
+            contextWriteTimer = null;
+        }
+
         var result = writeToInputBox(context);
         
-        console.log('[AiCapture] Write result:', result);
-
-        browser.runtime.sendMessage({
-            type: 'DEBUG_INFO',
-            info: 'write: ok=' + result.ok + ' stage=' + result.stage + ' len=' + context.length
-        }).catch(function () {});
+        logDebug('🚀 writeToInputBox result: ok=' + result.ok + ', stage=' + result.stage);
 
         if (!result.ok) {
+            logDebug('❌ writeAndSend: Write failed, sending CONTEXT_WRITTEN');
             browser.runtime.sendMessage({
-                type:   'CONTEXT_WRITTEN',
-                stage:  'write_failed',
-                detail: result.stage,
-                domain: location.hostname
-            }).catch(function () {});
+                type:      'CONTEXT_WRITTEN',
+                success:   false,
+                contextId: contextId,
+                stage:     'write_failed',
+                detail:    result.stage,
+                domain:    location.hostname
+            }).catch(function (e) {
+                logDebug('❌ Failed to send CONTEXT_WRITTEN: ' + e.message);
+            });
             contextBusy = false;
             return;
         }
 
-        setTimeout(clickSendButton, 600);
+        logDebug('✅ writeAndSend: Text written, waiting before click (600ms)');
+
+        // انتظر قليلاً قبل الضغط على الزر
+        setTimeout(function () {
+            logDebug('⏳ writeAndSend: Starting clickSendButton...');
+            clickSendButton().then(function (clicked) {
+                logDebug('✅ writeAndSend: Button handling finished, clicked=' + clicked);
+                
+                // انتظر قليلاً لتأكيد أن الرسالة ذهبت
+                contextWriteTimer = setTimeout(function () {
+                    logDebug('✅ writeAndSend: Confirming success after 1s delay');
+                    browser.runtime.sendMessage({
+                        type:      'CONTEXT_WRITTEN',
+                        success:   true,
+                        contextId: contextId,
+                        stage:     'button_clicked',
+                        domain:    location.hostname
+                    }).catch(function (e) {
+                        logDebug('❌ Failed to send CONTEXT_WRITTEN: ' + e.message);
+                    });
+                    contextBusy = false;
+                    pendingContextId = null;
+                }, 1000);
+            }).catch(function (e) {
+                logDebug('❌ writeAndSend: clickSendButton error: ' + e.message);
+                browser.runtime.sendMessage({
+                    type:      'CONTEXT_WRITTEN',
+                    success:   false,
+                    contextId: contextId,
+                    stage:     'click_error',
+                    detail:    e.message,
+                    domain:    location.hostname
+                }).catch(function () {});
+                contextBusy = false;
+            });
+        }, 600);
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // إرسال تلقائي
+    // إرسال تلقائي (استجابة سيارة)
     // ══════════════════════════════════════════════════════════════════
 
     function sendAutoToKotlin(text) {
@@ -359,19 +425,22 @@
             var recheck = extractLatestResponse();
             if (recheck === textSnapshot && textSnapshot !== lastSentText) {
                 lastSentText = textSnapshot;
+                logDebug('📤 Auto-sending response: ' + textSnapshot.length + ' chars');
                 try {
                     browser.runtime.sendMessage({
                         type:   'AI_RESPONSE',
                         text:   textSnapshot,
                         domain: location.hostname
                     });
-                } catch (e) {}
+                } catch (e) {
+                    logDebug('❌ Error sending AI_RESPONSE: ' + e.message);
+                }
             }
         }, 1000);
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // مراقبة تلقائية
+    // مراقبة تلقائية (DOM mutations)
     // ══════════════════════════════════════════════════════════════════
 
     var observer = new MutationObserver(function () {
@@ -387,6 +456,7 @@
                 childList: true,
                 subtree:   true
             });
+            logDebug('✅ MutationObserver started');
         } else {
             setTimeout(startObserver, 500);
         }
@@ -394,7 +464,7 @@
     startObserver();
 
     // ══════════════════════════════════════════════════════════════════
-    // Polling — CHECK_CAPTURE
+    // Polling — CHECK_CAPTURE (زر 🧠 في Kotlin)
     // ══════════════════════════════════════════════════════════════════
 
     setInterval(function () {
@@ -406,6 +476,8 @@
         }).then(function (response) {
             if (!response || !response.capture) return;
 
+            logDebug('📩 [aicapture] CHECK_CAPTURE received');
+            
             var text = extractLatestResponse();
             var ok   = !!(text && text.length >= MIN_LEN);
 
@@ -423,60 +495,75 @@
                               ? document.body.innerText.length : 0
                 }
             });
-        }).catch(function () {});
+        }).catch(function (e) {
+            logDebug('❌ CHECK_CAPTURE error: ' + e.message);
+        });
     }, 1000);
 
     // ══════════════════════════════════════════════════════════════════
-    // Polling — GET_CONTEXT
+    // Polling — GET_CONTEXT (الحلقة الرئيسية)
     // ══════════════════════════════════════════════════════════════════
 
     setInterval(function () {
         if (document.visibilityState !== 'visible') return;
-        if (contextBusy) return;
-
-        console.log('[AiCapture] 📡 Polling GET_CONTEXT...');
+        if (contextBusy) {
+            // logDebug('⏭️ GET_CONTEXT skipped: contextBusy=true');
+            return;
+        }
 
         browser.runtime.sendMessage({
             type:   'GET_CONTEXT',
             domain: location.hostname
         }).then(function (response) {
-            console.log('[AiCapture] 📩 Response:', response);
+            if (!response) {
+                logDebug('⚠️ GET_CONTEXT: empty response');
+                return;
+            }
 
-            if (!response || !response.hasContext) {
-                // console.log('[AiCapture] ⚪ No context');
+            logDebug('📩 [aicapture] GET_CONTEXT response: hasContext=' + response.hasContext);
+
+            if (!response.hasContext) {
                 return;
             }
             
             var context = response.context || '';
-            if (!context) {
-                console.log('[AiCapture] ⚠️ Empty context');
+            var contextId = response.id || 0;
+
+            if (!context || context.length === 0) {
+                logDebug('⚠️ GET_CONTEXT: context is empty');
                 return;
             }
 
-            console.log('[AiCapture] ✅ Got context:', context.length, 'chars');
+            logDebug('✅ GET_CONTEXT: Got context, length=' + context.length + ', id=' + contextId);
+            
+            // set busy flag قبل البدء
             contextBusy = true;
-            writeAndSend(context);
+            pendingContextId = contextId;
+            
+            // ابدأ الكتابة والإرسال
+            writeAndSend(context, contextId);
 
         }).catch(function (e) {
-            console.error('[AiCapture] ❌ GET_CONTEXT error:', e);
+            logDebug('❌ GET_CONTEXT error: ' + e.message);
         });
     }, 1000);
 
     // ══════════════════════════════════════════════════════════════════
-    // تنظيف
+    // تنظيف عند مغادرة الصفحة
     // ══════════════════════════════════════════════════════════════════
 
     window.addEventListener('pagehide', function () {
+        logDebug('👋 Page is hiding, disconnecting observer');
         observer.disconnect();
+        if (contextWriteTimer) {
+            clearTimeout(contextWriteTimer);
+        }
     });
 
     // ══════════════════════════════════════════════════════════════════
-    // Port (اختياري - في النهاية بعد تعريف كل شيء)
+    // رسالة البداية
     // ══════════════════════════════════════════════════════════════════
 
-    // ملاحظة: Port messaging معطّل حالياً لأن AichatApp لا يدعم setPortDelegate
-    // نعتمد على polling GET_CONTEXT كل ثانية
-
-    console.log('[AiCapture] ✅ Extension loaded successfully');
+    logDebug('✅ Extension loaded successfully');
 
 })();
