@@ -50,7 +50,11 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     var type = message.type;
-    logLocal('📨 Received: ' + type + ' from ' + (sender.url || 'unknown'));
+    
+    // تجاهل تسجيل GET_CONTEXT — كثير جداً
+    if (type !== "GET_CONTEXT") {
+        logLocal('📨 Received: ' + type + ' from ' + (sender.url || 'unknown'));
+    }
 
     // ────────────────────────────────────────────────────────────────
     // AI_RESPONSE — استجابة الـ AI التلقائية
@@ -91,11 +95,11 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CAPTURE_RESULT — نتيجة التقاط
+    // CAPTURE_RESULT — نتيجة التقاط يدوي
     // ────────────────────────────────────────────────────────────────
     if (type === "CAPTURE_RESULT") {
-        logLocal('📸 CAPTURE_RESULT: success=' + message.success + ' text=' + 
-            (message.text ? message.text.substring(0, 50) + '...' : 'empty'));
+        logLocal('📸 CAPTURE_RESULT: success=' + message.success + 
+            ', text=' + (message.text ? message.text.substring(0, 50) + '...' : 'empty'));
         
         sendToNative({
             type:    "CAPTURE_RESULT",
@@ -113,23 +117,44 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
     // ────────────────────────────────────────────────────────────────
     // GET_CONTEXT — طلب السياق (polling من content.js)
+    // 
+    // 🆕 تحسينات:
+    // - نعيد requestId مع الرد لتجنب ردود قديمة (deduplication)
+    // - لا نسجل — كثير جداً (كل ثانية)
     // ────────────────────────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
-        // logLocal('🔄 GET_CONTEXT polled'); // كثير جداً - نتجاهل السجل
+        var requestId = message.requestId || 0;  // 🆕 استخرج معرف الطلب
         
         sendToNative({
             type:   "GET_CONTEXT",
             domain: message.domain || ""
         }).then(function (response) {
             if (response && response.hasContext) {
-                logLocal('✅ GET_CONTEXT: hasContext=true, len=' + 
+                logLocal('✅ GET_CONTEXT (id=' + requestId + '): has=true, len=' + 
                     (response.context ? response.context.length : 0) +
-                    ', id=' + (response.id || '?'));
+                    ', contextId=' + (response.id || '?'));
             }
-            sendResponse(response || { hasContext: false, context: "" });
+            
+            // 🆕 أضف requestId إلى الرد لتطابق الطلب
+            var finalResponse = response || { 
+                hasContext: false, 
+                context: "", 
+                requestId: requestId 
+            };
+            
+            if (finalResponse && !finalResponse.hasOwnProperty('requestId')) {
+                finalResponse.requestId = requestId;
+            }
+            
+            sendResponse(finalResponse);
         }).catch(function (e) {
-            logLocal('❌ GET_CONTEXT error: ' + e.message);
-            sendResponse({ hasContext: false, context: "" });
+            logLocal('❌ GET_CONTEXT (id=' + requestId + ') error: ' + e.message);
+            sendResponse({ 
+                hasContext: false, 
+                context: "", 
+                requestId: requestId,
+                error: e.message
+            });
         });
         
         return true; // async response
@@ -161,7 +186,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     // ────────────────────────────────────────────────────────────────
     // DEBUG_INFO — رسائل التشخيص من content.js
     // ────────────────────────────────────────────────────────────────
-    // 🆕 هذا الفرع كان مفقوداً بالكامل — سبب اختفاء كل رسائل التشخيص
+    // هذا الفرع كان مفقوداً بالكامل — سبب اختفاء كل رسائل التشخيص
     // القادمة من content.js (DEBUG_INFO) بصمت دون وصولها إلى Kotlin.
     if (type === "DEBUG_INFO") {
         logLocal('🔍 DEBUG_INFO: ' + (message.info || ''));
@@ -180,14 +205,14 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     // ────────────────────────────────────────────────────────────────
     // Fallback: أي نوع غير معروف
     // ────────────────────────────────────────────────────────────────
-    // 🆕 لمنع إسقاط أي رسالة مستقبلية بصمت دون أي أثر أو استجابة،
+    // لمنع إسقاط أي رسالة مستقبلية بصمت دون أي أثر أو استجابة،
     // نمرّرها كما هي إلى الجهة الأصلية (Kotlin) لأغراض التشخيص.
     logLocal('⚠️ UNKNOWN_TYPE: ' + type);
     
     sendToNative({
-        type:    "UNKNOWN_TYPE",
+        type:     "UNKNOWN_TYPE",
         original: type,
-        payload: JSON.stringify(message)
+        payload:  JSON.stringify(message)
     }).catch(function (e) {
         logLocal('❌ UNKNOWN_TYPE handler failed: ' + e.message);
     });
@@ -202,9 +227,9 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
 browser.runtime.onInstalled.addListener(function (details) {
     if (details.reason === "install") {
-        logLocal('🎉 Extension installed');
+        logLocal('🎉 Extension installed successfully');
     } else if (details.reason === "update") {
-        logLocal('🔄 Extension updated from ' + details.previousVersion + ' to current');
+        logLocal('🔄 Extension updated to current version');
     }
 });
 
