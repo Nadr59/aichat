@@ -17,25 +17,24 @@ function logLocal(message) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// Helper: إرسال رسالة آمن إلى Kotlin
-// ══════════════════════════════════════════════════════════════════
+// Helper: إرسال رسالة آمن إلى Kotlin (Promise-based فقط)
+// ════════════════════════════════════════════════════════════════════
 
 function sendToNative(payload) {
-    return new Promise(function (resolve, reject) {
-        try {
-            browser.runtime.sendNativeMessage(NATIVE_APP, payload, function (response) {
-                if (browser.runtime.lastError) {
-                    logLocal('❌ Native error: ' + browser.runtime.lastError.message);
-                    reject(new Error(browser.runtime.lastError.message));
-                } else {
-                    resolve(response);
-                }
-            });
-        } catch (e) {
-            logLocal('❌ sendToNative exception: ' + e.message);
-            reject(e);
-        }
-    });
+    logLocal('🔄 sendToNative START: type=' + payload.type);
+    
+    // Firefox API - ترجع Promise مباشرة، بدون callback
+    return browser.runtime.sendNativeMessage(NATIVE_APP, payload)
+        .then(function (response) {
+            logLocal('✅ sendToNative SUCCESS: type=' + payload.type + 
+                ', response len=' + (response ? JSON.stringify(response).length : 0));
+            return response;
+        })
+        .catch(function (error) {
+            logLocal('❌ sendToNative CATCH: type=' + payload.type + 
+                ', error=' + error.message);
+            throw error;
+        });
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -91,15 +90,14 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             sendResponse({ capture: false });
         });
         
-        return true;
+        return true; // 🔴 مهم جداً
     }
 
     // ────────────────────────────────────────────────────────────────
     // CAPTURE_RESULT
     // ────────────────────────────────────────────────────────────────
     if (type === "CAPTURE_RESULT") {
-        logLocal('📸 CAPTURE_RESULT: success=' + message.success + 
-            ', text=' + (message.text ? message.text.substring(0, 50) + '...' : 'empty'));
+        logLocal('📸 CAPTURE_RESULT: success=' + message.success);
         
         sendToNative({
             type:    "CAPTURE_RESULT",
@@ -121,91 +119,59 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     if (type === "GET_CONTEXT") {
         var requestId = message.requestId || 0;
         
-        try {
-            sendToNative({
-                type:   "GET_CONTEXT",
-                domain: message.domain || ""
-            }).then(function (response) {
+        sendToNative({
+            type:   "GET_CONTEXT",
+            domain: message.domain || ""
+        }).then(function (response) {
+            // تأكد أن response هو object وليس string
+            var data = response;
+            if (typeof response === 'string') {
+                logLocal('⚠️ GET_CONTEXT (id=' + requestId + '): response is string, parsing...');
                 try {
-                    // تأكد أن response هو object وليس string
-                    var data = response;
-                    if (typeof response === 'string') {
-                        logLocal('⚠️ GET_CONTEXT (id=' + requestId + '): response is string, parsing...');
-                        try {
-                            data = JSON.parse(response);
-                        } catch (parseErr) {
-                            logLocal('❌ GET_CONTEXT (id=' + requestId + '): JSON.parse failed: ' + parseErr.message + ', raw=' + response);
-                            sendResponse({ 
-                                hasContext: false, 
-                                context: "", 
-                                requestId: requestId,
-                                error: "JSON parse error: " + parseErr.message
-                            });
-                            return;
-                        }
-                    }
-                    
-                    // تحقق من صحة data
-                    if (!data) {
-                        logLocal('❌ GET_CONTEXT (id=' + requestId + '): data is null/undefined after parsing');
-                        sendResponse({ 
-                            hasContext: false, 
-                            context: "", 
-                            requestId: requestId,
-                            error: "data is null"
-                        });
-                        return;
-                    }
-                    
-                    if (data.hasContext) {
-                        logLocal('✅ GET_CONTEXT (id=' + requestId + '): has=true, len=' + 
-                            (data.context ? data.context.length : 0) +
-                            ', contextId=' + (data.id || '?'));
-                    }
-                    
-                    // أضف requestId إلى الرد
-                    if (!data.hasOwnProperty('requestId')) {
-                        data.requestId = requestId;
-                    }
-                    
-                    // تأكد من وجود الحقول المطلوبة
-                    if (!data.hasOwnProperty('hasContext')) {
-                        data.hasContext = false;
-                    }
-                    if (!data.hasOwnProperty('context')) {
-                        data.context = "";
-                    }
-                    
-                    logLocal('✅ GET_CONTEXT (id=' + requestId + '): sending valid response');
-                    sendResponse(data);
-                    
-                } catch (responseErr) {
-                    logLocal('❌ GET_CONTEXT (id=' + requestId + '): response handler error: ' + responseErr.message);
+                    data = JSON.parse(response);
+                } catch (parseErr) {
+                    logLocal('❌ GET_CONTEXT (id=' + requestId + '): JSON.parse failed');
                     sendResponse({ 
                         hasContext: false, 
                         context: "", 
-                        requestId: requestId,
-                        error: "response handler: " + responseErr.message
+                        requestId: requestId
                     });
+                    return;
                 }
-            }).catch(function (nativeErr) {
-                logLocal('❌ GET_CONTEXT (id=' + requestId + '): sendToNative error: ' + nativeErr.message);
+            }
+            
+            if (!data) {
+                logLocal('⚠️ GET_CONTEXT (id=' + requestId + '): data is null');
                 sendResponse({ 
                     hasContext: false, 
                     context: "", 
-                    requestId: requestId,
-                    error: "native: " + nativeErr.message
+                    requestId: requestId
                 });
-            });
-        } catch (mainErr) {
-            logLocal('❌ GET_CONTEXT (id=' + requestId + '): main error: ' + mainErr.message);
+                return;
+            }
+            
+            if (data.hasContext) {
+                logLocal('✅ GET_CONTEXT (id=' + requestId + '): has=true, len=' + 
+                    (data.context ? data.context.length : 0));
+            }
+            
+            // أضف requestId إلى الرد
+            data.requestId = requestId;
+            
+            // تأكد من وجود الحقول المطلوبة
+            data.hasContext = data.hasContext || false;
+            data.context = data.context || "";
+            
+            sendResponse(data);
+            
+        }).catch(function (error) {
+            logLocal('❌ GET_CONTEXT (id=' + requestId + '): error=' + error.message);
             sendResponse({ 
                 hasContext: false, 
                 context: "", 
-                requestId: requestId,
-                error: "main: " + mainErr.message
+                requestId: requestId
             });
-        }
+        });
         
         return true; // 🔴 حاسم جداً
     }
@@ -215,8 +181,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     // ────────────────────────────────────────────────────────────────
     if (type === "CONTEXT_WRITTEN") {
         logLocal('✏️ CONTEXT_WRITTEN: success=' + message.success + 
-            ', contextId=' + (message.contextId || '?') +
-            ', stage=' + (message.stage || '?'));
+            ', contextId=' + (message.contextId || '?'));
         
         sendToNative({
             type:      "CONTEXT_WRITTEN",
@@ -269,7 +234,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Fallback: أي نوع غير معروف
+    // Fallback
     // ────────────────────────────────────────────────────────────────
     logLocal('⚠️ UNKNOWN_TYPE: ' + type);
     
@@ -286,19 +251,19 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 });
 
 // ══════════════════════════════════════════════════════════════════
-// Event: تحديث الامتداد
+// Extension Events
 // ══════════════════════════════════════════════════════════════════
 
 browser.runtime.onInstalled.addListener(function (details) {
     if (details.reason === "install") {
-        logLocal('🎉 Extension installed successfully');
+        logLocal('🎉 Extension installed');
     } else if (details.reason === "update") {
-        logLocal('🔄 Extension updated to current version');
+        logLocal('🔄 Extension updated');
     }
 });
 
 // ══════════════════════════════════════════════════════════════════
-// رسالة البداية
+// Startup Message
 // ══════════════════════════════════════════════════════════════════
 
-logLocal('✅ Background script loaded successfully');
+logLocal('✅ Background script ready');
