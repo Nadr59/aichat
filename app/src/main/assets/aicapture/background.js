@@ -53,7 +53,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     
     // تجاهل تسجيل GET_CONTEXT — كثير جداً
     if (type !== "GET_CONTEXT") {
-        logLocal('📨 Received: ' + type + ' from ' + (sender.url || 'unknown'));
+        logLocal('📨 Received: ' + type);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -118,35 +118,42 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     // ────────────────────────────────────────────────────────────────
     // GET_CONTEXT — طلب السياق (polling من content.js)
     // 
-    // 🆕 تحسينات:
-    // - نعيد requestId مع الرد لتجنب ردود قديمة (deduplication)
-    // - لا نسجل — كثير جداً (كل ثانية)
+    // 🆕 إصلاح حاسم:
+    // 1. return true — للحفاظ على القناة مفتوحة للرد الغير متزامن
+    // 2. JSON.parse — في حالة الـ Native ترسل string بدل object
+    // 3. requestId passthrough — للتحقق من مطابقة الطلب والرد
     // ────────────────────────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
-        var requestId = message.requestId || 0;  // 🆕 استخرج معرف الطلب
+        var requestId = message.requestId || 0;
         
         sendToNative({
             type:   "GET_CONTEXT",
             domain: message.domain || ""
         }).then(function (response) {
-            if (response && response.hasContext) {
+            // تأكد أن response هو object وليس string
+            var data = response;
+            if (typeof response === 'string') {
+                logLocal('⚠️ GET_CONTEXT (id=' + requestId + '): response is string, parsing...');
+                try {
+                    data = JSON.parse(response);
+                } catch (e) {
+                    logLocal('❌ GET_CONTEXT (id=' + requestId + '): JSON.parse error: ' + e.message);
+                    data = { hasContext: false, context: "", requestId: requestId };
+                }
+            }
+            
+            if (data && data.hasContext) {
                 logLocal('✅ GET_CONTEXT (id=' + requestId + '): has=true, len=' + 
-                    (response.context ? response.context.length : 0) +
-                    ', contextId=' + (response.id || '?'));
+                    (data.context ? data.context.length : 0) +
+                    ', contextId=' + (data.id || '?'));
             }
             
-            // 🆕 أضف requestId إلى الرد لتطابق الطلب
-            var finalResponse = response || { 
-                hasContext: false, 
-                context: "", 
-                requestId: requestId 
-            };
-            
-            if (finalResponse && !finalResponse.hasOwnProperty('requestId')) {
-                finalResponse.requestId = requestId;
+            // 🆕 أضف requestId إلى الرد
+            if (data && !data.hasOwnProperty('requestId')) {
+                data.requestId = requestId;
             }
             
-            sendResponse(finalResponse);
+            sendResponse(data || { hasContext: false, context: "", requestId: requestId });
         }).catch(function (e) {
             logLocal('❌ GET_CONTEXT (id=' + requestId + ') error: ' + e.message);
             sendResponse({ 
@@ -157,7 +164,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             });
         });
         
-        return true; // async response
+        return true; // 🔴 حاسم جداً — الحفاظ على القناة مفتوحة
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -184,10 +191,26 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // CONTEXT_CONSUMED — إخبار الـ Kotlin بأن السياق تم استهلاكه
+    // 🆕 منع التكرار اللانهائي
+    // ────────────────────────────────────────────────────────────────
+    if (type === "CONTEXT_CONSUMED") {
+        logLocal('🗑️ CONTEXT_CONSUMED: contextId=' + (message.contextId || '?'));
+        
+        sendToNative({
+            type:      "CONTEXT_CONSUMED",
+            contextId: message.contextId || 0
+        }).catch(function (e) {
+            logLocal('❌ CONTEXT_CONSUMED failed: ' + e.message);
+        });
+        
+        sendResponse({ ok: true });
+        return false;
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // DEBUG_INFO — رسائل التشخيص من content.js
     // ────────────────────────────────────────────────────────────────
-    // هذا الفرع كان مفقوداً بالكامل — سبب اختفاء كل رسائل التشخيص
-    // القادمة من content.js (DEBUG_INFO) بصمت دون وصولها إلى Kotlin.
     if (type === "DEBUG_INFO") {
         logLocal('🔍 DEBUG_INFO: ' + (message.info || ''));
         
@@ -205,8 +228,6 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     // ────────────────────────────────────────────────────────────────
     // Fallback: أي نوع غير معروف
     // ────────────────────────────────────────────────────────────────
-    // لمنع إسقاط أي رسالة مستقبلية بصمت دون أي أثر أو استجابة،
-    // نمرّرها كما هي إلى الجهة الأصلية (Kotlin) لأغراض التشخيص.
     logLocal('⚠️ UNKNOWN_TYPE: ' + type);
     
     sendToNative({
