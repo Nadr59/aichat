@@ -39,10 +39,6 @@ class AichatApp : Application() {
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
 
-    // ══════════════════════════════════════════════════════════════════
-    // Debug Log
-    // ══════════════════════════════════════════════════════════════════
-
     val debugLog: SnapshotStateList<String> = mutableStateListOf()
 
     fun logDebug(msg: String) {
@@ -83,6 +79,12 @@ class AichatApp : Application() {
         contextPending = text
         lastContextId = System.currentTimeMillis()
         logDebug("📤 Context pending set: ${text.length} chars, id=$lastContextId")
+        
+        // 🆕 أرسل رسالة إلى JavaScript فوراً
+        sendToContent("CONTEXT_UPDATED", JSONObject().apply {
+            put("hasContext", true)
+            put("id", lastContextId)
+        })
     }
 
     fun sendContextToPage(
@@ -113,6 +115,41 @@ class AichatApp : Application() {
         }
 
         setContextPending(contextText)
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Send to Content Script (NEW - CRITICAL)
+    // ══════════════════════════════════════════════════════════════════
+
+    private fun sendToContent(type: String, data: JSONObject) {
+        logDebug("📤 sendToContent: type=$type")
+        
+        try {
+            aiChatExtension?.setMessageDelegate(
+                object : WebExtension.MessageDelegate {
+                    override fun onMessage(
+                        nativeApp: String,
+                        message: Any,
+                        sender: WebExtension.MessageSender
+                    ): GeckoResult<Any>? {
+                        // لا نفعل شيء هنا — فقط للاستقبال
+                        return null
+                    }
+                },
+                "content"
+            )
+            
+            // أرسل الرسالة
+            val payload = JSONObject().apply {
+                put("type", type)
+                putOpt("data", data)
+            }
+            
+            aiChatExtension?.broadcastMessage("browser", payload, null)
+            logDebug("✅ sendToContent: message sent")
+        } catch (e: Exception) {
+            logDebug("❌ sendToContent error: ${e.message}")
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -149,10 +186,34 @@ class AichatApp : Application() {
                 // Manual Capture
                 // ══════════════════════════════════════════════════════
 
-                "CHECK_CAPTURE" -> handleCheckCapture(json)
+                "CHECK_CAPTURE" -> {
+                    val flag = captureFlag
+                    captureFlag = false
+                    
+                    if (flag) {
+                        logDebug("📡 Capture triggered")
+                    }
+                    
+                    GeckoResult.fromValue(
+                        JSONObject().put("capture", flag)
+                    )
+                }
 
                 "CAPTURE_RESULT" -> {
-                    handleCaptureResult(json)
+                    val success = json.optBoolean("success", false)
+                    val text    = json.optString("text")
+                    val debug   = json.optJSONObject("debug")
+                    
+                    val msg = if (success) {
+                        "🧠 Capture OK: ${text.take(60)}…"
+                    } else {
+                        "⚠️ Capture Failed"
+                    }
+                    logDebug(msg)
+                    
+                    Handler(Looper.getMainLooper()).post {
+                        onManualCaptureResult?.invoke(success, text, debug)
+                    }
                     GeckoResult.fromValue(null)
                 }
 
@@ -161,7 +222,16 @@ class AichatApp : Application() {
                 // ══════════════════════════════════════════════════════
 
                 "AI_RESPONSE" -> {
-                    handleAutoResponse(json)
+                    val text   = json.optString("text")
+                    val domain = json.optString("domain", "unknown")
+                    
+                    if (text.length >= 80) {
+                        logDebug("📨 Auto Response: ${text.take(60)}…")
+                        
+                        Handler(Looper.getMainLooper()).post {
+                            onAiResponseCaptured?.invoke(domain, text)
+                        }
+                    }
                     GeckoResult.fromValue(null)
                 }
 
@@ -169,15 +239,53 @@ class AichatApp : Application() {
                 // Context Flow
                 // ══════════════════════════════════════════════════════
 
-                "GET_CONTEXT" -> handleGetContext()
+                "GET_CONTEXT" -> {
+                    val pending = contextPending
+                    val has = pending.isNotBlank()
+                    
+                    logDebug("📤 GET_CONTEXT: has=$has, len=${pending.length}")
+                    
+                    val response = JSONObject()
+                    response.put("hasContext", has)
+                    response.put("context", if (has) pending else "")
+                    response.put("id", lastContextId)
+                    
+                    logDebug("📤 Sending response: hasContext=$has, len=${response.optString("context").length}")
+                    
+                    GeckoResult.fromValue(response)
+                }
 
                 "CONTEXT_WRITTEN" -> {
-                    handleContextWritten(json)
+                    val success    = json.optBoolean("success", false)
+                    val contextId  = json.optLong("contextId", 0L)
+                    val stage      = json.optString("stage", "")
+                    val detail     = json.optString("detail", "")
+                    
+                    logDebug("✏️ CONTEXT_WRITTEN: success=$success, id=$contextId")
+                    
+                    Handler(Looper.getMainLooper()).post {
+                        onContextWritten?.invoke(success, stage, detail)
+                    }
+                    
+                    val userMsg = when {
+                        !success -> "❌ فشل الإرسال: $detail"
+                        stage == "button_clicked" -> "✅ تم الإرسال بنجاح"
+                        else -> "✅ تمت الكتابة"
+                    }
+                    showToast(userMsg)
                     GeckoResult.fromValue(null)
                 }
 
                 "CONTEXT_CONSUMED" -> {
-                    handleContextConsumed(json)
+                    val contextId = json.optLong("contextId", 0L)
+                    
+                    logDebug("🗑️ CONTEXT_CONSUMED: contextId=$contextId")
+                    
+                    if (contextId == lastContextId && contextId != 0L) {
+                        contextPending = ""
+                        lastContextId = 0L
+                        logDebug("✅ contextPending cleared")
+                    }
                     GeckoResult.fromValue(null)
                 }
 
@@ -196,115 +304,6 @@ class AichatApp : Application() {
                     GeckoResult.fromValue(null)
                 }
             }
-        }
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    // Message Handlers
-    // ══════════════════════════════════════════════════════════════════
-
-    private fun handleCheckCapture(json: JSONObject): GeckoResult<Any> {
-        val flag = captureFlag
-        captureFlag = false
-        
-        if (flag) {
-            logDebug("📡 Capture triggered")
-        }
-        
-        return GeckoResult.fromValue(
-            JSONObject().put("capture", flag)
-        )
-    }
-
-    private fun handleCaptureResult(json: JSONObject) {
-        val success = json.optBoolean("success", false)
-        val text    = json.optString("text")
-        val debug   = json.optJSONObject("debug")
-        
-        val msg = if (success) {
-            "🧠 Capture OK: ${text.take(60)}…"
-        } else {
-            "⚠️ Capture Failed"
-        }
-        logDebug(msg)
-        
-        Handler(Looper.getMainLooper()).post {
-            onManualCaptureResult?.invoke(success, text, debug)
-        }
-    }
-
-    private fun handleAutoResponse(json: JSONObject) {
-        val text   = json.optString("text")
-        val domain = json.optString("domain", "unknown")
-        
-        if (text.length < 80) return
-        
-        logDebug("📨 Auto Response: ${text.take(60)}…")
-        
-        Handler(Looper.getMainLooper()).post {
-            onAiResponseCaptured?.invoke(domain, text)
-        }
-    }
-
-    /**
-     * GET_CONTEXT — Response directly from onMessage
-     * No separate Native Host needed!
-     */
-    private fun handleGetContext(): GeckoResult<Any> {
-        return try {
-            val pending = contextPending
-            val has = pending.isNotBlank()
-            
-            logDebug("📤 GET_CONTEXT: has=$has, len=${pending.length}")
-            
-            val response = JSONObject()
-            response.put("hasContext", has)
-            response.put("context", if (has) pending else "")
-            response.put("id", lastContextId)
-            
-            logDebug("📤 Sending response: hasContext=$has, len=${response.optString("context").length}")
-            
-            GeckoResult.fromValue(response)
-        } catch (e: Exception) {
-            logDebug("❌ GET_CONTEXT error: ${e.message}")
-            e.printStackTrace()
-            GeckoResult.fromValue(
-                JSONObject()
-                    .put("hasContext", false)
-                    .put("context", "")
-            )
-        }
-    }
-
-    private fun handleContextWritten(json: JSONObject) {
-        val success    = json.optBoolean("success", false)
-        val contextId  = json.optLong("contextId", 0L)
-        val stage      = json.optString("stage", "")
-        val detail     = json.optString("detail", "")
-        
-        logDebug("✏️ CONTEXT_WRITTEN: success=$success, id=$contextId")
-        
-        Handler(Looper.getMainLooper()).post {
-            onContextWritten?.invoke(success, stage, detail)
-        }
-        
-        val userMsg = when {
-            !success -> "❌ فشل الإرسال: $detail"
-            stage == "button_clicked" -> "✅ تم الإرسال بنجاح"
-            else -> "✅ تمت الكتابة"
-        }
-        showToast(userMsg)
-    }
-
-    private fun handleContextConsumed(json: JSONObject) {
-        val contextId = json.optLong("contextId", 0L)
-        
-        logDebug("🗑️ CONTEXT_CONSUMED: contextId=$contextId")
-        
-        if (contextId == lastContextId && contextId != 0L) {
-            contextPending = ""
-            lastContextId = 0L
-            logDebug("✅ contextPending cleared")
         }
     }
 
