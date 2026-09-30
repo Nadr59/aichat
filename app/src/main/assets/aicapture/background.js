@@ -57,7 +57,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // AI_RESPONSE — استجابة الـ AI التلقائية
+    // AI_RESPONSE
     // ────────────────────────────────────────────────────────────────
     if (type === "AI_RESPONSE") {
         logLocal('📤 AI_RESPONSE: ' + (message.text ? message.text.substring(0, 50) + '...' : 'empty'));
@@ -75,7 +75,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CHECK_CAPTURE — طلب التقاط (من زر 🧠 في Kotlin)
+    // CHECK_CAPTURE
     // ────────────────────────────────────────────────────────────────
     if (type === "CHECK_CAPTURE") {
         logLocal('🧠 CHECK_CAPTURE requested');
@@ -91,11 +91,11 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             sendResponse({ capture: false });
         });
         
-        return true; // يشير إلى أننا سنرد بشكل async
+        return true;
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CAPTURE_RESULT — نتيجة التقاط يدوي
+    // CAPTURE_RESULT
     // ────────────────────────────────────────────────────────────────
     if (type === "CAPTURE_RESULT") {
         logLocal('📸 CAPTURE_RESULT: success=' + message.success + 
@@ -116,59 +116,102 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // GET_CONTEXT — طلب السياق (polling من content.js)
-    // 
-    // 🆕 إصلاح حاسم:
-    // 1. return true — للحفاظ على القناة مفتوحة للرد الغير متزامن
-    // 2. JSON.parse — في حالة الـ Native ترسل string بدل object
-    // 3. requestId passthrough — للتحقق من مطابقة الطلب والرد
+    // GET_CONTEXT — محسّن مع معالجة أخطاء شاملة
     // ────────────────────────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
         var requestId = message.requestId || 0;
         
-        sendToNative({
-            type:   "GET_CONTEXT",
-            domain: message.domain || ""
-        }).then(function (response) {
-            // تأكد أن response هو object وليس string
-            var data = response;
-            if (typeof response === 'string') {
-                logLocal('⚠️ GET_CONTEXT (id=' + requestId + '): response is string, parsing...');
+        try {
+            sendToNative({
+                type:   "GET_CONTEXT",
+                domain: message.domain || ""
+            }).then(function (response) {
                 try {
-                    data = JSON.parse(response);
-                } catch (e) {
-                    logLocal('❌ GET_CONTEXT (id=' + requestId + '): JSON.parse error: ' + e.message);
-                    data = { hasContext: false, context: "", requestId: requestId };
+                    // تأكد أن response هو object وليس string
+                    var data = response;
+                    if (typeof response === 'string') {
+                        logLocal('⚠️ GET_CONTEXT (id=' + requestId + '): response is string, parsing...');
+                        try {
+                            data = JSON.parse(response);
+                        } catch (parseErr) {
+                            logLocal('❌ GET_CONTEXT (id=' + requestId + '): JSON.parse failed: ' + parseErr.message + ', raw=' + response);
+                            sendResponse({ 
+                                hasContext: false, 
+                                context: "", 
+                                requestId: requestId,
+                                error: "JSON parse error: " + parseErr.message
+                            });
+                            return;
+                        }
+                    }
+                    
+                    // تحقق من صحة data
+                    if (!data) {
+                        logLocal('❌ GET_CONTEXT (id=' + requestId + '): data is null/undefined after parsing');
+                        sendResponse({ 
+                            hasContext: false, 
+                            context: "", 
+                            requestId: requestId,
+                            error: "data is null"
+                        });
+                        return;
+                    }
+                    
+                    if (data.hasContext) {
+                        logLocal('✅ GET_CONTEXT (id=' + requestId + '): has=true, len=' + 
+                            (data.context ? data.context.length : 0) +
+                            ', contextId=' + (data.id || '?'));
+                    }
+                    
+                    // أضف requestId إلى الرد
+                    if (!data.hasOwnProperty('requestId')) {
+                        data.requestId = requestId;
+                    }
+                    
+                    // تأكد من وجود الحقول المطلوبة
+                    if (!data.hasOwnProperty('hasContext')) {
+                        data.hasContext = false;
+                    }
+                    if (!data.hasOwnProperty('context')) {
+                        data.context = "";
+                    }
+                    
+                    logLocal('✅ GET_CONTEXT (id=' + requestId + '): sending valid response');
+                    sendResponse(data);
+                    
+                } catch (responseErr) {
+                    logLocal('❌ GET_CONTEXT (id=' + requestId + '): response handler error: ' + responseErr.message);
+                    sendResponse({ 
+                        hasContext: false, 
+                        context: "", 
+                        requestId: requestId,
+                        error: "response handler: " + responseErr.message
+                    });
                 }
-            }
-            
-            if (data && data.hasContext) {
-                logLocal('✅ GET_CONTEXT (id=' + requestId + '): has=true, len=' + 
-                    (data.context ? data.context.length : 0) +
-                    ', contextId=' + (data.id || '?'));
-            }
-            
-            // 🆕 أضف requestId إلى الرد
-            if (data && !data.hasOwnProperty('requestId')) {
-                data.requestId = requestId;
-            }
-            
-            sendResponse(data || { hasContext: false, context: "", requestId: requestId });
-        }).catch(function (e) {
-            logLocal('❌ GET_CONTEXT (id=' + requestId + ') error: ' + e.message);
+            }).catch(function (nativeErr) {
+                logLocal('❌ GET_CONTEXT (id=' + requestId + '): sendToNative error: ' + nativeErr.message);
+                sendResponse({ 
+                    hasContext: false, 
+                    context: "", 
+                    requestId: requestId,
+                    error: "native: " + nativeErr.message
+                });
+            });
+        } catch (mainErr) {
+            logLocal('❌ GET_CONTEXT (id=' + requestId + '): main error: ' + mainErr.message);
             sendResponse({ 
                 hasContext: false, 
                 context: "", 
                 requestId: requestId,
-                error: e.message
+                error: "main: " + mainErr.message
             });
-        });
+        }
         
-        return true; // 🔴 حاسم جداً — الحفاظ على القناة مفتوحة
+        return true; // 🔴 حاسم جداً
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CONTEXT_WRITTEN — تأكيد كتابة السياق
+    // CONTEXT_WRITTEN
     // ────────────────────────────────────────────────────────────────
     if (type === "CONTEXT_WRITTEN") {
         logLocal('✏️ CONTEXT_WRITTEN: success=' + message.success + 
@@ -191,15 +234,15 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CONTEXT_CONSUMED — إخبار الـ Kotlin بأن السياق تم استهلاكه
-    // 🆕 منع التكرار اللانهائي
+    // CONTEXT_CONSUMED
     // ────────────────────────────────────────────────────────────────
     if (type === "CONTEXT_CONSUMED") {
-        logLocal('🗑️ CONTEXT_CONSUMED: contextId=' + (message.contextId || '?'));
+        var contextId = message.contextId || 0;
+        logLocal('🗑️ CONTEXT_CONSUMED: contextId=' + contextId);
         
         sendToNative({
             type:      "CONTEXT_CONSUMED",
-            contextId: message.contextId || 0
+            contextId: contextId
         }).catch(function (e) {
             logLocal('❌ CONTEXT_CONSUMED failed: ' + e.message);
         });
@@ -209,7 +252,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // DEBUG_INFO — رسائل التشخيص من content.js
+    // DEBUG_INFO
     // ────────────────────────────────────────────────────────────────
     if (type === "DEBUG_INFO") {
         logLocal('🔍 DEBUG_INFO: ' + (message.info || ''));
