@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "AiChat Capture",
   "version": "1.0.15",
-  "description": "Capture AI responses and send them to Kotlin native app",
+  "description": "Capture AI responses and send them to native app",
   "browser_specific_settings": {
     "gecko": {
       "id": "aicapture@aichat.example.com"
@@ -10,8 +10,6 @@
   },
   "permissions": [
     "nativeMessaging",
-    "nativeMessagingFromContent",
-    "geckoViewAddons",
     "tabs",
     "activeTab",
     "*://chatgpt.com/*",
@@ -45,9 +43,5 @@
       "run_at": "document_idle",
       "all_frames": false
     }
-  ],
-  "icons": {
-    "48": "icons/icon-48.png",
-    "96": "icons/icon-96.png"
-  }
-        }
+  ]
+}
