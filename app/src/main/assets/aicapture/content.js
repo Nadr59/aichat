@@ -17,16 +17,14 @@
     var DEBOUNCE_MS       = 1800;
     var MIN_LEN           = 30;
     var MAX_LEN           = 3000;
-    var contextBusy       = false;           // منع تكرار writeAndSend
-    var pendingContextId  = null;            // تتبع معرف الـ context الحالي
-    var contextWriteTimer = null;            // timeout لتأكيد الكتابة
-
-    // 🆕 Request Deduplication — تتبع معرف الطلب والرد
-    var lastRequestId = 0;
-    var pendingRequests = {};  // {requestId: timestamp}
+    var contextBusy       = false;
+    var pendingContextId  = null;
+    var contextWriteTimer = null;
+    var lastRequestId     = 0;
+    var pendingRequests   = {};
 
     // ══════════════════════════════════════════════════════════════════
-    // Debug Helper — تسجيل شامل
+    // Debug Helper
     // ══════════════════════════════════════════════════════════════════
 
     function logDebug(message) {
@@ -40,13 +38,10 @@
         var fullMsg = timestamp + '  ' + message;
         console.log('[AiCapture] ' + fullMsg);
         
-        // أرسل لـ Kotlin للتسجيل المركزي
         browser.runtime.sendMessage({
             type: 'DEBUG_INFO',
             info: fullMsg
-        }).catch(function () {
-            // خطأ في الإرسال — لا نفعل شيء
-        });
+        }).catch(function () {});
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -159,7 +154,7 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // إيجاد صندوق الإدخال
+    // Find Input Box
     // ══════════════════════════════════════════════════════════════════
 
     function findInputBox() {
@@ -176,9 +171,7 @@
             
             for (var i = 0; i < selectors.length; i++) {
                 var el = document.querySelector(selectors[i]);
-                if (el) {
-                    return el;
-                }
+                if (el) return el;
             }
             return null;
         }
@@ -198,7 +191,7 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // الكتابة في صندوق الإدخال
+    // Write to Input Box
     // ══════════════════════════════════════════════════════════════════
 
     function writeToInputBox(text) {
@@ -212,7 +205,6 @@
 
         logDebug('✅ writeToInputBox: Input found (' + input.tagName + ')');
 
-        // TEXTAREA أو INPUT
         if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
             try {
                 input.focus();
@@ -230,7 +222,6 @@
             }
         }
 
-        // contenteditable
         logDebug('📝 writeToInputBox: Trying contenteditable...');
         input.focus();
         
@@ -271,7 +262,7 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // إيجاد زر الإرسال
+    // Find Send Button
     // ══════════════════════════════════════════════════════════════════
 
     function findSendButton() {
@@ -298,7 +289,7 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // ضغط زر الإرسال (async)
+    // Click Send Button (async)
     // ══════════════════════════════════════════════════════════════════
 
     function clickSendButton() {
@@ -333,7 +324,6 @@
                 }
             }, 200);
 
-            // timeout جمالي بعد 5 ثواني
             setTimeout(function () {
                 if (interval) {
                     clearInterval(interval);
@@ -345,27 +335,22 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // تنفيذ الكتابة والإرسال (async)
-    // 
-    // 🆕 محسّن مع CONTEXT_CONSUMED
+    // Write and Send (async)
     // ══════════════════════════════════════════════════════════════════
 
     function writeAndSend(context, contextId) {
         logDebug('🚀 writeAndSend START: length=' + context.length + ', id=' + contextId);
-        logDebug('🚀 First 100 chars: ' + context.substring(0, 100));
         
-        // ألغِ أي timeout سابق
         if (contextWriteTimer) {
             clearTimeout(contextWriteTimer);
             contextWriteTimer = null;
         }
 
         var result = writeToInputBox(context);
-        
         logDebug('🚀 writeToInputBox result: ok=' + result.ok + ', stage=' + result.stage);
 
         if (!result.ok) {
-            logDebug('❌ writeAndSend: Write failed, sending CONTEXT_WRITTEN');
+            logDebug('❌ writeAndSend: Write failed');
             browser.runtime.sendMessage({
                 type:      'CONTEXT_WRITTEN',
                 success:   false,
@@ -374,16 +359,13 @@
                 detail:    result.stage,
                 domain:    location.hostname
             }).catch(function (e) {
-                logDebug('❌ Failed to send CONTEXT_WRITTEN: ' + e.message);
+                logDebug('❌ CONTEXT_WRITTEN error: ' + e.message);
             });
             
-            // 🆕 أخبر الـ Kotlin أن السياق استهلك (فشل)
             browser.runtime.sendMessage({
                 type: 'CONTEXT_CONSUMED',
                 contextId: contextId
-            }).catch(function (e) {
-                logDebug('❌ Failed to send CONTEXT_CONSUMED: ' + e.message);
-            });
+            }).catch(function () {});
             
             contextBusy = false;
             return;
@@ -391,15 +373,13 @@
 
         logDebug('✅ writeAndSend: Text written, waiting before click (600ms)');
 
-        // انتظر قليلاً قبل الضغط على الزر
         setTimeout(function () {
-            logDebug('⏳ writeAndSend: Starting clickSendButton...');
+            logDebug('⏳ Starting clickSendButton...');
             clickSendButton().then(function (clicked) {
-                logDebug('✅ writeAndSend: Button handling finished, clicked=' + clicked);
+                logDebug('✅ Button handling finished, clicked=' + clicked);
                 
-                // انتظر قليلاً لتأكيد أن الرسالة ذهبت
                 contextWriteTimer = setTimeout(function () {
-                    logDebug('✅ writeAndSend: Confirming success after 1s delay');
+                    logDebug('✅ Confirming success after 1s delay');
                     browser.runtime.sendMessage({
                         type:      'CONTEXT_WRITTEN',
                         success:   true,
@@ -407,22 +387,21 @@
                         stage:     'button_clicked',
                         domain:    location.hostname
                     }).catch(function (e) {
-                        logDebug('❌ Failed to send CONTEXT_WRITTEN: ' + e.message);
+                        logDebug('❌ CONTEXT_WRITTEN error: ' + e.message);
                     });
                     
-                    // 🆕 أخبر الـ Kotlin أن السياق تم استهلاكه (نجح)
                     browser.runtime.sendMessage({
                         type: 'CONTEXT_CONSUMED',
                         contextId: contextId
                     }).catch(function (e) {
-                        logDebug('❌ Failed to send CONTEXT_CONSUMED: ' + e.message);
+                        logDebug('❌ CONTEXT_CONSUMED error: ' + e.message);
                     });
                     
                     contextBusy = false;
                     pendingContextId = null;
                 }, 1000);
             }).catch(function (e) {
-                logDebug('❌ writeAndSend: clickSendButton error: ' + e.message);
+                logDebug('❌ clickSendButton error: ' + e.message);
                 browser.runtime.sendMessage({
                     type:      'CONTEXT_WRITTEN',
                     success:   false,
@@ -432,13 +411,10 @@
                     domain:    location.hostname
                 }).catch(function () {});
                 
-                // 🆕 أخبر الـ Kotlin أن السياق استهلك (خطأ)
                 browser.runtime.sendMessage({
                     type: 'CONTEXT_CONSUMED',
                     contextId: contextId
-                }).catch(function (e) {
-                    logDebug('❌ Failed to send CONTEXT_CONSUMED: ' + e.message);
-                });
+                }).catch(function () {});
                 
                 contextBusy = false;
             });
@@ -446,7 +422,7 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // إرسال تلقائي (استجابة آلية)
+    // Auto Send
     // ══════════════════════════════════════════════════════════════════
 
     function sendAutoToKotlin(text) {
@@ -466,14 +442,14 @@
                         domain: location.hostname
                     });
                 } catch (e) {
-                    logDebug('❌ Error sending AI_RESPONSE: ' + e.message);
+                    logDebug('❌ AI_RESPONSE error: ' + e.message);
                 }
             }
         }, 1000);
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // مراقبة تلقائية (DOM mutations)
+    // Observer
     // ══════════════════════════════════════════════════════════════════
 
     var observer = new MutationObserver(function () {
@@ -497,7 +473,7 @@
     startObserver();
 
     // ══════════════════════════════════════════════════════════════════
-    // Polling — CHECK_CAPTURE (زر 🧠 في Kotlin)
+    // Polling — CHECK_CAPTURE
     // ══════════════════════════════════════════════════════════════════
 
     setInterval(function () {
@@ -524,8 +500,7 @@
                         '[data-message-author-role="assistant"]'
                     ).length,
                     articles: document.querySelectorAll('article').length,
-                    bodyLen:  document.body
-                              ? document.body.innerText.length : 0
+                    bodyLen:  document.body ? document.body.innerText.length : 0
                 }
             });
         }).catch(function (e) {
@@ -534,31 +509,17 @@
     }, 1000);
 
     // ══════════════════════════════════════════════════════════════════
-    // Polling — GET_CONTEXT (محسّن مع Debugging شامل + CONTEXT_CONSUMED)
-    // 
-    // 🆕 تحسينات:
-    // - أضفنا requestId لكل طلب لتجنب ردود قديمة
-    // - نتتبع الطلبات المعلقة والردود المقابلة
-    // - نتجاهل أي رد لم يطابق requestId الحالي
-    // - debugging شامل لكشف المشاكل
+    // Polling — GET_CONTEXT
     // ══════════════════════════════════════════════════════════════════
-
-    var getContextPollCount = 0;
 
     setInterval(function () {
         if (document.visibilityState !== 'visible') return;
-        if (contextBusy) {
-            return;
-        }
+        if (contextBusy) return;
 
-        // 🆕 توليد معرف فريد لهذا الطلب
         lastRequestId++;
         var currentRequestId = lastRequestId;
         pendingRequests[currentRequestId] = Date.now();
         
-        getContextPollCount++;
-
-        // تنظيف الطلبات القديمة (أكثر من 10 ثواني)
         var now = Date.now();
         for (var reqId in pendingRequests) {
             if (now - pendingRequests[reqId] > 10000) {
@@ -569,20 +530,16 @@
         browser.runtime.sendMessage({
             type:      'GET_CONTEXT',
             domain:    location.hostname,
-            requestId: currentRequestId  // 🆕 أرسل معرف الطلب
+            requestId: currentRequestId
         }).then(function (response) {
-            // 🆕 تشخيص شامل
-            logDebug('📬 GET_CONTEXT #' + currentRequestId + ': raw response=' + JSON.stringify(response));
-
             if (!response) {
-                logDebug('⚠️ GET_CONTEXT #' + currentRequestId + ': EMPTY response (background.js might be missing return true)');
+                logDebug('⚠️ GET_CONTEXT #' + currentRequestId + ': empty response');
                 delete pendingRequests[currentRequestId];
                 return;
             }
 
-            // تحقق من مطابقة requestId
             if (response.requestId && response.requestId !== currentRequestId) {
-                logDebug('⏭️ GET_CONTEXT #' + currentRequestId + ': STALE response (expected=' + currentRequestId + ', got=' + response.requestId + '), ignoring');
+                logDebug('⏭️ GET_CONTEXT #' + currentRequestId + ': stale response (id=' + response.requestId + '), ignoring');
                 return;
             }
 
@@ -600,25 +557,21 @@
                 return;
             }
 
-            logDebug('✅ GET_CONTEXT #' + currentRequestId + ': VALID context! length=' + context.length + ', id=' + contextId);
-            logDebug('✅ contextBusy=' + contextBusy + ', about to call writeAndSend');
+            logDebug('✅ GET_CONTEXT #' + currentRequestId + ': Got context, length=' + context.length + ', id=' + contextId);
             
-            // set busy flag قبل البدء
             contextBusy = true;
             pendingContextId = contextId;
             
-            logDebug('🚀 Calling writeAndSend now...');
-            // ابدأ الكتابة والإرسال
             writeAndSend(context, contextId);
 
         }).catch(function (e) {
-            logDebug('❌ GET_CONTEXT #' + currentRequestId + ' error: ' + e.message + ' | lastError=' + browser.runtime.lastError);
+            logDebug('❌ GET_CONTEXT #' + currentRequestId + ' error: ' + e.message);
             delete pendingRequests[currentRequestId];
         });
     }, 1000);
 
     // ══════════════════════════════════════════════════════════════════
-    // تنظيف عند مغادرة الصفحة
+    // Cleanup
     // ══════════════════════════════════════════════════════════════════
 
     window.addEventListener('pagehide', function () {
@@ -630,7 +583,7 @@
     });
 
     // ══════════════════════════════════════════════════════════════════
-    // رسالة البداية
+    // Startup
     // ══════════════════════════════════════════════════════════════════
 
     logDebug('✅ Extension loaded successfully');
