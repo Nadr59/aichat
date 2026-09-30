@@ -21,6 +21,10 @@
     var pendingContextId  = null;            // تتبع معرف الـ context الحالي
     var contextWriteTimer = null;            // timeout لتأكيد الكتابة
 
+    // 🆕 Request Deduplication — تتبع معرف الطلب والرد
+    var lastRequestId = 0;
+    var pendingRequests = {};  // {requestId: timestamp}
+
     // ══════════════════════════════════════════════════════════════════
     // Debug Helper — تسجيل شامل
     // ══════════════════════════════════════════════════════════════════
@@ -413,7 +417,7 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // إرسال تلقائي (استجابة سيارة)
+    // إرسال تلقائي (استجابة آلية)
     // ══════════════════════════════════════════════════════════════════
 
     function sendAutoToKotlin(text) {
@@ -501,26 +505,51 @@
     }, 1000);
 
     // ══════════════════════════════════════════════════════════════════
-    // Polling — GET_CONTEXT (الحلقة الرئيسية)
+    // Polling — GET_CONTEXT (محسّن مع Request Deduplication)
+    // 
+    // 🆕 تحسينات:
+    // - أضفنا requestId لكل طلب لتجنب ردود قديمة
+    // - نتتبع الطلبات المعلقة والردود المقابلة
+    // - نتجاهل أي رد لم يطابق requestId الحالي
     // ══════════════════════════════════════════════════════════════════
 
     setInterval(function () {
         if (document.visibilityState !== 'visible') return;
         if (contextBusy) {
-            // logDebug('⏭️ GET_CONTEXT skipped: contextBusy=true');
             return;
         }
 
+        // 🆕 توليد معرف فريد لهذا الطلب
+        lastRequestId++;
+        var currentRequestId = lastRequestId;
+        pendingRequests[currentRequestId] = Date.now();
+        
+        // تنظيف الطلبات القديمة (أكثر من 10 ثواني)
+        var now = Date.now();
+        for (var reqId in pendingRequests) {
+            if (now - pendingRequests[reqId] > 10000) {
+                delete pendingRequests[reqId];
+            }
+        }
+
         browser.runtime.sendMessage({
-            type:   'GET_CONTEXT',
-            domain: location.hostname
+            type:      'GET_CONTEXT',
+            domain:    location.hostname,
+            requestId: currentRequestId  // 🆕 أرسل معرف الطلب
         }).then(function (response) {
             if (!response) {
-                logDebug('⚠️ GET_CONTEXT: empty response');
+                logDebug('⚠️ GET_CONTEXT #' + currentRequestId + ': empty response');
+                delete pendingRequests[currentRequestId];
                 return;
             }
 
-            logDebug('📩 [aicapture] GET_CONTEXT response: hasContext=' + response.hasContext);
+            // 🆕 تحقق من مطابقة requestId — تجاهل الردود القديمة
+            if (response.requestId && response.requestId !== currentRequestId) {
+                logDebug('⏭️ GET_CONTEXT #' + currentRequestId + ': stale response (id=' + response.requestId + '), ignoring');
+                return;
+            }
+
+            delete pendingRequests[currentRequestId];
 
             if (!response.hasContext) {
                 return;
@@ -530,11 +559,11 @@
             var contextId = response.id || 0;
 
             if (!context || context.length === 0) {
-                logDebug('⚠️ GET_CONTEXT: context is empty');
+                logDebug('⚠️ GET_CONTEXT #' + currentRequestId + ': context is empty');
                 return;
             }
 
-            logDebug('✅ GET_CONTEXT: Got context, length=' + context.length + ', id=' + contextId);
+            logDebug('✅ GET_CONTEXT #' + currentRequestId + ': Got context, length=' + context.length + ', id=' + contextId);
             
             // set busy flag قبل البدء
             contextBusy = true;
@@ -544,7 +573,8 @@
             writeAndSend(context, contextId);
 
         }).catch(function (e) {
-            logDebug('❌ GET_CONTEXT error: ' + e.message);
+            logDebug('❌ GET_CONTEXT #' + currentRequestId + ' error: ' + e.message);
+            delete pendingRequests[currentRequestId];
         });
     }, 1000);
 
