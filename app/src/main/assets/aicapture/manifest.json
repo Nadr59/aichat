@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "AiChat Capture",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Capture AI responses and send them to Kotlin native app",
   "browser_specific_settings": {
     "gecko": {
