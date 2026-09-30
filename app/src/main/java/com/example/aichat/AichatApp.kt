@@ -8,10 +8,9 @@ import android.widget.Toast
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.example.aichat.data.local.ChatDatabase
-import com.example.aichat.data.local.SystemPrompt
-import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
+import com.example.aichat.data.model.MemoryItem
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -41,7 +40,7 @@ class AichatApp : Application() {
         private set
 
     // ══════════════════════════════════════════════════════════════════
-    // سجل تشخيص دائم
+    // Debug Log
     // ══════════════════════════════════════════════════════════════════
 
     val debugLog: SnapshotStateList<String> = mutableStateListOf()
@@ -72,7 +71,7 @@ class AichatApp : Application() {
 
     fun triggerCapture() {
         captureFlag = true
-        logDebug("📌 captureFlag = true (manual capture requested)")
+        logDebug("📌 captureFlag = true (manual capture)")
     }
 
     fun setContextPending(text: String) {
@@ -94,7 +93,7 @@ class AichatApp : Application() {
         val memoryContext = MemoryContextBuilder().build(memories)
 
         if (memoryContext.isBlank()) {
-            logDebug("⚠️ sendContextToPage: لا توجد ذكريات لإرسالها")
+            logDebug("⚠️ sendContextToPage: No memories")
             return
         }
 
@@ -117,7 +116,7 @@ class AichatApp : Application() {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // WebExtension MessageDelegate — aicapture
+    // WebExtension MessageDelegate
     // ══════════════════════════════════════════════════════════════════
 
     private val messageDelegateAiCapture = object : WebExtension.MessageDelegate {
@@ -130,17 +129,16 @@ class AichatApp : Application() {
 
             val json = parseMessage(message)
             if (json == null) {
-                logDebug("❌ onMessage: parseMessage=null, raw=$message")
+                logDebug("❌ parseMessage=null")
                 return GeckoResult.fromValue(null)
             }
 
             val type = json.optString("type")
             if (type.isBlank()) {
-                logDebug("❌ onMessage: empty type")
+                logDebug("❌ empty type")
                 return GeckoResult.fromValue(null)
             }
 
-            // تسجيل الاستقبال (تجاهل GET_CONTEXT)
             if (type != "GET_CONTEXT") {
                 logDebug("📩 [aicapture] $type")
             }
@@ -148,7 +146,7 @@ class AichatApp : Application() {
             return when (type) {
 
                 // ══════════════════════════════════════════════════════
-                // المسار 1: التقاط يدوي
+                // Manual Capture
                 // ══════════════════════════════════════════════════════
 
                 "CHECK_CAPTURE" -> handleCheckCapture(json)
@@ -159,7 +157,7 @@ class AichatApp : Application() {
                 }
 
                 // ══════════════════════════════════════════════════════
-                // المسار 2: استجابة تلقائية
+                // Auto Response
                 // ══════════════════════════════════════════════════════
 
                 "AI_RESPONSE" -> {
@@ -168,7 +166,7 @@ class AichatApp : Application() {
                 }
 
                 // ══════════════════════════════════════════════════════
-                // المسار 3: إرسال السياق (محسّن)
+                // Context Flow
                 // ══════════════════════════════════════════════════════
 
                 "GET_CONTEXT" -> handleGetContext()
@@ -184,7 +182,7 @@ class AichatApp : Application() {
                 }
 
                 // ══════════════════════════════════════════════════════
-                // التشخيص
+                // Debug
                 // ══════════════════════════════════════════════════════
 
                 "DEBUG_INFO" -> {
@@ -193,15 +191,8 @@ class AichatApp : Application() {
                     GeckoResult.fromValue(null)
                 }
 
-                "UNKNOWN_TYPE" -> {
-                    val original = json.optString("original")
-                    val payload  = json.optString("payload")
-                    logDebug("⚠️ UNKNOWN_TYPE: $original | $payload")
-                    GeckoResult.fromValue(null)
-                }
-
                 else -> {
-                    logDebug("⚠️ unknown message type: $type")
+                    logDebug("⚠️ unknown type: $type")
                     GeckoResult.fromValue(null)
                 }
             }
@@ -209,7 +200,7 @@ class AichatApp : Application() {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // معالجات الرسائل
+    // Message Handlers
     // ══════════════════════════════════════════════════════════════════
 
     private fun handleCheckCapture(json: JSONObject): GeckoResult<Any> {
@@ -217,7 +208,7 @@ class AichatApp : Application() {
         captureFlag = false
         
         if (flag) {
-            logDebug("📡 captureFlag TRUE → content.js سيستخرج الاستجابة الآن")
+            logDebug("📡 Capture triggered")
         }
         
         return GeckoResult.fromValue(
@@ -233,7 +224,7 @@ class AichatApp : Application() {
         val msg = if (success) {
             "🧠 Capture OK: ${text.take(60)}…"
         } else {
-            "⚠️ Capture Failed: $debug"
+            "⚠️ Capture Failed"
         }
         logDebug(msg)
         
@@ -246,9 +237,7 @@ class AichatApp : Application() {
         val text   = json.optString("text")
         val domain = json.optString("domain", "unknown")
         
-        if (text.length < 80) {
-            return
-        }
+        if (text.length < 80) return
         
         logDebug("📨 Auto Response: ${text.take(60)}…")
         
@@ -258,7 +247,8 @@ class AichatApp : Application() {
     }
 
     /**
-     * GET_CONTEXT — محسّن مع معالجة أخطاء آمنة
+     * GET_CONTEXT — Response directly from onMessage
+     * No separate Native Host needed!
      */
     private fun handleGetContext(): GeckoResult<Any> {
         return try {
@@ -267,7 +257,6 @@ class AichatApp : Application() {
             
             logDebug("📤 GET_CONTEXT: has=$has, len=${pending.length}")
             
-            // أنشئ الـ JSON بشكل آمن
             val response = JSONObject()
             response.put("hasContext", has)
             response.put("context", if (has) pending else "")
@@ -275,17 +264,14 @@ class AichatApp : Application() {
             
             logDebug("📤 Sending response: hasContext=$has, len=${response.optString("context").length}")
             
-            // 🔴 لا تمسح هنا — اتركه حتى يأتي CONTEXT_CONSUMED
-            
             GeckoResult.fromValue(response)
         } catch (e: Exception) {
-            logDebug("❌ GET_CONTEXT error: ${e.message} | ${e.cause?.message}")
+            logDebug("❌ GET_CONTEXT error: ${e.message}")
             e.printStackTrace()
             GeckoResult.fromValue(
                 JSONObject()
                     .put("hasContext", false)
                     .put("context", "")
-                    .put("error", "GET_CONTEXT exception: ${e.message}")
             )
         }
     }
@@ -296,7 +282,7 @@ class AichatApp : Application() {
         val stage      = json.optString("stage", "")
         val detail     = json.optString("detail", "")
         
-        logDebug("✏️ CONTEXT_WRITTEN: success=$success, id=$contextId, stage=$stage")
+        logDebug("✏️ CONTEXT_WRITTEN: success=$success, id=$contextId")
         
         Handler(Looper.getMainLooper()).post {
             onContextWritten?.invoke(success, stage, detail)
@@ -304,27 +290,21 @@ class AichatApp : Application() {
         
         val userMsg = when {
             !success -> "❌ فشل الإرسال: $detail"
-            stage == "button_clicked" -> "✅ تم الإرسال للمنصة بنجاح"
-            stage == "enter_pressed" -> "✅ تم الضغط Enter"
-            else -> "✅ تمت الكتابة: $stage"
+            stage == "button_clicked" -> "✅ تم الإرسال بنجاح"
+            else -> "✅ تمت الكتابة"
         }
         showToast(userMsg)
     }
 
-    /**
-     * 🆕 CONTEXT_CONSUMED — حذف السياق الذي تم استهلاكه
-     */
     private fun handleContextConsumed(json: JSONObject) {
         val contextId = json.optLong("contextId", 0L)
         
-        logDebug("🗑️ CONTEXT_CONSUMED: contextId=$contextId (lastId=$lastContextId)")
+        logDebug("🗑️ CONTEXT_CONSUMED: contextId=$contextId")
         
         if (contextId == lastContextId && contextId != 0L) {
             contextPending = ""
             lastContextId = 0L
             logDebug("✅ contextPending cleared")
-        } else if (contextId != 0L) {
-            logDebug("⚠️ CONTEXT_CONSUMED: id mismatch - expected $lastContextId, got $contextId")
         }
     }
 
@@ -339,8 +319,8 @@ class AichatApp : Application() {
             webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
             Log.d("AichatApp", "✅ Database ready")
         } catch (e: Exception) {
-            Log.e("AichatApp", "❌ Database initialization failed: ${e.message}", e)
-            showToast("❌ فشل تهيئة قاعدة البيانات")
+            Log.e("AichatApp", "❌ Database failed: ${e.message}", e)
+            showToast("❌ Database error")
             throw e
         }
     }
@@ -365,7 +345,7 @@ class AichatApp : Application() {
             }
         } catch (e: Exception) {
             Log.e("AichatApp", "❌ GeckoRuntime error: ${e.message}", e)
-            showToast("❌ فشل إنشاء GeckoRuntime")
+            showToast("❌ GeckoRuntime error")
             null
         }
     }
@@ -381,37 +361,33 @@ class AichatApp : Application() {
                     if (ext != null) {
                         aiChatExtension = ext
                         ext.setMessageDelegate(messageDelegateAiCapture, "browser")
-                        Log.d("AichatApp", "✅ aicapture extension loaded: ${ext.id}")
-                        logDebug("✅ Extension 'aicapture' loaded successfully")
+                        Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
+                        logDebug("✅ Extension loaded successfully")
                     } else {
-                        Log.e("AichatApp", "❌ Extension load returned null")
-                        logDebug("❌ Extension load returned null")
+                        Log.e("AichatApp", "❌ Extension = null")
+                        logDebug("❌ Extension load failed")
                     }
                 },
                 { error ->
-                    val msg = error?.message ?: "Unknown error"
-                    val cause = error?.cause?.message ?: ""
-                    Log.e("AichatApp", "❌ aicapture error: $msg | $cause")
+                    val msg = error?.message ?: "unknown"
+                    Log.e("AichatApp", "❌ Extension error: $msg")
                     logDebug("❌ Extension error: $msg")
                 }
             )
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // معالج تحويل الرسائل
+    // Message Parser
     // ══════════════════════════════════════════════════════════════════
 
     private fun parseMessage(message: Any): JSONObject? = try {
         when (message) {
             is JSONObject -> message
             is Map<*, *>  -> JSONObject(message as Map<*, *>)
-            else -> {
-                Log.w("AichatApp", "⚠️ parseMessage: unsupported type ${message.javaClass.simpleName}")
-                null
-            }
+            else -> null
         }
     } catch (e: Exception) {
-        Log.e("AichatApp", "❌ parseMessage exception: ${e.message}", e)
+        Log.e("AichatApp", "❌ parseMessage: ${e.message}")
         null
     }
 }
