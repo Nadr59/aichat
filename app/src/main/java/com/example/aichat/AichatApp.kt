@@ -31,7 +31,7 @@ class AichatApp : Application() {
 
     @Volatile private var captureFlag    = false
     @Volatile private var contextPending = ""
-    @Volatile private var lastContextId  = 0L    // 🆕 تتبع معرف الـ context الحالي
+    @Volatile private var lastContextId  = 0L
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
@@ -41,43 +41,24 @@ class AichatApp : Application() {
         private set
 
     // ══════════════════════════════════════════════════════════════════
-    // 🆕 سجل تشخيص دائم داخل التطبيق (بديل لـ Logcat غير المتاح في CI)
+    // سجل تشخيص دائم
     // ══════════════════════════════════════════════════════════════════
 
     val debugLog: SnapshotStateList<String> = mutableStateListOf()
 
-    /**
-     * تسجيل شامل: Log + Toast + السجل الدائم
-     * (للرسائل التشخيصية المهمة من Extension أو داخل التطبيق)
-     */
     fun logDebug(msg: String) {
         Log.d("AichatApp", msg)
-        
         Handler(Looper.getMainLooper()).post {
             val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-            val fullMsg = "$time  $msg"
-            debugLog.add(0, fullMsg)
-            
-            // احتفظ بـ 150 سطر فقط
-            if (debugLog.size > 150) {
-                debugLog.removeAt(debugLog.lastIndex)
-            }
-            
-            // عرض Toast
+            debugLog.add(0, "$time  $msg")
+            if (debugLog.size > 150) debugLog.removeAt(debugLog.lastIndex)
             Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
         }
     }
 
-    /**
-     * تنظيف السجل التشخيصي
-     */
     fun clearDebugLog() {
         debugLog.clear()
     }
-
-    // ══════════════════════════════════════════════════════════════════
-    // Toast Helper (بدون تسجيل - للرسائل العادية)
-    // ══════════════════════════════════════════════════════════════════
 
     fun showToast(msg: String) {
         Handler(Looper.getMainLooper()).post {
@@ -86,33 +67,14 @@ class AichatApp : Application() {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // المسار 1 — التقاط يدوي (زر 🧠)
+    // Public APIs
     // ══════════════════════════════════════════════════════════════════
 
-    /**
-     * تشغيل العلم لالتقاط استجابة الـ AI الحالية
-     * (يُستدعى من UI عند الضغط على زر 🧠)
-     */
     fun triggerCapture() {
         captureFlag = true
         logDebug("📌 captureFlag = true (manual capture requested)")
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // المسار 2 — إرسال السياق إلى المنصة
-    // ══════════════════════════════════════════════════════════════════
-
-    /**
-     * تعيين نص مباشرة للإرسال إلى المنصة
-     * (يُستخدم من Dialog أو قائمة)
-     *
-     * آلية العمل:
-     * 1. يُستدعى من UI مع نص
-     * 2. يُخزّن في contextPending
-     * 3. content.js يلتقطه عبر GET_CONTEXT polling (كل ثانية)
-     * 4. يُكتب في textarea ويُضغط الزر
-     * 5. يُرسل CONTEXT_WRITTEN للتأكيد
-     */
     fun setContextPending(text: String) {
         if (text.isBlank()) {
             logDebug("⚠️ setContextPending: Empty text, ignoring")
@@ -120,14 +82,10 @@ class AichatApp : Application() {
         }
 
         contextPending = text
-        lastContextId = System.currentTimeMillis()  // 🆕 معرف فريد للـ context
+        lastContextId = System.currentTimeMillis()
         logDebug("📤 Context pending set: ${text.length} chars, id=$lastContextId")
     }
 
-    /**
-     * الدالة القديمة - للتوافق مع الكود القديم
-     * (تبني السياق من الذكريات ثم تستدعي setContextPending)
-     */
     fun sendContextToPage(
         memories:              List<MemoryItem>,
         customInstruction:     String  = "",
@@ -140,7 +98,6 @@ class AichatApp : Application() {
             return
         }
 
-        // تنسيق مناسب لـ textarea
         val contextText = buildString {
             appendLine("السياق من محادثاتي السابقة:")
             appendLine()
@@ -183,7 +140,7 @@ class AichatApp : Application() {
                 return GeckoResult.fromValue(null)
             }
 
-            // تسجيل الاستقبال (تجاهل GET_CONTEXT لأنه متكرر جداً)
+            // تسجيل الاستقبال (تجاهل GET_CONTEXT)
             if (type != "GET_CONTEXT") {
                 logDebug("📩 [aicapture] $type")
             }
@@ -191,7 +148,7 @@ class AichatApp : Application() {
             return when (type) {
 
                 // ══════════════════════════════════════════════════════
-                // المسار 1: التقاط يدوي (زر 🧠)
+                // المسار 1: التقاط يدوي
                 // ══════════════════════════════════════════════════════
 
                 "CHECK_CAPTURE" -> handleCheckCapture(json)
@@ -211,13 +168,18 @@ class AichatApp : Application() {
                 }
 
                 // ══════════════════════════════════════════════════════
-                // المسار 3: إرسال السياق
+                // المسار 3: إرسال السياق (محسّن)
                 // ══════════════════════════════════════════════════════
 
                 "GET_CONTEXT" -> handleGetContext()
 
                 "CONTEXT_WRITTEN" -> {
                     handleContextWritten(json)
+                    GeckoResult.fromValue(null)
+                }
+
+                "CONTEXT_CONSUMED" -> {
+                    handleContextConsumed(json)
                     GeckoResult.fromValue(null)
                 }
 
@@ -230,10 +192,6 @@ class AichatApp : Application() {
                     logDebug("🔍 JS: $info")
                     GeckoResult.fromValue(null)
                 }
-
-                // ══════════════════════════════════════════════════════
-                // 🆕 أي نوع غير معروف - لا يُسقط بصمت أبداً
-                // ══════════════════════════════════════════════════════
 
                 "UNKNOWN_TYPE" -> {
                     val original = json.optString("original")
@@ -251,13 +209,9 @@ class AichatApp : Application() {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // معالجات الرسائل التفصيلية
+    // معالجات الرسائل
     // ══════════════════════════════════════════════════════════════════
 
-    /**
-     * CHECK_CAPTURE — طلب التقاط يدوي
-     * يُرسل flag يشير إلى وجود طلب التقاط
-     */
     private fun handleCheckCapture(json: JSONObject): GeckoResult<Any> {
         val flag = captureFlag
         captureFlag = false
@@ -271,10 +225,6 @@ class AichatApp : Application() {
         )
     }
 
-    /**
-     * CAPTURE_RESULT — نتيجة التقاط يدوي
-     * يُرسل من content.js بعد استخراج النص بنجاح
-     */
     private fun handleCaptureResult(json: JSONObject) {
         val success = json.optBoolean("success", false)
         val text    = json.optString("text")
@@ -292,16 +242,12 @@ class AichatApp : Application() {
         }
     }
 
-    /**
-     * AI_RESPONSE — استجابة تلقائية من Polling
-     * يُرسل من content.js تلقائياً عند اكتشاف استجابة جديدة
-     */
     private fun handleAutoResponse(json: JSONObject) {
         val text   = json.optString("text")
         val domain = json.optString("domain", "unknown")
         
         if (text.length < 80) {
-            return  // تجاهل الرسائل القصيرة
+            return
         }
         
         logDebug("📨 Auto Response: ${text.take(60)}…")
@@ -312,67 +258,50 @@ class AichatApp : Application() {
     }
 
     /**
-     * GET_CONTEXT — طلب السياق (polling من content.js كل ثانية)
-     *
-     * 🔑 تحسينات:
-     * - لا نمسح contextPending هنا بعد الآن ❌ (كان يسبب race condition)
-     * - نرسل معرف فريد (id) مع السياق للتتبع
-     * - نترك المسح للـ CONTEXT_WRITTEN عند التأكيد الفعلي ✅
+     * GET_CONTEXT — محسّن مع معالجة أخطاء آمنة
      */
     private fun handleGetContext(): GeckoResult<Any> {
-        val pending = contextPending
-        val has     = pending.isNotBlank()
-        
-        // 🆕 لا تمسح: contextPending = ""
-        
-        if (has) {
-            logDebug("📤 GET_CONTEXT: has=true, len=${pending.length}, id=$lastContextId")
+        return try {
+            val pending = contextPending
+            val has = pending.isNotBlank()
+            
+            logDebug("📤 GET_CONTEXT: has=$has, len=${pending.length}")
+            
+            // أنشئ الـ JSON بشكل آمن
+            val response = JSONObject()
+            response.put("hasContext", has)
+            response.put("context", if (has) pending else "")
+            response.put("id", lastContextId)
+            
+            logDebug("📤 Sending response: hasContext=$has, len=${response.optString("context").length}")
+            
+            // 🔴 لا تمسح هنا — اتركه حتى يأتي CONTEXT_CONSUMED
+            
+            GeckoResult.fromValue(response)
+        } catch (e: Exception) {
+            logDebug("❌ GET_CONTEXT error: ${e.message} | ${e.cause?.message}")
+            e.printStackTrace()
+            GeckoResult.fromValue(
+                JSONObject()
+                    .put("hasContext", false)
+                    .put("context", "")
+                    .put("error", "GET_CONTEXT exception: ${e.message}")
+            )
         }
-        
-        return GeckoResult.fromValue(
-            JSONObject().apply {
-                put("hasContext", has)
-                put("context",    pending)
-                put("id",         lastContextId)  // 🆕 معرف فريد للتتبع
-            }
-        )
     }
 
-    /**
-     * CONTEXT_WRITTEN — تأكيد كتابة السياق
-     *
-     * 🔑 تحسينات:
-     * - نتحقق من معرف الـ context (contextId) قبل المسح
-     * - نمسح فقط عند النجاح المؤكد
-     * - نرسل رسالة مرئية (Toast) للمستخدم
-     */
     private fun handleContextWritten(json: JSONObject) {
         val success    = json.optBoolean("success", false)
         val contextId  = json.optLong("contextId", 0L)
         val stage      = json.optString("stage", "")
         val detail     = json.optString("detail", "")
-        val domain     = json.optString("domain", "unknown")
         
-        // تتبع
-        logDebug("✏️ CONTEXT_WRITTEN: success=$success, id=$contextId (lastId=$lastContextId), stage=$stage, domain=$domain")
+        logDebug("✏️ CONTEXT_WRITTEN: success=$success, id=$contextId, stage=$stage")
         
-        // تحديث UI/Callback
         Handler(Looper.getMainLooper()).post {
             onContextWritten?.invoke(success, stage, detail)
         }
         
-        // مسح السياق فقط عند النجاح والمطابقة
-        if (success && contextId == lastContextId && contextId != 0L) {
-            contextPending = ""
-            lastContextId = 0L
-            logDebug("🗑️ contextPending cleared (matched id)")
-        } else if (success) {
-            logDebug("⚠️ CONTEXT_WRITTEN success but id mismatch: $contextId != $lastContextId")
-        } else {
-            logDebug("❌ CONTEXT_WRITTEN failed: $detail")
-        }
-        
-        // عرض رسالة للمستخدم
         val userMsg = when {
             !success -> "❌ فشل الإرسال: $detail"
             stage == "button_clicked" -> "✅ تم الإرسال للمنصة بنجاح"
@@ -382,8 +311,25 @@ class AichatApp : Application() {
         showToast(userMsg)
     }
 
+    /**
+     * 🆕 CONTEXT_CONSUMED — حذف السياق الذي تم استهلاكه
+     */
+    private fun handleContextConsumed(json: JSONObject) {
+        val contextId = json.optLong("contextId", 0L)
+        
+        logDebug("🗑️ CONTEXT_CONSUMED: contextId=$contextId (lastId=$lastContextId)")
+        
+        if (contextId == lastContextId && contextId != 0L) {
+            contextPending = ""
+            lastContextId = 0L
+            logDebug("✅ contextPending cleared")
+        } else if (contextId != 0L) {
+            logDebug("⚠️ CONTEXT_CONSUMED: id mismatch - expected $lastContextId, got $contextId")
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════
-    // onCreate — تهيئة التطبيق
+    // onCreate
     // ══════════════════════════════════════════════════════════════════
 
     override fun onCreate() {
@@ -400,12 +346,9 @@ class AichatApp : Application() {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // GeckoRuntime — تحميل Extension
+    // GeckoRuntime
     // ══════════════════════════════════════════════════════════════════
 
-    /**
-     * إنشاء أو إرجاع GeckoRuntime (بدون تزامن دقيق للأداء)
-     */
     @Synchronized
     fun getOrCreateGeckoRuntime(): GeckoRuntime? {
         if (geckoRuntime != null) return geckoRuntime
@@ -427,9 +370,6 @@ class AichatApp : Application() {
         }
     }
 
-    /**
-     * تحميل Extension اليتيمة (aicapture)
-     */
     private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
         runtime.webExtensionController
             .ensureBuiltIn(
@@ -461,9 +401,6 @@ class AichatApp : Application() {
     // معالج تحويل الرسائل
     // ══════════════════════════════════════════════════════════════════
 
-    /**
-     * تحويل أي صيغة رسالة إلى JSONObject
-     */
     private fun parseMessage(message: Any): JSONObject? = try {
         when (message) {
             is JSONObject -> message
