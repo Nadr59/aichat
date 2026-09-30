@@ -3,7 +3,7 @@
 var NATIVE_APP = "browser";
 
 // ══════════════════════════════════════════════════════════════════
-// Helper: تسجيل محلي للتشخيص
+// Helper: Logging
 // ══════════════════════════════════════════════════════════════════
 
 function logLocal(message) {
@@ -17,28 +17,25 @@ function logLocal(message) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// Helper: إرسال رسالة آمن إلى Kotlin (Promise-based فقط)
-// ════════════════════════════════════════════════════════════════════
+// Helper: Send to Native (Promise-based)
+// ══════════════════════════════════════════════════════════════════
 
 function sendToNative(payload) {
     logLocal('🔄 sendToNative START: type=' + payload.type);
     
-    // Firefox API - ترجع Promise مباشرة، بدون callback
     return browser.runtime.sendNativeMessage(NATIVE_APP, payload)
         .then(function (response) {
-            logLocal('✅ sendToNative SUCCESS: type=' + payload.type + 
-                ', response len=' + (response ? JSON.stringify(response).length : 0));
+            logLocal('✅ sendToNative SUCCESS: type=' + payload.type);
             return response;
         })
         .catch(function (error) {
-            logLocal('❌ sendToNative CATCH: type=' + payload.type + 
-                ', error=' + error.message);
+            logLocal('❌ sendToNative CATCH: type=' + payload.type + ', error=' + error.message);
             throw error;
         });
 }
 
 // ══════════════════════════════════════════════════════════════════
-// Main Message Listener
+// Message Listener
 // ══════════════════════════════════════════════════════════════════
 
 browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
@@ -50,7 +47,6 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
     var type = message.type;
     
-    // تجاهل تسجيل GET_CONTEXT — كثير جداً
     if (type !== "GET_CONTEXT") {
         logLocal('📨 Received: ' + type);
     }
@@ -90,7 +86,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             sendResponse({ capture: false });
         });
         
-        return true; // 🔴 مهم جداً
+        return true;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -114,7 +110,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // GET_CONTEXT — محسّن مع معالجة أخطاء شاملة
+    // GET_CONTEXT — Direct from Kotlin (onMessage)
     // ────────────────────────────────────────────────────────────────
     if (type === "GET_CONTEXT") {
         var requestId = message.requestId || 0;
@@ -123,7 +119,6 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             type:   "GET_CONTEXT",
             domain: message.domain || ""
         }).then(function (response) {
-            // تأكد أن response هو object وليس string
             var data = response;
             if (typeof response === 'string') {
                 logLocal('⚠️ GET_CONTEXT (id=' + requestId + '): response is string, parsing...');
@@ -155,10 +150,7 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
                     (data.context ? data.context.length : 0));
             }
             
-            // أضف requestId إلى الرد
             data.requestId = requestId;
-            
-            // تأكد من وجود الحقول المطلوبة
             data.hasContext = data.hasContext || false;
             data.context = data.context || "";
             
@@ -173,15 +165,14 @@ browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             });
         });
         
-        return true; // 🔴 حاسم جداً
+        return true;
     }
 
     // ────────────────────────────────────────────────────────────────
     // CONTEXT_WRITTEN
     // ────────────────────────────────────────────────────────────────
     if (type === "CONTEXT_WRITTEN") {
-        logLocal('✏️ CONTEXT_WRITTEN: success=' + message.success + 
-            ', contextId=' + (message.contextId || '?'));
+        logLocal('✏️ CONTEXT_WRITTEN: success=' + message.success);
         
         sendToNative({
             type:      "CONTEXT_WRITTEN",
@@ -263,7 +254,7 @@ browser.runtime.onInstalled.addListener(function (details) {
 });
 
 // ══════════════════════════════════════════════════════════════════
-// Startup Message
+// Startup
 // ══════════════════════════════════════════════════════════════════
 
 logLocal('✅ Background script ready');
