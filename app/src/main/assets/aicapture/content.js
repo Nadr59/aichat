@@ -346,6 +346,8 @@
 
     // ══════════════════════════════════════════════════════════════════
     // تنفيذ الكتابة والإرسال (async)
+    // 
+    // 🆕 محسّن مع CONTEXT_CONSUMED
     // ══════════════════════════════════════════════════════════════════
 
     function writeAndSend(context, contextId) {
@@ -374,6 +376,15 @@
             }).catch(function (e) {
                 logDebug('❌ Failed to send CONTEXT_WRITTEN: ' + e.message);
             });
+            
+            // 🆕 أخبر الـ Kotlin أن السياق استهلك (فشل)
+            browser.runtime.sendMessage({
+                type: 'CONTEXT_CONSUMED',
+                contextId: contextId
+            }).catch(function (e) {
+                logDebug('❌ Failed to send CONTEXT_CONSUMED: ' + e.message);
+            });
+            
             contextBusy = false;
             return;
         }
@@ -398,6 +409,15 @@
                     }).catch(function (e) {
                         logDebug('❌ Failed to send CONTEXT_WRITTEN: ' + e.message);
                     });
+                    
+                    // 🆕 أخبر الـ Kotlin أن السياق تم استهلاكه (نجح)
+                    browser.runtime.sendMessage({
+                        type: 'CONTEXT_CONSUMED',
+                        contextId: contextId
+                    }).catch(function (e) {
+                        logDebug('❌ Failed to send CONTEXT_CONSUMED: ' + e.message);
+                    });
+                    
                     contextBusy = false;
                     pendingContextId = null;
                 }, 1000);
@@ -411,6 +431,15 @@
                     detail:    e.message,
                     domain:    location.hostname
                 }).catch(function () {});
+                
+                // 🆕 أخبر الـ Kotlin أن السياق استهلك (خطأ)
+                browser.runtime.sendMessage({
+                    type: 'CONTEXT_CONSUMED',
+                    contextId: contextId
+                }).catch(function (e) {
+                    logDebug('❌ Failed to send CONTEXT_CONSUMED: ' + e.message);
+                });
+                
                 contextBusy = false;
             });
         }, 600);
@@ -505,13 +534,16 @@
     }, 1000);
 
     // ══════════════════════════════════════════════════════════════════
-    // Polling — GET_CONTEXT (محسّن مع Request Deduplication)
+    // Polling — GET_CONTEXT (محسّن مع Debugging شامل + CONTEXT_CONSUMED)
     // 
     // 🆕 تحسينات:
     // - أضفنا requestId لكل طلب لتجنب ردود قديمة
     // - نتتبع الطلبات المعلقة والردود المقابلة
     // - نتجاهل أي رد لم يطابق requestId الحالي
+    // - debugging شامل لكشف المشاكل
     // ══════════════════════════════════════════════════════════════════
+
+    var getContextPollCount = 0;
 
     setInterval(function () {
         if (document.visibilityState !== 'visible') return;
@@ -524,6 +556,8 @@
         var currentRequestId = lastRequestId;
         pendingRequests[currentRequestId] = Date.now();
         
+        getContextPollCount++;
+
         // تنظيف الطلبات القديمة (أكثر من 10 ثواني)
         var now = Date.now();
         for (var reqId in pendingRequests) {
@@ -537,15 +571,18 @@
             domain:    location.hostname,
             requestId: currentRequestId  // 🆕 أرسل معرف الطلب
         }).then(function (response) {
+            // 🆕 تشخيص شامل
+            logDebug('📬 GET_CONTEXT #' + currentRequestId + ': raw response=' + JSON.stringify(response));
+
             if (!response) {
-                logDebug('⚠️ GET_CONTEXT #' + currentRequestId + ': empty response');
+                logDebug('⚠️ GET_CONTEXT #' + currentRequestId + ': EMPTY response (background.js might be missing return true)');
                 delete pendingRequests[currentRequestId];
                 return;
             }
 
-            // 🆕 تحقق من مطابقة requestId — تجاهل الردود القديمة
+            // تحقق من مطابقة requestId
             if (response.requestId && response.requestId !== currentRequestId) {
-                logDebug('⏭️ GET_CONTEXT #' + currentRequestId + ': stale response (id=' + response.requestId + '), ignoring');
+                logDebug('⏭️ GET_CONTEXT #' + currentRequestId + ': STALE response (expected=' + currentRequestId + ', got=' + response.requestId + '), ignoring');
                 return;
             }
 
@@ -563,17 +600,19 @@
                 return;
             }
 
-            logDebug('✅ GET_CONTEXT #' + currentRequestId + ': Got context, length=' + context.length + ', id=' + contextId);
+            logDebug('✅ GET_CONTEXT #' + currentRequestId + ': VALID context! length=' + context.length + ', id=' + contextId);
+            logDebug('✅ contextBusy=' + contextBusy + ', about to call writeAndSend');
             
             // set busy flag قبل البدء
             contextBusy = true;
             pendingContextId = contextId;
             
+            logDebug('🚀 Calling writeAndSend now...');
             // ابدأ الكتابة والإرسال
             writeAndSend(context, contextId);
 
         }).catch(function (e) {
-            logDebug('❌ GET_CONTEXT #' + currentRequestId + ' error: ' + e.message);
+            logDebug('❌ GET_CONTEXT #' + currentRequestId + ' error: ' + e.message + ' | lastError=' + browser.runtime.lastError);
             delete pendingRequests[currentRequestId];
         });
     }, 1000);
