@@ -1,7 +1,8 @@
 {
   "manifest_version": 2,
   "name": "AiChat Capture",
-  "version": "1.0.9",
+  "version": "1.0.10",
+  "description": "Capture AI responses and send them to Kotlin native app",
   "browser_specific_settings": {
     "gecko": {
       "id": "aicapture@aichat.example.com"
@@ -27,20 +28,26 @@
     "scripts": ["background.js"],
     "persistent": true
   },
-  "content_scripts": [{
-    "matches": [
-      "*://chatgpt.com/*",
-      "*://*.openai.com/*",
-      "*://claude.ai/*",
-      "*://gemini.google.com/*",
-      "*://perplexity.ai/*",
-      "*://copilot.microsoft.com/*",
-      "*://grok.com/*",
-      "*://chat.mistral.ai/*",
-      "*://you.com/*"
-    ],
-    "js": ["content.js"],
-    "run_at": "document_idle",
-    "all_frames": false
-  }]
-}
+  "content_scripts": [
+    {
+      "matches": [
+        "*://chatgpt.com/*",
+        "*://*.openai.com/*",
+        "*://claude.ai/*",
+        "*://gemini.google.com/*",
+        "*://perplexity.ai/*",
+        "*://copilot.microsoft.com/*",
+        "*://grok.com/*",
+        "*://chat.mistral.ai/*",
+        "*://you.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  }
+        }
