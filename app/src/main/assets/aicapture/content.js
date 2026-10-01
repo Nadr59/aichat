@@ -1,4 +1,5 @@
 (function () {
+    "use strict";
 
     // ══════════════════════════════════════════════════════════════════
     // حماية من iframe والتكرار
@@ -9,39 +10,43 @@
     window.__aiCaptureActive = true;
 
     // ══════════════════════════════════════════════════════════════════
-    // المتغيرات العامة
+    // الثوابت والمتغيرات
     // ══════════════════════════════════════════════════════════════════
 
-    var lastSentText      = '';
-    var debounceTimer     = null;
-    var DEBOUNCE_MS       = 1800;
-    var MIN_LEN           = 30;
-    var MAX_LEN           = 3000;
-    var contextBusy       = false;
-    var pendingContextId  = null;
-    var contextWriteTimer = null;
-    var lastRequestId     = 0;
-    var pendingRequests   = {};
+    var BUILD           = 'v1.0.16-poll';   // غيّرها مع كل تعديل للتأكد من النسخة
+    var POLL_MS         = 1000;
+    var DEBOUNCE_MS     = 1800;
+    var MIN_LEN         = 30;
+    var MAX_LEN         = 3000;
+    var JOB_TIMEOUT_MS  = 20000;
+
+    var lastSentText    = '';
+    var debounceTimer   = null;
+    var pollCount       = 0;
+    var pollInFlight    = false;
+    var pollStartedAt   = 0;
+    var lastPollErr     = '';
+    var activeJob       = null;     // مهمة الكتابة/الإرسال الجارية
 
     // ══════════════════════════════════════════════════════════════════
-    // Debug Helper
+    // Messaging helpers
     // ══════════════════════════════════════════════════════════════════
+
+    function send(msg) {
+        try {
+            return browser.runtime.sendMessage(msg).catch(function () {});
+        } catch (e) {
+            return Promise.resolve();
+        }
+    }
 
     function logDebug(message) {
-        var timestamp = new Date().toLocaleTimeString('en-US', {
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
+        var ts = new Date().toLocaleTimeString('en-US', {
+            hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
         });
-        
-        var fullMsg = timestamp + '  ' + message;
-        console.log('[AiCapture] ' + fullMsg);
-        
-        browser.runtime.sendMessage({
-            type: 'DEBUG_INFO',
-            info: fullMsg
-        }).catch(function () {});
+        var full = ts + '  ' + message;
+        console.log('[AiCapture] ' + full);
+        send({ type: 'DEBUG_INFO', info: full });
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -55,9 +60,18 @@
             .trim();
     }
 
+    function norm(s) {
+        return (s || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function q(sel, root) {
+        try { return (root || document).querySelector(sel); }
+        catch (e) { return null; }
+    }
+
     function isVisible(el) {
         if (!el) return false;
-        var r  = el.getBoundingClientRect();
+        var r = el.getBoundingClientRect();
         if (r.width === 0 && r.height === 0) return false;
         var cs = window.getComputedStyle(el);
         return cs.display !== 'none' && cs.visibility !== 'hidden';
@@ -79,25 +93,17 @@
     // ══════════════════════════════════════════════════════════════════
 
     function extractChatGPT() {
-        var turns = document.querySelectorAll(
-            '[data-message-author-role="assistant"]'
-        );
+        var turns = document.querySelectorAll('[data-message-author-role="assistant"]');
         for (var i = turns.length - 1; i >= 0; i--) {
             var turn = turns[i];
             if (turn.closest('[data-is-streaming="true"]')) continue;
-            var inner = turn.querySelector(
-                '.markdown, .prose, .whitespace-pre-wrap'
-            ) || turn;
+            var inner = turn.querySelector('.markdown, .prose, .whitespace-pre-wrap') || turn;
             var t = clean(inner.innerText);
             if (t.length >= MIN_LEN) return t;
         }
-        var articles = document.querySelectorAll(
-            'article[data-testid^="conversation-turn"]'
-        );
+        var articles = document.querySelectorAll('article[data-testid^="conversation-turn"]');
         for (var j = articles.length - 1; j >= 0; j--) {
-            if (articles[j].querySelector(
-                '[data-message-author-role="user"]'
-            )) continue;
+            if (articles[j].querySelector('[data-message-author-role="user"]')) continue;
             var t2 = clean(articles[j].innerText);
             if (t2.length >= MIN_LEN) return t2;
         }
@@ -105,9 +111,7 @@
     }
 
     function extractClaude() {
-        return lastMatching(
-                '[data-is-streaming="false"] .font-claude-message'
-            )
+        return lastMatching('[data-is-streaming="false"] .font-claude-message')
             || lastMatching('.font-claude-message')
             || lastMatching('[data-is-streaming="false"]');
     }
@@ -126,14 +130,12 @@
             '[contenteditable="true"]'
         ].join(', ');
 
-        var blocks = document.querySelectorAll(
-            'article, section, main div, p, li, pre, blockquote'
-        );
+        var blocks = document.querySelectorAll('article, section, main div, p, li, pre, blockquote');
         var best = '';
         for (var i = 0; i < blocks.length; i++) {
             var el = blocks[i];
-            if (el.closest(EXCLUDE))    continue;
-            if (!isVisible(el))         continue;
+            if (el.closest(EXCLUDE)) continue;
+            if (!isVisible(el)) continue;
             if (el.querySelectorAll('p, li, pre').length > 60) continue;
             var t = clean(el.innerText);
             if (t.length > best.length) best = t;
@@ -161,289 +163,285 @@
         var host = location.hostname;
 
         if (/chatgpt\.com|openai\.com/.test(host)) {
-            var selectors = [
-                '#prompt-textarea',
-                'textarea[placeholder*="Message"]',
-                'textarea[data-id="root"]',
-                'div[contenteditable="true"]',
-                'textarea'
-            ];
-            
-            for (var i = 0; i < selectors.length; i++) {
-                var el = document.querySelector(selectors[i]);
-                if (el) return el;
-            }
-            return null;
+            return q('#prompt-textarea')
+                || q('textarea[placeholder*="Message"]')
+                || q('textarea[data-id="root"]')
+                || q('div[contenteditable="true"]')
+                || q('textarea');
         }
-        
         if (/claude\.ai/.test(host)) {
-            return document.querySelector('.ProseMirror')
-                || document.querySelector('[contenteditable="true"]');
+            return q('.ProseMirror[contenteditable="true"]')
+                || q('.ProseMirror')
+                || q('[contenteditable="true"]');
         }
-        
         if (/gemini\.google\.com/.test(host)) {
-            return document.querySelector('.ql-editor')
-                || document.querySelector('[contenteditable="true"]');
+            return q('.ql-editor')
+                || q('[contenteditable="true"]');
         }
-        
-        return document.querySelector('textarea')
-            || document.querySelector('[contenteditable="true"]');
+        return q('textarea') || q('[contenteditable="true"]');
+    }
+
+    function isInputEmpty() {
+        var input = findInputBox();
+        if (!input) return true;
+        if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
+            return (input.value || '').trim().length === 0;
+        }
+        return (input.textContent || '').trim().length === 0;
     }
 
     // ══════════════════════════════════════════════════════════════════
     // Write to Input Box
     // ══════════════════════════════════════════════════════════════════
 
+    function contentHasText(input, text) {
+        var preview = norm(text).slice(0, 20);
+        return norm(input.textContent || input.innerText || '').indexOf(preview) !== -1;
+    }
+
+    function selectAllContents(input) {
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        var range = document.createRange();
+        range.selectNodeContents(input);
+        sel.addRange(range);
+    }
+
+    function tryPaste(input, text) {
+        try {
+            var dt = new DataTransfer();
+            dt.setData('text/plain', text);
+            var ev = new ClipboardEvent('paste', {
+                clipboardData: dt, bubbles: true, cancelable: true
+            });
+            input.dispatchEvent(ev);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
     function writeToInputBox(text) {
-        logDebug('📝 writeToInputBox called, text length: ' + text.length);
-        
+        logDebug('📝 writeToInputBox: length=' + text.length);
+
         var input = findInputBox();
         if (!input) {
             logDebug('❌ writeToInputBox: No input box found');
             return { ok: false, stage: 'find=NULL' };
         }
+        logDebug('✅ Input found: <' + input.tagName + '>');
 
-        logDebug('✅ writeToInputBox: Input found (' + input.tagName + ')');
-
+        // ── textarea / input ──
         if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
             try {
                 input.focus();
-                var setter = Object.getOwnPropertyDescriptor(
-                    window.HTMLTextAreaElement.prototype, 'value'
-                ).set;
+                var proto  = input.tagName === 'TEXTAREA'
+                    ? window.HTMLTextAreaElement.prototype
+                    : window.HTMLInputElement.prototype;
+                var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
                 setter.call(input, text);
                 input.dispatchEvent(new Event('input',  { bubbles: true }));
                 input.dispatchEvent(new Event('change', { bubbles: true }));
-                logDebug('✅ writeToInputBox: Text written to textarea');
+                logDebug('✅ Text written to textarea');
                 return { ok: true, stage: 'textarea' };
             } catch (e) {
-                logDebug('❌ writeToInputBox: Textarea error: ' + e.message);
+                logDebug('❌ Textarea error: ' + e.message);
                 return { ok: false, stage: 'textarea-err=' + e.message };
             }
         }
 
-        logDebug('📝 writeToInputBox: Trying contenteditable...');
+        // ── contenteditable ──
         input.focus();
-        
-        var activeOk = document.activeElement === input
-                    || input.contains(document.activeElement);
+        var activeOk = document.activeElement === input || input.contains(document.activeElement);
         if (!activeOk) {
-            logDebug('❌ writeToInputBox: Focus failed');
+            logDebug('❌ Focus failed');
             return { ok: false, stage: 'focus-failed' };
         }
 
-        try {
-            var sel = window.getSelection();
-            sel.removeAllRanges();
-            var range = document.createRange();
-            range.selectNodeContents(input);
-            range.collapse(false);
-            sel.addRange(range);
-        } catch (e) {
-            logDebug('❌ writeToInputBox: Caret error: ' + e.message);
+        try { selectAllContents(input); }
+        catch (e) {
+            logDebug('❌ Selection error: ' + e.message);
             return { ok: false, stage: 'caret-err=' + e.message };
         }
 
-        var done = document.execCommand('insertText', false, text);
-        if (!done) {
-            logDebug('❌ writeToInputBox: execCommand failed');
-            return { ok: false, stage: 'execCommand=false' };
+        var done = false;
+        try { done = document.execCommand('insertText', false, text); }
+        catch (e) { done = false; }
+
+        if (done && contentHasText(input, text)) {
+            logDebug('✅ Text written (execCommand)');
+            return { ok: true, stage: 'contenteditable' };
         }
 
-        var preview = text.slice(0, 20);
-        var content = input.textContent || input.innerText || '';
-        if (!content.includes(preview)) {
-            logDebug('❌ writeToInputBox: Text verification failed');
-            return { ok: false, stage: 'reverted' };
+        // بديل: محاكاة اللصق
+        logDebug('⚠️ execCommand failed/unverified, trying paste fallback');
+        try { input.focus(); selectAllContents(input); } catch (e) {}
+        if (tryPaste(input, text) && contentHasText(input, text)) {
+            logDebug('✅ Text written (paste fallback)');
+            return { ok: true, stage: 'contenteditable-paste' };
         }
 
-        logDebug('✅ writeToInputBox: Text written to contenteditable');
-        return { ok: true, stage: 'contenteditable' };
+        logDebug('❌ Text verification failed');
+        return { ok: false, stage: done ? 'reverted' : 'execCommand=false' };
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Find Send Button
+    // Send Button
     // ══════════════════════════════════════════════════════════════════
 
     function findSendButton() {
         var host = location.hostname;
+        var btn  = null;
 
-        if (/chatgpt\.com/.test(host)) {
-            return document.querySelector('button[data-testid="send-button"]')
-                || document.querySelector('button[aria-label="Send prompt"]')
-                || document.querySelector('button[aria-label="إرسال رسالة"]')
-                || document.querySelector('button[type="submit"]');
+        if (/chatgpt\.com|openai\.com/.test(host)) {
+            btn = q('button[data-testid="send-button"]')
+               || q('#composer-submit-button')
+               || q('button[aria-label="Send prompt" i]')
+               || q('button[aria-label="Send message" i]')
+               || q('button[aria-label="إرسال رسالة"]');
+        } else if (/gemini\.google\.com/.test(host)) {
+            btn = q('button.send-button')
+               || q('button[aria-label="Send message" i]')
+               || q('button[aria-label="إرسال الرسالة"]');
+        } else if (/claude\.ai/.test(host)) {
+            btn = q('button[aria-label="Send message" i]');
         }
-        if (/gemini\.google\.com/.test(host)) {
-            return document.querySelector('button[aria-label="Send message"]')
-                || document.querySelector('button[aria-label="إرسال الرسالة"]')
-                || document.querySelector('button[type="submit"]');
-        }
-        if (/claude\.ai/.test(host)) {
-            return document.querySelector('button[aria-label="Send Message"]')
-                || document.querySelector('button[type="submit"]');
-        }
-        return document.querySelector('button[type="submit"]')
-            || document.querySelector('button[aria-label*="send" i]')
-            || document.querySelector('button[aria-label*="إرسال" i]');
+        if (btn) return btn;
+
+        // احتياطي عام: ابحث ضمن نفس النموذج الذي يحوي حقل الإدخال أولًا
+        var input = findInputBox();
+        var scope = (input && input.closest && input.closest('form')) || document;
+        return q('button[type="submit"]', scope)
+            || q('button[aria-label*="send" i]', scope)
+            || q('button[aria-label*="إرسال"]', scope);
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Click Send Button (async)
-    // ══════════════════════════════════════════════════════════════════
+    function isDisabled(btn) {
+        return btn.disabled || btn.getAttribute('aria-disabled') === 'true';
+    }
 
+    function pressEnter() {
+        var input = findInputBox();
+        if (!input) return false;
+        input.focus();
+        ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+            input.dispatchEvent(new KeyboardEvent(type, {
+                key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                bubbles: true, cancelable: true, composed: true
+            }));
+        });
+        return true;
+    }
+
+    // يرجع { clicked: bool, method: 'button' | 'enter' | 'none' }
     function clickSendButton() {
         logDebug('🔘 Trying to click send button...');
-        
+
         return new Promise(function (resolve) {
             var attempts = 0;
-            var maxAttempts = 15;
-            var interval = setInterval(function () {
+            var MAX      = 15;
+            var timer = setInterval(function () {
                 attempts++;
                 var btn = findSendButton();
-                
-                if (btn && !btn.disabled) {
-                    clearInterval(interval);
-                    logDebug('✅ Button found and clicked');
+
+                if (btn && !isDisabled(btn)) {
+                    clearInterval(timer);
                     btn.click();
-                    resolve(true);
-                } else if (attempts >= maxAttempts) {
-                    clearInterval(interval);
-                    logDebug('⚠️ Button not found after ' + maxAttempts + ' attempts, trying Enter');
-                    
-                    var input = findInputBox();
-                    if (input) {
-                        input.dispatchEvent(new KeyboardEvent('keydown', {
-                            key: 'Enter',
-                            keyCode: 13,
-                            bubbles: true,
-                            composed: true
-                        }));
-                    }
-                    resolve(true);
+                    logDebug('✅ Send button clicked (attempt ' + attempts + ')');
+                    resolve({ clicked: true, method: 'button' });
+                    return;
+                }
+
+                if (attempts >= MAX) {
+                    clearInterval(timer);
+                    logDebug('⚠️ Button not usable after ' + MAX + ' attempts, trying Enter');
+                    var ok = pressEnter();
+                    resolve({ clicked: ok, method: ok ? 'enter' : 'none' });
                 }
             }, 200);
-
-            setTimeout(function () {
-                if (interval) {
-                    clearInterval(interval);
-                    logDebug('⏱️ clickSendButton timeout');
-                    resolve(false);
-                }
-            }, 5000);
         });
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Write and Send (async)
+    // Job: Write and Send
     // ══════════════════════════════════════════════════════════════════
 
+    function finishJob(job, success, stage, detail) {
+        if (job.done) return;
+        job.done = true;
+
+        job.timers.forEach(function (t) { clearTimeout(t); });
+        job.timers = [];
+
+        logDebug((success ? '✅' : '❌') + ' Job finished: id=' + job.id +
+                 ', stage=' + stage + (detail ? ', ' + detail : ''));
+
+        send({
+            type:      'CONTEXT_WRITTEN',
+            success:   !!success,
+            contextId: job.id,
+            stage:     stage,
+            detail:    detail || '',
+            domain:    location.hostname
+        });
+        send({ type: 'CONTEXT_CONSUMED', contextId: job.id });
+
+        if (activeJob === job) activeJob = null;
+    }
+
     function writeAndSend(context, contextId) {
-        logDebug('🚀 writeAndSend START: length=' + context.length + ', id=' + contextId);
-        
-        if (contextWriteTimer) {
-            clearTimeout(contextWriteTimer);
-            contextWriteTimer = null;
+        var job = { id: contextId, done: false, startedAt: Date.now(), timers: [] };
+        activeJob = job;
+
+        logDebug('🚀 writeAndSend: length=' + context.length + ', id=' + contextId +
+                 ', vis=' + document.visibilityState);
+
+        try {
+            var result = writeToInputBox(context);
+            if (!result.ok) {
+                finishJob(job, false, 'write_failed', result.stage);
+                return;
+            }
+
+            job.timers.push(setTimeout(function () {
+                clickSendButton().then(function (res) {
+                    job.timers.push(setTimeout(function () {
+                        var cleared = isInputEmpty();
+                        var stage = res.method === 'button' ? 'button_clicked'
+                                  : res.method === 'enter'  ? 'enter_sent'
+                                  : 'send_failed';
+                        finishJob(job, res.clicked, stage, 'input_cleared=' + cleared);
+                    }, 1000));
+                }).catch(function (e) {
+                    finishJob(job, false, 'click_error', e && e.message);
+                });
+            }, 600));
+
+        } catch (e) {
+            finishJob(job, false, 'exception', e && e.message);
         }
-
-        var result = writeToInputBox(context);
-        logDebug('🚀 writeToInputBox result: ok=' + result.ok + ', stage=' + result.stage);
-
-        if (!result.ok) {
-            logDebug('❌ writeAndSend: Write failed');
-            browser.runtime.sendMessage({
-                type:      'CONTEXT_WRITTEN',
-                success:   false,
-                contextId: contextId,
-                stage:     'write_failed',
-                detail:    result.stage,
-                domain:    location.hostname
-            }).catch(function (e) {
-                logDebug('❌ CONTEXT_WRITTEN error: ' + e.message);
-            });
-            
-            browser.runtime.sendMessage({
-                type: 'CONTEXT_CONSUMED',
-                contextId: contextId
-            }).catch(function () {});
-            
-            contextBusy = false;
-            return;
-        }
-
-        logDebug('✅ writeAndSend: Text written, waiting before click (600ms)');
-
-        setTimeout(function () {
-            logDebug('⏳ Starting clickSendButton...');
-            clickSendButton().then(function (clicked) {
-                logDebug('✅ Button handling finished, clicked=' + clicked);
-                
-                contextWriteTimer = setTimeout(function () {
-                    logDebug('✅ Confirming success after 1s delay');
-                    browser.runtime.sendMessage({
-                        type:      'CONTEXT_WRITTEN',
-                        success:   true,
-                        contextId: contextId,
-                        stage:     'button_clicked',
-                        domain:    location.hostname
-                    }).catch(function (e) {
-                        logDebug('❌ CONTEXT_WRITTEN error: ' + e.message);
-                    });
-                    
-                    browser.runtime.sendMessage({
-                        type: 'CONTEXT_CONSUMED',
-                        contextId: contextId
-                    }).catch(function (e) {
-                        logDebug('❌ CONTEXT_CONSUMED error: ' + e.message);
-                    });
-                    
-                    contextBusy = false;
-                    pendingContextId = null;
-                }, 1000);
-            }).catch(function (e) {
-                logDebug('❌ clickSendButton error: ' + e.message);
-                browser.runtime.sendMessage({
-                    type:      'CONTEXT_WRITTEN',
-                    success:   false,
-                    contextId: contextId,
-                    stage:     'click_error',
-                    detail:    e.message,
-                    domain:    location.hostname
-                }).catch(function () {});
-                
-                browser.runtime.sendMessage({
-                    type: 'CONTEXT_CONSUMED',
-                    contextId: contextId
-                }).catch(function () {});
-                
-                contextBusy = false;
-            });
-        }, 600);
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Auto Send
+    // Auto Send (ردود الذكاء الاصطناعي)
     // ══════════════════════════════════════════════════════════════════
 
     function sendAutoToKotlin(text) {
+        if (activeJob)                 return;
         if (!text || text.length < 80) return;
         if (text === lastSentText)     return;
-        
-        var textSnapshot = text;
-        setTimeout(function() {
+
+        var snapshot = text;
+        setTimeout(function () {
             var recheck = extractLatestResponse();
-            if (recheck === textSnapshot && textSnapshot !== lastSentText) {
-                lastSentText = textSnapshot;
-                logDebug('📤 Auto-sending response: ' + textSnapshot.length + ' chars');
-                try {
-                    browser.runtime.sendMessage({
-                        type:   'AI_RESPONSE',
-                        text:   textSnapshot,
-                        domain: location.hostname
-                    });
-                } catch (e) {
-                    logDebug('❌ AI_RESPONSE error: ' + e.message);
-                }
+            if (recheck === snapshot && snapshot !== lastSentText) {
+                lastSentText = snapshot;
+                logDebug('📤 Auto-sending response: ' + snapshot.length + ' chars');
+                send({
+                    type:   'AI_RESPONSE',
+                    text:   snapshot,
+                    domain: location.hostname
+                });
             }
         }, 1000);
     }
@@ -461,10 +459,7 @@
 
     function startObserver() {
         if (document.body) {
-            observer.observe(document.body, {
-                childList: true,
-                subtree:   true
-            });
+            observer.observe(document.body, { childList: true, subtree: true });
             logDebug('✅ MutationObserver started');
         } else {
             setTimeout(startObserver, 500);
@@ -473,112 +468,100 @@
     startObserver();
 
     // ══════════════════════════════════════════════════════════════════
-    // Polling — CHECK_CAPTURE
+    // Manual capture
     // ══════════════════════════════════════════════════════════════════
 
-    setInterval(function () {
-        if (document.visibilityState !== 'visible') return;
+    function handleCapture() {
+        logDebug('📩 Capture requested');
 
-        browser.runtime.sendMessage({
-            type:   'CHECK_CAPTURE',
-            domain: location.hostname
-        }).then(function (response) {
-            if (!response || !response.capture) return;
+        var text = extractLatestResponse();
+        var ok   = !!(text && text.length >= MIN_LEN);
 
-            logDebug('📩 [aicapture] CHECK_CAPTURE received');
-            
-            var text = extractLatestResponse();
-            var ok   = !!(text && text.length >= MIN_LEN);
-
-            browser.runtime.sendMessage({
-                type:    'CAPTURE_RESULT',
-                success: ok,
-                text:    ok ? text : '',
-                domain:  location.hostname,
-                debug: {
-                    assistant: document.querySelectorAll(
-                        '[data-message-author-role="assistant"]'
-                    ).length,
-                    articles: document.querySelectorAll('article').length,
-                    bodyLen:  document.body ? document.body.innerText.length : 0
-                }
-            });
-        }).catch(function (e) {
-            logDebug('❌ CHECK_CAPTURE error: ' + e.message);
+        send({
+            type:    'CAPTURE_RESULT',
+            success: ok,
+            text:    ok ? text : '',
+            domain:  location.hostname,
+            debug: {
+                assistant: document.querySelectorAll('[data-message-author-role="assistant"]').length,
+                articles:  document.querySelectorAll('article').length,
+                bodyLen:   document.body ? document.body.innerText.length : 0
+            }
         });
-    }, 1000);
+    }
 
     // ══════════════════════════════════════════════════════════════════
-    // Polling — GET_CONTEXT
+    // Polling — POLL (capture + context في طلب واحد)
     // ══════════════════════════════════════════════════════════════════
 
-    setInterval(function () {
-        if (document.visibilityState !== 'visible') return;
-        if (contextBusy) return;
+    function poll() {
+        pollCount++;
 
-        lastRequestId++;
-        var currentRequestId = lastRequestId;
-        pendingRequests[currentRequestId] = Date.now();
-        
-        var now = Date.now();
-        for (var reqId in pendingRequests) {
-            if (now - pendingRequests[reqId] > 10000) {
-                delete pendingRequests[reqId];
+        // نبض حياة (قبل أي شرط) لتشخيص التوقف
+        if (pollCount % 10 === 1) {
+            logDebug('💓 alive: vis=' + document.visibilityState +
+                     ' busy=' + (!!activeJob) + ' host=' + location.hostname +
+                     ' build=' + BUILD);
+        }
+
+        // watchdog: مهمة عالقة
+        if (activeJob) {
+            if (Date.now() - activeJob.startedAt > JOB_TIMEOUT_MS) {
+                logDebug('⚠️ Job watchdog timeout, resetting');
+                finishJob(activeJob, false, 'watchdog_timeout', '');
+            } else {
+                return;
             }
         }
 
+        // منع تداخل الطلبات
+        if (pollInFlight) {
+            if (Date.now() - pollStartedAt > 8000) pollInFlight = false;
+            else return;
+        }
+        pollInFlight  = true;
+        pollStartedAt = Date.now();
+
         browser.runtime.sendMessage({
-            type:      'GET_CONTEXT',
-            domain:    location.hostname,
-            requestId: currentRequestId
-        }).then(function (response) {
-            if (!response) {
-                logDebug('⚠️ GET_CONTEXT #' + currentRequestId + ': empty response');
-                delete pendingRequests[currentRequestId];
-                return;
+            type:    'POLL',
+            domain:  location.hostname,
+            visible: document.visibilityState === 'visible'
+        }).then(function (resp) {
+            pollInFlight = false;
+            lastPollErr  = '';
+            if (!resp) return;
+
+            if (resp.capture) handleCapture();
+
+            if (resp.hasContext && resp.context && !activeJob) {
+                logDebug('✅ Got context: length=' + resp.context.length + ', id=' + resp.id);
+                writeAndSend(resp.context, resp.id || 0);
             }
-
-            if (response.requestId && response.requestId !== currentRequestId) {
-                logDebug('⏭️ GET_CONTEXT #' + currentRequestId + ': stale response (id=' + response.requestId + '), ignoring');
-                return;
-            }
-
-            delete pendingRequests[currentRequestId];
-
-            if (!response.hasContext) {
-                return;
-            }
-            
-            var context = response.context || '';
-            var contextId = response.id || 0;
-
-            if (!context || context.length === 0) {
-                logDebug('⚠️ GET_CONTEXT #' + currentRequestId + ': context is empty');
-                return;
-            }
-
-            logDebug('✅ GET_CONTEXT #' + currentRequestId + ': Got context, length=' + context.length + ', id=' + contextId);
-            
-            contextBusy = true;
-            pendingContextId = contextId;
-            
-            writeAndSend(context, contextId);
-
         }).catch(function (e) {
-            logDebug('❌ GET_CONTEXT #' + currentRequestId + ' error: ' + e.message);
-            delete pendingRequests[currentRequestId];
+            pollInFlight = false;
+            var m = (e && e.message) ? e.message : String(e);
+            if (m !== lastPollErr) {          // لا تكرر نفس الخطأ كل ثانية
+                lastPollErr = m;
+                logDebug('❌ POLL error: ' + m);
+            }
         });
-    }, 1000);
+    }
+
+    setInterval(poll, POLL_MS);
 
     // ══════════════════════════════════════════════════════════════════
-    // Cleanup
+    // Page lifecycle
     // ══════════════════════════════════════════════════════════════════
 
     window.addEventListener('pagehide', function () {
-        logDebug('👋 Page is hiding, disconnecting observer');
+        logDebug('👋 pagehide');
         observer.disconnect();
-        if (contextWriteTimer) {
-            clearTimeout(contextWriteTimer);
+    });
+
+    window.addEventListener('pageshow', function (ev) {
+        if (ev.persisted) {
+            logDebug('🔁 pageshow (bfcache), restarting observer');
+            startObserver();
         }
     });
 
@@ -586,6 +569,6 @@
     // Startup
     // ══════════════════════════════════════════════════════════════════
 
-    logDebug('✅ Extension loaded successfully');
+    logDebug('✅ Extension loaded successfully BUILD=' + BUILD);
 
 })();
