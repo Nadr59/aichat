@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "AiChat Capture",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "Capture AI responses and send them to native app",
   "browser_specific_settings": {
     "gecko": {
@@ -10,17 +10,15 @@
   },
   "permissions": [
     "nativeMessaging",
-    "tabs",
-    "activeTab",
-    "*://chatgpt.com/*",
+    "*://*.chatgpt.com/*",
     "*://*.openai.com/*",
-    "*://claude.ai/*",
+    "*://*.claude.ai/*",
     "*://gemini.google.com/*",
-    "*://perplexity.ai/*",
+    "*://*.perplexity.ai/*",
     "*://copilot.microsoft.com/*",
-    "*://grok.com/*",
+    "*://*.grok.com/*",
     "*://chat.mistral.ai/*",
-    "*://you.com/*"
+    "*://*.you.com/*"
   ],
   "background": {
     "scripts": ["background.js"],
@@ -29,15 +27,15 @@
   "content_scripts": [
     {
       "matches": [
-        "*://chatgpt.com/*",
+        "*://*.chatgpt.com/*",
         "*://*.openai.com/*",
-        "*://claude.ai/*",
+        "*://*.claude.ai/*",
         "*://gemini.google.com/*",
-        "*://perplexity.ai/*",
+        "*://*.perplexity.ai/*",
         "*://copilot.microsoft.com/*",
-        "*://grok.com/*",
+        "*://*.grok.com/*",
         "*://chat.mistral.ai/*",
-        "*://you.com/*"
+        "*://*.you.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle",
