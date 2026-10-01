@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "AiChat Capture",
-  "version": "1.0.16",
+  "version": "1.0.18",
   "description": "Capture AI responses and send them to native app",
   "browser_specific_settings": {
     "gecko": {
