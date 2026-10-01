@@ -1,82 +1,102 @@
 (function () {
     "use strict";
 
-    /*
-     * ================================================================
-     * AiChat GeckoView DIRECT NATIVE MESSAGE TEST
-     * ================================================================
-     *
-     * هذا اختبار تشخيصي فقط.
-     *
-     * لا نستخدم:
-     *   browser.runtime.sendMessage()
-     *   background.js
-     *   POLL
-     *   DOM
-     *   MutationObserver
-     *   الكتابة داخل ChatGPT
-     *
-     * الهدف:
-     *
-     * content.js
-     *      ↓
-     * browser.runtime.sendNativeMessage()
-     *      ↓
-     * GeckoView
-     *      ↓
-     * AichatApp.MessageDelegate
-     *
-     * إذا ظهرت DIRECT_TEST RECEIVED في Kotlin،
-     * فهذا يعني أن content.js قادر على الوصول مباشرة
-     * إلى native messaging.
-     * ================================================================
-     */
+    // ============================================================
+    // AiChat — CONTENT.JS INJECTION TEST
+    // ============================================================
 
-    var host = "";
-
-    try {
-        host = location.hostname || "";
-    } catch (e) {
-        host = "unknown";
-    }
+    var timestamp = new Date().toLocaleTimeString();
 
     console.log(
-        "[AiChat DIRECT TEST] SCRIPT START - host=" + host
+        "[AiChat TEST] content.js EXECUTED at " + timestamp
     );
+
+    // ------------------------------------------------------------
+    // 1. تغيير عنوان الصفحة
+    // ------------------------------------------------------------
+
+    try {
+        document.title =
+            "[AiChat TEST OK] " + document.title;
+
+        console.log(
+            "[AiChat TEST] document.title changed"
+        );
+    } catch (e) {
+        console.log(
+            "[AiChat TEST] title error:",
+            e
+        );
+    }
+
+    // ------------------------------------------------------------
+    // 2. إنشاء علامة مرئية داخل الصفحة
+    // ------------------------------------------------------------
+
+    try {
+        var testElement = document.createElement("div");
+
+        testElement.id = "aichat-content-test";
+
+        testElement.textContent =
+            "✅ AiChat content.js يعمل — " + timestamp;
+
+        testElement.style.position = "fixed";
+        testElement.style.top = "10px";
+        testElement.style.left = "10px";
+        testElement.style.zIndex = "2147483647";
+
+        testElement.style.padding = "12px 16px";
+
+        testElement.style.background =
+            "rgba(0, 0, 0, 0.90)";
+
+        testElement.style.color = "white";
+
+        testElement.style.fontSize = "16px";
+        testElement.style.fontFamily = "sans-serif";
+
+        testElement.style.borderRadius = "8px";
+
+        testElement.style.boxShadow =
+            "0 2px 10px rgba(0,0,0,0.5)";
+
+        document.documentElement.appendChild(
+            testElement
+        );
+
+        console.log(
+            "[AiChat TEST] Visible test element created"
+        );
+
+    } catch (e) {
+
+        console.log(
+            "[AiChat TEST] DOM error:",
+            e
+        );
+    }
+
+    // ------------------------------------------------------------
+    // 3. محاولة وضع علامة في body أيضًا
+    // ------------------------------------------------------------
 
     try {
 
-        browser.runtime.sendNativeMessage(
-            "browser",
-            {
-                type: "DIRECT_TEST",
-                message: "DIRECT_NATIVE_MESSAGE_OK",
-                domain: host,
-                timestamp: Date.now()
-            }
-        )
-        .then(function (response) {
+        if (document.body) {
 
-            console.log(
-                "[AiChat DIRECT TEST] Native response:",
-                response
+            document.body.setAttribute(
+                "data-aichat-content-test",
+                "SUCCESS"
             );
 
-        })
-        .catch(function (error) {
+        }
 
-            console.log(
-                "[AiChat DIRECT TEST] Native message FAILED:",
-                error
-            );
-
-        });
-
-    } catch (error) {
+    } catch (e) {
 
         console.log(
-            "[AiChat DIRECT TEST] sendNativeMessage exception:",
-            error
+            "[AiChat TEST] body attribute error:",
+            e
         );
     }
 
