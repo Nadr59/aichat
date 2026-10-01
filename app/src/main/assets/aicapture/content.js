@@ -2,44 +2,26 @@
     "use strict";
 
     // ============================================================
-    // AiChat — CONTENT.JS INJECTION TEST
+    // AiChat — SEND NATIVE MESSAGE TEST
     // ============================================================
 
     var timestamp = new Date().toLocaleTimeString();
 
     console.log(
-        "[AiChat TEST] content.js EXECUTED at " + timestamp
+        "[AiChat NATIVE TEST] content.js EXECUTED at " + timestamp
     );
 
     // ------------------------------------------------------------
-    // 1. تغيير عنوان الصفحة
-    // ------------------------------------------------------------
-
-    try {
-        document.title =
-            "[AiChat TEST OK] " + document.title;
-
-        console.log(
-            "[AiChat TEST] document.title changed"
-        );
-    } catch (e) {
-        console.log(
-            "[AiChat TEST] title error:",
-            e
-        );
-    }
-
-    // ------------------------------------------------------------
-    // 2. إنشاء علامة مرئية داخل الصفحة
+    // 1. علامة مرئية تؤكد أن الاختبار بدأ
     // ------------------------------------------------------------
 
     try {
         var testElement = document.createElement("div");
 
-        testElement.id = "aichat-content-test";
+        testElement.id = "aichat-native-test";
 
         testElement.textContent =
-            "✅ AiChat content.js يعمل — " + timestamp;
+            "🧪 sendNativeMessage TEST — " + timestamp;
 
         testElement.style.position = "fixed";
         testElement.style.top = "10px";
@@ -66,38 +48,135 @@
         );
 
         console.log(
-            "[AiChat TEST] Visible test element created"
+            "[AiChat NATIVE TEST] Visible test element created"
         );
 
     } catch (e) {
 
         console.log(
-            "[AiChat TEST] DOM error:",
+            "[AiChat NATIVE TEST] DOM error:",
             e
         );
     }
 
     // ------------------------------------------------------------
-    // 3. محاولة وضع علامة في body أيضًا
+    // 2. التأكد من وجود sendNativeMessage
     // ------------------------------------------------------------
 
     try {
 
-        if (document.body) {
+        if (
+            typeof browser === "undefined" ||
+            !browser.runtime
+        ) {
 
-            document.body.setAttribute(
-                "data-aichat-content-test",
-                "SUCCESS"
+            console.log(
+                "[AiChat NATIVE TEST] ERROR: browser.runtime unavailable"
             );
 
+            return;
         }
+
+        if (
+            typeof browser.runtime.sendNativeMessage !== "function"
+        ) {
+
+            console.log(
+                "[AiChat NATIVE TEST] ERROR: sendNativeMessage unavailable"
+            );
+
+            return;
+        }
+
+        console.log(
+            "[AiChat NATIVE TEST] sendNativeMessage AVAILABLE"
+        );
 
     } catch (e) {
 
         console.log(
-            "[AiChat TEST] body attribute error:",
+            "[AiChat NATIVE TEST] API check error:",
             e
         );
+
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // 3. إرسال رسالة Native واحدة فقط
+    // ------------------------------------------------------------
+
+    var message = {
+        type: "AICHAT_NATIVE_TEST",
+        source: "content.js",
+        timestamp: timestamp,
+        test: true
+    };
+
+    console.log(
+        "[AiChat NATIVE TEST] Sending native message:",
+        message
+    );
+
+    try {
+
+        browser.runtime.sendNativeMessage(
+            "aichat",
+            message
+        )
+        .then(function (response) {
+
+            console.log(
+                "[AiChat NATIVE TEST] SUCCESS — native response:",
+                response
+            );
+
+            try {
+
+                testElement.textContent =
+                    "✅ sendNativeMessage SUCCESS — " +
+                    timestamp;
+
+            } catch (e) {
+                // ignore UI update error
+            }
+
+        })
+        .catch(function (error) {
+
+            console.log(
+                "[AiChat NATIVE TEST] FAILED:",
+                error
+            );
+
+            try {
+
+                testElement.textContent =
+                    "❌ sendNativeMessage FAILED — " +
+                    timestamp;
+
+            } catch (e) {
+                // ignore UI update error
+            }
+
+        });
+
+    } catch (e) {
+
+        console.log(
+            "[AiChat NATIVE TEST] EXCEPTION:",
+            e
+        );
+
+        try {
+
+            testElement.textContent =
+                "❌ sendNativeMessage EXCEPTION — " +
+                timestamp;
+
+        } catch (ignore) {
+            // ignore
+        }
     }
 
 })();
