@@ -8,9 +8,9 @@ import android.widget.Toast
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.example.aichat.data.local.ChatDatabase
+import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
-import com.example.aichat.data.model.MemoryItem
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -22,15 +22,27 @@ import java.util.Locale
 
 class AichatApp : Application() {
 
+    companion object {
+        private const val TAG                = "AichatApp"
+        private const val CONTEXT_TTL_MS     = 120_000L   // صلاحية السياق
+        private const val REDELIVER_AFTER_MS = 20_000L    // منع التسليم المزدوج
+    }
+
     @Volatile var geckoRuntime: GeckoRuntime? = null
         private set
 
     @Volatile var aiChatExtension: WebExtension? = null
         private set
 
-    @Volatile private var captureFlag    = false
-    @Volatile private var contextPending = ""
-    @Volatile private var lastContextId  = 0L
+    @Volatile private var captureFlag = false
+
+    // ── حالة السياق (محمية بـ ctxLock) ──
+    private val ctxLock = Any()
+    private var contextPending     = ""
+    private var lastContextId      = 0L
+    private var contextSetAt       = 0L
+    private var contextTarget      = ""      // نطاق مستهدف اختياري، فارغ = أي منصة
+    private var contextDeliveredAt = 0L
 
     var onAiResponseCaptured:  ((domain: String, text: String) -> Unit)? = null
     var onManualCaptureResult: ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
@@ -41,13 +53,19 @@ class AichatApp : Application() {
 
     val debugLog: SnapshotStateList<String> = mutableStateListOf()
 
-    fun logDebug(msg: String) {
-        Log.d("AichatApp", msg)
-        Handler(Looper.getMainLooper()).post {
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Logging
+    // ══════════════════════════════════════════════════════════════════
+
+    fun logDebug(msg: String, toast: Boolean = false) {
+        Log.d(TAG, msg)
+        mainHandler.post {
             val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
             debugLog.add(0, "$time  $msg")
             if (debugLog.size > 150) debugLog.removeAt(debugLog.lastIndex)
-            Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+            if (toast) Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -56,7 +74,7 @@ class AichatApp : Application() {
     }
 
     fun showToast(msg: String) {
-        Handler(Looper.getMainLooper()).post {
+        mainHandler.post {
             Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
         }
     }
@@ -70,26 +88,40 @@ class AichatApp : Application() {
         logDebug("📌 captureFlag = true (manual capture)")
     }
 
-    fun setContextPending(text: String) {
+    /**
+     * @param targetDomain نطاق المنصة المستهدفة (مثل "chatgpt.com")، أو فارغ لأي منصة.
+     */
+    fun setContextPending(text: String, targetDomain: String = "") {
         if (text.isBlank()) {
             logDebug("⚠️ setContextPending: Empty text, ignoring")
             return
         }
 
-        contextPending = text
-        lastContextId = System.currentTimeMillis()
-        logDebug("📤 Context pending set: ${text.length} chars, id=$lastContextId")
+        val id = System.currentTimeMillis()
+        synchronized(ctxLock) {
+            contextPending     = text
+            lastContextId      = id
+            contextSetAt       = id
+            contextTarget      = targetDomain.trim().lowercase(Locale.ROOT)
+            contextDeliveredAt = 0L
+        }
+        logDebug(
+            "📤 Context pending set: ${text.length} chars, id=$id" +
+                if (targetDomain.isNotBlank()) ", target=$targetDomain" else "",
+            toast = true
+        )
     }
 
     fun sendContextToPage(
         memories:              List<MemoryItem>,
         customInstruction:     String  = "",
-        isSystemPromptEnabled: Boolean = true
+        isSystemPromptEnabled: Boolean = true,
+        targetDomain:          String  = ""
     ) {
         val memoryContext = MemoryContextBuilder().build(memories)
 
         if (memoryContext.isBlank()) {
-            logDebug("⚠️ sendContextToPage: No memories")
+            logDebug("⚠️ sendContextToPage: No memories", toast = true)
             return
         }
 
@@ -108,12 +140,65 @@ class AichatApp : Application() {
             appendLine("السؤال:")
         }
 
-        setContextPending(contextText)
+        setContextPending(contextText, targetDomain)
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Context delivery
+    // ══════════════════════════════════════════════════════════════════
+
+    private data class ContextDelivery(val text: String, val id: Long)
+
+    private fun domainMatches(domain: String, target: String): Boolean {
+        if (target.isBlank()) return true
+        val d = domain.lowercase(Locale.ROOT)
+        return d == target || d.endsWith(".$target")
+    }
+
+    /** يرجع السياق إن كان صالحًا ومخصصًا لهذا النطاق ولم يُسلَّم حديثًا. */
+    private fun takeContextFor(domain: String): ContextDelivery? {
+        val now = System.currentTimeMillis()
+        var expired = false
+        var result: ContextDelivery? = null
+
+        synchronized(ctxLock) {
+            if (contextPending.isBlank()) return null
+
+            if (now - contextSetAt > CONTEXT_TTL_MS) {
+                contextPending = ""
+                lastContextId  = 0L
+                expired = true
+            } else if (
+                domainMatches(domain, contextTarget) &&
+                (contextDeliveredAt == 0L || now - contextDeliveredAt > REDELIVER_AFTER_MS)
+            ) {
+                contextDeliveredAt = now
+                result = ContextDelivery(contextPending, lastContextId)
+            }
+        }
+
+        if (expired) logDebug("⌛ Context expired, cleared")
+        return result
+    }
+
+    private fun clearContextIfMatches(id: Long): Boolean {
+        synchronized(ctxLock) {
+            if (id != 0L && id == lastContextId) {
+                contextPending     = ""
+                lastContextId      = 0L
+                contextDeliveredAt = 0L
+                return true
+            }
+        }
+        return false
     }
 
     // ══════════════════════════════════════════════════════════════════
     // WebExtension MessageDelegate
     // ══════════════════════════════════════════════════════════════════
+
+    private fun reply(obj: JSONObject = JSONObject().put("ok", true)): GeckoResult<Any>? =
+        GeckoResult.fromValue<Any>(obj)
 
     private val messageDelegateAiCapture = object : WebExtension.MessageDelegate {
 
@@ -125,142 +210,136 @@ class AichatApp : Application() {
 
             val json = parseMessage(message)
             if (json == null) {
-                logDebug("❌ parseMessage=null")
-                return GeckoResult.fromValue(null)
+                logDebug("❌ parseMessage=null (${message.javaClass.simpleName})")
+                return reply()
             }
 
             val type = json.optString("type")
             if (type.isBlank()) {
                 logDebug("❌ empty type")
-                return GeckoResult.fromValue(null)
+                return reply()
             }
 
-            if (type != "GET_CONTEXT") {
+            if (type != "POLL" && type != "DEBUG_INFO") {
                 logDebug("📩 [aicapture] $type")
             }
 
             return when (type) {
 
                 // ══════════════════════════════════════════════════════
-                // Manual Capture
+                // PING (اختبار القناة)
                 // ══════════════════════════════════════════════════════
-
-                "CHECK_CAPTURE" -> {
-                    val flag = captureFlag
-                    captureFlag = false
-                    
-                    if (flag) {
-                        logDebug("📡 Capture triggered")
-                    }
-                    
-                    GeckoResult.fromValue(
-                        JSONObject().put("capture", flag)
-                    )
+                "PING" -> {
+                    logDebug("🏓 PING received from background")
+                    reply(JSONObject().put("pong", true))
                 }
 
+                // ══════════════════════════════════════════════════════
+                // POLL: التقاط يدوي + سياق في رد واحد
+                // ══════════════════════════════════════════════════════
+                "POLL" -> {
+                    val domain  = json.optString("domain")
+                    val visible = json.optBoolean("visible", true)
+                    val resp    = JSONObject()
+
+                    // الالتقاط اليدوي فقط للصفحة الظاهرة
+                    var capture = false
+                    if (visible && captureFlag) {
+                        captureFlag = false
+                        capture = true
+                        logDebug("📡 Capture triggered for $domain")
+                    }
+                    resp.put("capture", capture)
+
+                    // السياق
+                    val delivery = takeContextFor(domain)
+                    if (delivery != null) {
+                        logDebug("📤 Delivering context: len=${delivery.text.length}, id=${delivery.id}, domain=$domain, visible=$visible")
+                        resp.put("hasContext", true)
+                        resp.put("context", delivery.text)
+                        resp.put("id", delivery.id)
+                    } else {
+                        resp.put("hasContext", false)
+                        resp.put("context", "")
+                        resp.put("id", 0L)
+                    }
+
+                    reply(resp)
+                }
+
+                // ══════════════════════════════════════════════════════
+                // Manual Capture result
+                // ══════════════════════════════════════════════════════
                 "CAPTURE_RESULT" -> {
                     val success = json.optBoolean("success", false)
                     val text    = json.optString("text")
                     val debug   = json.optJSONObject("debug")
-                    
-                    val msg = if (success) {
-                        "🧠 Capture OK: ${text.take(60)}…"
-                    } else {
-                        "⚠️ Capture Failed"
-                    }
-                    logDebug(msg)
-                    
-                    Handler(Looper.getMainLooper()).post {
-                        onManualCaptureResult?.invoke(success, text, debug)
-                    }
-                    GeckoResult.fromValue(null)
+
+                    logDebug(
+                        if (success) "🧠 Capture OK: ${text.take(60)}…"
+                        else "⚠️ Capture Failed"
+                    )
+
+                    mainHandler.post { onManualCaptureResult?.invoke(success, text, debug) }
+                    reply()
                 }
 
                 // ══════════════════════════════════════════════════════
                 // Auto Response
                 // ══════════════════════════════════════════════════════
-
                 "AI_RESPONSE" -> {
                     val text   = json.optString("text")
                     val domain = json.optString("domain", "unknown")
-                    
+
                     if (text.length >= 80) {
                         logDebug("📨 Auto Response: ${text.take(60)}…")
-                        
-                        Handler(Looper.getMainLooper()).post {
-                            onAiResponseCaptured?.invoke(domain, text)
-                        }
+                        mainHandler.post { onAiResponseCaptured?.invoke(domain, text) }
                     }
-                    GeckoResult.fromValue(null)
+                    reply()
                 }
 
                 // ══════════════════════════════════════════════════════
-                // Context Flow
+                // Context result
                 // ══════════════════════════════════════════════════════
-
-                "GET_CONTEXT" -> {
-                    val pending = contextPending
-                    val has = pending.isNotBlank()
-                    
-                    logDebug("📤 GET_CONTEXT: has=$has, len=${pending.length}")
-                    
-                    val response = JSONObject()
-                    response.put("hasContext", has)
-                    response.put("context", if (has) pending else "")
-                    response.put("id", lastContextId)
-                    
-                    logDebug("📤 Sending response: hasContext=$has, len=${response.optString("context").length}")
-                    
-                    GeckoResult.fromValue(response)
-                }
-
                 "CONTEXT_WRITTEN" -> {
-                    val success    = json.optBoolean("success", false)
-                    val contextId  = json.optLong("contextId", 0L)
-                    val stage      = json.optString("stage", "")
-                    val detail     = json.optString("detail", "")
-                    
-                    logDebug("✏️ CONTEXT_WRITTEN: success=$success, id=$contextId")
-                    
-                    Handler(Looper.getMainLooper()).post {
-                        onContextWritten?.invoke(success, stage, detail)
-                    }
-                    
-                    val userMsg = when {
-                        !success -> "❌ فشل الإرسال: $detail"
-                        stage == "button_clicked" -> "✅ تم الإرسال بنجاح"
-                        else -> "✅ تمت الكتابة"
-                    }
-                    showToast(userMsg)
-                    GeckoResult.fromValue(null)
+                    val success   = json.optBoolean("success", false)
+                    val contextId = json.optLong("contextId", 0L)
+                    val stage     = json.optString("stage", "")
+                    val detail    = json.optString("detail", "")
+
+                    logDebug("✏️ CONTEXT_WRITTEN: success=$success, id=$contextId, stage=$stage, detail=$detail")
+
+                    mainHandler.post { onContextWritten?.invoke(success, stage, detail) }
+
+                    showToast(
+                        when {
+                            !success                  -> "❌ فشل الإرسال: $stage ($detail)"
+                            stage == "button_clicked" -> "✅ تم الإرسال بنجاح"
+                            stage == "enter_sent"     -> "✅ أُرسل بالضغط على Enter"
+                            else                      -> "✅ تمت الكتابة"
+                        }
+                    )
+                    reply()
                 }
 
                 "CONTEXT_CONSUMED" -> {
                     val contextId = json.optLong("contextId", 0L)
-                    
-                    logDebug("🗑️ CONTEXT_CONSUMED: contextId=$contextId")
-                    
-                    if (contextId == lastContextId && contextId != 0L) {
-                        contextPending = ""
-                        lastContextId = 0L
-                        logDebug("✅ contextPending cleared")
-                    }
-                    GeckoResult.fromValue(null)
+                    val cleared   = clearContextIfMatches(contextId)
+                    logDebug("🗑️ CONTEXT_CONSUMED: id=$contextId, cleared=$cleared")
+                    reply()
                 }
 
                 // ══════════════════════════════════════════════════════
-                // Debug
+                // Debug من JS
                 // ══════════════════════════════════════════════════════
-
                 "DEBUG_INFO" -> {
-                    val info = json.optString("info")
-                    logDebug("🔍 JS: $info")
-                    GeckoResult.fromValue(null)
+                    logDebug("🔍 JS: ${json.optString("info")}")
+                    reply()
                 }
 
                 else -> {
                     logDebug("⚠️ unknown type: $type")
-                    GeckoResult.fromValue(null)
+                    reply()
                 }
             }
         }
@@ -275,9 +354,9 @@ class AichatApp : Application() {
         try {
             val db = ChatDatabase.getDatabase(this)
             webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
-            Log.d("AichatApp", "✅ Database ready")
+            Log.d(TAG, "✅ Database ready")
         } catch (e: Exception) {
-            Log.e("AichatApp", "❌ Database failed: ${e.message}", e)
+            Log.e(TAG, "❌ Database failed: ${e.message}", e)
             showToast("❌ Database error")
             throw e
         }
@@ -290,25 +369,29 @@ class AichatApp : Application() {
     @Synchronized
     fun getOrCreateGeckoRuntime(): GeckoRuntime? {
         if (geckoRuntime != null) return geckoRuntime
-        
+
         return try {
             val settings = GeckoRuntimeSettings.Builder()
                 .aboutConfigEnabled(false)
+                .consoleOutput(true)            // لرؤية console.log للإضافة في Logcat (GeckoConsole)
+                .remoteDebuggingEnabled(true)   // للتطوير؛ عطّله في نسخة الإنتاج
                 .build()
-            
+
             GeckoRuntime.create(applicationContext, settings).also { rt ->
                 geckoRuntime = rt
                 loadAiCaptureExtension(rt)
-                Log.d("AichatApp", "✅ GeckoRuntime created")
+                Log.d(TAG, "✅ GeckoRuntime created")
             }
         } catch (e: Exception) {
-            Log.e("AichatApp", "❌ GeckoRuntime error: ${e.message}", e)
+            Log.e(TAG, "❌ GeckoRuntime error: ${e.message}", e)
             showToast("❌ GeckoRuntime error")
             null
         }
     }
 
     private fun loadAiCaptureExtension(runtime: GeckoRuntime) {
+        // ملاحظة: ensureBuiltIn لا يعيد التثبيت إلا إذا تغيّر version في manifest.json
+        // لذا ارفع الإصدار مع كل تعديل على ملفات الإضافة.
         runtime.webExtensionController
             .ensureBuiltIn(
                 "resource://android/assets/aicapture/",
@@ -319,16 +402,17 @@ class AichatApp : Application() {
                     if (ext != null) {
                         aiChatExtension = ext
                         ext.setMessageDelegate(messageDelegateAiCapture, "browser")
-                        Log.d("AichatApp", "✅ Extension loaded: ${ext.id}")
-                        logDebug("✅ Extension loaded successfully")
+                        val ver = ext.metaData?.version ?: "?"
+                        Log.d(TAG, "✅ Extension loaded: ${ext.id} v=$ver")
+                        logDebug("✅ Extension loaded: v=$ver")
                     } else {
-                        Log.e("AichatApp", "❌ Extension = null")
+                        Log.e(TAG, "❌ Extension = null")
                         logDebug("❌ Extension load failed")
                     }
                 },
                 { error ->
                     val msg = error?.message ?: "unknown"
-                    Log.e("AichatApp", "❌ Extension error: $msg")
+                    Log.e(TAG, "❌ Extension error: $msg")
                     logDebug("❌ Extension error: $msg")
                 }
             )
@@ -342,10 +426,11 @@ class AichatApp : Application() {
         when (message) {
             is JSONObject -> message
             is Map<*, *>  -> JSONObject(message as Map<*, *>)
-            else -> null
+            is String     -> JSONObject(message)
+            else          -> null
         }
     } catch (e: Exception) {
-        Log.e("AichatApp", "❌ parseMessage: ${e.message}")
+        Log.e(TAG, "❌ parseMessage: ${e.message}")
         null
     }
 }
