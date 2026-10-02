@@ -1,309 +1,218 @@
 (function () {
+    "use strict";
 
-"use strict";
+    // ============================================================
+    // AiChat — ChatGPT INPUT WRITE TEST
+    // الإصدار: 1.0.20 TEST
+    //
+    // الهدف:
+    //   كتابة نص ثابت في خانة ChatGPT فقط.
+    //
+    // لا يوجد:
+    //   - nativeMessaging
+    //   - background.js
+    //   - Kotlin
+    //   - Memory
+    //   - GET_CONTEXT
+    //   - CHECK_CAPTURE
+    //   - ضغط زر الإرسال
+    // ============================================================
 
-var timestamp =
-    new Date().toLocaleTimeString();
+    if (window !== window.top) return;
 
-console.log(
-    "[AiChat CONTENT TEST] content.js EXECUTED at " +
-    timestamp
-);
+    console.log("[AiChat TEST] content.js loaded");
 
-var testElement = null;
+    var TEST_TEXT =
+        "اختبار AiChat: تمت الكتابة في خانة ChatGPT بنجاح.";
 
-// ============================================================
-// Visible diagnostic box
-// ============================================================
+    function log(message) {
+        console.log("[AiChat TEST] " + message);
+    }
 
-try {
+    function findChatGPTInput() {
+        var selectors = [
+            "#prompt-textarea",
+            "textarea[placeholder*='Message']",
+            "textarea[data-id='root']",
+            "div[contenteditable='true']",
+            "textarea"
+        ];
 
-    testElement =
-        document.createElement("div");
+        for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
 
-    testElement.id =
-        "aichat-native-test";
+            if (!el) continue;
 
-    testElement.textContent =
-        "🧪 AiChat Native Test — " +
-        timestamp;
+            var rect = el.getBoundingClientRect();
 
-    testElement.style.position =
-        "fixed";
+            if (rect.width === 0 && rect.height === 0) {
+                continue;
+            }
 
-    testElement.style.top =
-        "10px";
-
-    testElement.style.left =
-        "10px";
-
-    testElement.style.right =
-        "10px";
-
-    testElement.style.zIndex =
-        "2147483647";
-
-    testElement.style.padding =
-        "12px 16px";
-
-    testElement.style.background =
-        "rgba(0,0,0,0.92)";
-
-    testElement.style.color =
-        "white";
-
-    testElement.style.fontSize =
-        "14px";
-
-    testElement.style.fontFamily =
-        "monospace";
-
-    testElement.style.borderRadius =
-        "8px";
-
-    testElement.style.boxShadow =
-        "0 2px 10px rgba(0,0,0,0.5)";
-
-    testElement.style.whiteSpace =
-        "pre-wrap";
-
-    testElement.style.wordBreak =
-        "break-word";
-
-    document.documentElement.appendChild(
-        testElement
-    );
-
-} catch (e) {
-
-    console.log(
-        "[AiChat CONTENT TEST] DOM error:",
-        e
-    );
-}
-
-// ============================================================
-// Helper
-// ============================================================
-
-function showResult(text) {
-
-    try {
-
-        if (testElement) {
-
-            testElement.textContent =
-                text;
+            return el;
         }
 
-    } catch (e) {
-
-        console.log(
-            "[AiChat CONTENT TEST] UI error:",
-            e
-        );
+        return null;
     }
-}
 
-// ============================================================
-// Check runtime
-// ============================================================
+    function writeToInput(input, text) {
 
-if (
-    typeof browser === "undefined" ||
-    !browser.runtime
-) {
+        log(
+            "Input found: tag=" +
+            input.tagName +
+            ", contenteditable=" +
+            input.getAttribute("contenteditable")
+        );
 
-    showResult(
-        "❌ browser.runtime unavailable"
-    );
+        input.focus();
 
-    console.log(
-        "[AiChat CONTENT TEST] browser.runtime unavailable"
-    );
-
-    return;
-}
-
-if (
-    typeof browser.runtime.sendMessage !==
-    "function"
-) {
-
-    showResult(
-        "❌ runtime.sendMessage unavailable"
-    );
-
-    console.log(
-        "[AiChat CONTENT TEST] " +
-        "runtime.sendMessage unavailable"
-    );
-
-    return;
-}
-
-// ============================================================
-// IMPORTANT
-//
-// Do NOT call sendNativeMessage here.
-//
-// Send the test to background.js instead.
-// ============================================================
-
-var message = {
-
-    type:
-        "AICHAT_NATIVE_TEST",
-
-    source:
-        "content.js",
-
-    timestamp:
-        timestamp,
-
-    test:
-        true
-};
-
-console.log(
-    "[AiChat CONTENT TEST] Sending message to background:",
-    message
-);
-
-showResult(
-    "🟡 Content → Background\n\n" +
-    "Sending AICHAT_NATIVE_TEST..."
-);
-
-// ============================================================
-// Send to Background
-// ============================================================
-
-try {
-
-    browser.runtime
-        .sendMessage(message)
-
-        .then(function (response) {
-
-            console.log(
-                "[AiChat CONTENT TEST] " +
-                "Background response:",
-                response
-            );
-
-            var responseText;
-
+        // --------------------------------------------------------
+        // TEXTAREA / INPUT
+        // --------------------------------------------------------
+        if (
+            input.tagName === "TEXTAREA" ||
+            input.tagName === "INPUT"
+        ) {
             try {
+                var prototype =
+                    input.tagName === "TEXTAREA"
+                        ? window.HTMLTextAreaElement.prototype
+                        : window.HTMLInputElement.prototype;
 
-                responseText =
-                    JSON.stringify(
-                        response,
-                        null,
-                        2
+                var descriptor =
+                    Object.getOwnPropertyDescriptor(
+                        prototype,
+                        "value"
                     );
 
+                if (!descriptor || !descriptor.set) {
+                    log("ERROR: value setter not found");
+                    return false;
+                }
+
+                descriptor.set.call(input, text);
+
+                input.dispatchEvent(
+                    new Event("input", {
+                        bubbles: true,
+                        composed: true
+                    })
+                );
+
+                input.dispatchEvent(
+                    new Event("change", {
+                        bubbles: true,
+                        composed: true
+                    })
+                );
+
+                log("SUCCESS: text written to textarea/input");
+
+                return true;
+
             } catch (e) {
+                log(
+                    "ERROR writing textarea/input: " +
+                    e.message
+                );
 
-                responseText =
-                    String(response);
+                return false;
             }
+        }
 
-            if (
-                response &&
-                response.native === true
-            ) {
+        // --------------------------------------------------------
+        // CONTENTEDITABLE
+        // --------------------------------------------------------
+        if (input.isContentEditable) {
 
-                showResult(
-                    "✅ Content → Background → Native\n\n" +
-                    "Native channel responded.\n\n" +
-                    "Response:\n" +
-                    responseText
+            try {
+                var selection = window.getSelection();
+
+                selection.removeAllRanges();
+
+                var range = document.createRange();
+
+                range.selectNodeContents(input);
+                range.collapse(false);
+
+                selection.addRange(range);
+
+                var inserted =
+                    document.execCommand(
+                        "insertText",
+                        false,
+                        text
+                    );
+
+                if (!inserted) {
+                    log("ERROR: execCommand returned false");
+                    return false;
+                }
+
+                log("SUCCESS: text inserted into contenteditable");
+
+                return true;
+
+            } catch (e) {
+                log(
+                    "ERROR writing contenteditable: " +
+                    e.message
                 );
 
-            } else if (
-                response &&
-                response.native === false
-            ) {
-
-                showResult(
-                    "❌ Background reached Native,\n" +
-                    "but Native Messaging failed.\n\n" +
-                    "Error:\n" +
-                    (
-                        response.error ||
-                        "Unknown error"
-                    )
-                );
-
-            } else {
-
-                showResult(
-                    "⚠️ Background response received\n\n" +
-                    responseText
-                );
+                return false;
             }
+        }
 
-        })
+        log("ERROR: unsupported input element");
 
-        .catch(function (error) {
+        return false;
+    }
 
-            console.log(
-                "[AiChat CONTENT TEST] " +
-                "Background communication FAILED:",
-                error
+    function runTest() {
+
+        log("Starting ChatGPT input test...");
+
+        var host = location.hostname;
+
+        if (
+            host !== "chatgpt.com" &&
+            host !== "www.chatgpt.com"
+        ) {
+            log(
+                "Not ChatGPT. Current host: " +
+                host
             );
+            return;
+        }
 
-            showResult(
-                "❌ Content → Background FAILED\n\n" +
-                "error.name:\n" +
-                (
-                    error &&
-                    error.name !== undefined
-                        ? error.name
-                        : "(undefined)"
-                ) +
-                "\n\n" +
-                "error.message:\n" +
-                (
-                    error &&
-                    error.message !== undefined
-                        ? error.message
-                        : "(undefined)"
-                ) +
-                "\n\n" +
-                "error.toString():\n" +
-                String(error)
+        var input = findChatGPTInput();
+
+        if (!input) {
+            log("Input not found. Retrying in 1 second...");
+
+            setTimeout(runTest, 1000);
+
+            return;
+        }
+
+        log("ChatGPT input found.");
+
+        var success =
+            writeToInput(input, TEST_TEXT);
+
+        if (success) {
+            log(
+                "TEST PASSED: text should now be visible."
             );
-        });
+            log(
+                "IMPORTANT: no send button was clicked."
+            );
+        } else {
+            log("TEST FAILED: could not write text.");
+        }
+    }
 
-} catch (e) {
-
-    console.log(
-        "[AiChat CONTENT TEST] " +
-        "Synchronous exception:",
-        e
-    );
-
-    showResult(
-        "❌ Content → Background EXCEPTION\n\n" +
-        "name:\n" +
-        (
-            e && e.name
-                ? e.name
-                : "(undefined)"
-        ) +
-        "\n\n" +
-        "message:\n" +
-        (
-            e && e.message
-                ? e.message
-                : "(undefined)"
-        ) +
-        "\n\n" +
-        "toString:\n" +
-        String(e)
-    );
-}
+    // انتظر حتى تستقر واجهة ChatGPT
+    setTimeout(runTest, 1500);
 
 })();
