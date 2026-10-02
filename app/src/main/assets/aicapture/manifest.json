@@ -1,7 +1,7 @@
 {
 "manifest_version": 2,
 "name": "AiChat Web Extension",
-"version": "1.0.19",
+"version": "1.0.20",
 "description": "AiChat GeckoView WebExtension",
 
 "permissions": [
