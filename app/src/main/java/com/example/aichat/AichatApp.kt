@@ -411,6 +411,23 @@ private val messageDelegateAiCapture =
                             )
                     )
                 }
+                "DIRECT_TEST_2" -> {
+    val source = json.optString("source", "")
+    val text = json.optString("text", "")
+    val timestamp = json.optString("timestamp", "")
+
+    logDebug(
+        "🧪 DIRECT_TEST_2 RECEIVED: " +
+            "source=$source, text=$text, timestamp=$timestamp"
+    )
+
+    reply(
+        JSONObject()
+            .put("ok", true)
+            .put("native", true)
+            .put("test", "DIRECT_TEST_2")
+    )
+                }
 
                 // ====================================================
                 // Direct test
