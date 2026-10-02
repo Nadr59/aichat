@@ -3,37 +3,23 @@
 
     if (window !== window.top) return;
 
-    console.log("[AiChat TEST] content.js loaded");
+    var element = document.createElement("div");
 
-    setTimeout(function () {
+    element.id = "aichat-content-test-1023";
+    element.textContent =
+        "✅ AiChat content.js v1.0.23 يعمل";
 
-        console.log(
-            "[AiChat TEST] Sending DIRECT_TEST_2 to background..."
-        );
+    element.style.position = "fixed";
+    element.style.top = "10px";
+    element.style.left = "10px";
+    element.style.zIndex = "2147483647";
+    element.style.padding = "12px 16px";
+    element.style.background = "black";
+    element.style.color = "white";
+    element.style.fontSize = "16px";
+    element.style.fontFamily = "sans-serif";
+    element.style.borderRadius = "8px";
 
-        browser.runtime.sendMessage({
-            type: "DIRECT_TEST_2",
-            source: "content.js",
-            text: "HELLO_FROM_CONTENT_JS_2",
-            timestamp: new Date().toISOString()
-        })
-        .then(function (response) {
-
-            console.log(
-                "[AiChat TEST] Background response:",
-                response
-            );
-
-        })
-        .catch(function (error) {
-
-            console.error(
-                "[AiChat TEST] sendMessage failed:",
-                error
-            );
-
-        });
-
-    }, 2000);
+    document.documentElement.appendChild(element);
 
 })();
