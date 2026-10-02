@@ -4,8 +4,10 @@
   "version": "1.0.23",
   "description": "AiChat GeckoView WebExtension",
   "permissions": [
-    "nativeMessaging",
-    "<all_urls>"
+  "nativeMessaging",
+  "nativeMessagingFromContent",
+  "geckoViewAddons",
+  "<all_urls>"
   ],
   "background": {
     "scripts": ["background.js"]
