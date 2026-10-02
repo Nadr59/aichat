@@ -338,6 +338,44 @@ function (message, sender) {
                         errorMessage
                 };
             });
+        if (type === "DIRECT_TEST_2") {
+
+    logLocal(
+        '🧪 DIRECT_TEST_2 received from content.js: ' +
+        (message.text || '')
+    );
+
+    sendToNative({
+        type: "DIRECT_TEST_2",
+        source: message.source || "unknown",
+        text: message.text || "",
+        timestamp: message.timestamp || ""
+    }).then(function (response) {
+
+        logLocal(
+            '✅ DIRECT_TEST_2 native response received'
+        );
+
+        sendResponse(response || {
+            ok: true
+        });
+
+    }).catch(function (error) {
+
+        logLocal(
+            '❌ DIRECT_TEST_2 native FAILED: ' +
+            error.message
+        );
+
+        sendResponse({
+            ok: false,
+            error: error.message
+        });
+
+    });
+
+    return true;
+        }
     }
 
     // ====================================================
