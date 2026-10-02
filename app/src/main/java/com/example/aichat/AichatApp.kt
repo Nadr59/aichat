@@ -870,7 +870,10 @@ private fun loadAiCaptureExtension(
                         "browser"
                     )
 
-                    
+              
+    
+
+
 
                     val ver =
     ext.metaData?.version ?: "?"
@@ -880,6 +883,9 @@ val baseUrl =
 
 val temporary =
     ext.metaData?.temporary ?: false
+                    logDebug(
+    "🔎 Extension source: $baseUrl"
+)      
 
 Log.d(
     TAG,
