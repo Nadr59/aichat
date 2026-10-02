@@ -2,20 +2,30 @@
 
 var NATIVE_APP = "browser";
 
-// رسائل تُمرر إلى Kotlin دون انتظار رد مهم
+// ============================================================
+// Message types forwarded to Kotlin
+// ============================================================
+
 var FORWARD_TYPES = {
-AI_RESPONSE:      true,
-CAPTURE_RESULT:   true,
-CONTEXT_WRITTEN:  true,
+AI_RESPONSE: true,
+CAPTURE_RESULT: true,
+CONTEXT_WRITTEN: true,
 CONTEXT_CONSUMED: true,
-DEBUG_INFO:       true
+DEBUG_INFO: true
 };
 
-// أنواع لا نريد إغراق سجل التشخيص بها
+// ============================================================
+// Quiet message types
+// ============================================================
+
 var QUIET_TYPES = {
 POLL: true,
 DEBUG_INFO: true
 };
+
+// ============================================================
+// Empty POLL response
+// ============================================================
 
 var EMPTY_POLL = {
 capture: false,
@@ -73,7 +83,7 @@ if (typeof response === "string") {
     try {
         return JSON.parse(response);
     } catch (e) {
-        return null;
+        return response;
     }
 }
 
@@ -82,7 +92,7 @@ return response;
 }
 
 // ============================================================
-// Send to Native
+// Send to GeckoView / Kotlin
 // ============================================================
 
 function sendToNative(payload) {
@@ -106,15 +116,20 @@ return browser.runtime
 
     .then(function (response) {
 
+        var normalized =
+            normalize(response);
+
         if (!quiet) {
 
             logLocal(
                 "✅ native replied: " +
-                payload.type
+                payload.type +
+                " → " +
+                JSON.stringify(normalized)
             );
         }
 
-        return normalize(response);
+        return normalized;
     })
 
     .catch(function (error) {
@@ -145,16 +160,27 @@ function (message, sender) {
 
     if (!message || !message.type) {
 
+        logLocal(
+            "❌ Message without type"
+        );
+
         return Promise.resolve({
+            ok: false,
             error: "No message type"
         });
     }
 
-    var type = message.type;
+    var type =
+        message.type;
 
-    // ----------------------------------------------------
+    logLocal(
+        "📩 ← content: " +
+        type
+    );
+
+    // ====================================================
     // POLL
-    // ----------------------------------------------------
+    // ====================================================
 
     if (type === "POLL") {
 
@@ -167,7 +193,6 @@ function (message, sender) {
 
             visible:
                 message.visible !== false
-
         })
 
         .then(function (r) {
@@ -177,6 +202,8 @@ function (message, sender) {
             lastPollError = "";
 
             return {
+
+                ok: true,
 
                 capture:
                     !!r.capture,
@@ -204,23 +231,41 @@ function (message, sender) {
         });
     }
 
-    // ----------------------------------------------------
-    // Forward message types
-    // ----------------------------------------------------
+    // ====================================================
+    // Forward messages to Kotlin
+    // ====================================================
 
     if (FORWARD_TYPES[type]) {
 
-        sendToNative(message)
-            .catch(function () {});
+        return sendToNative(message)
 
-        return Promise.resolve({
-            ok: true
-        });
+            .then(function (response) {
+
+                return {
+                    ok: true,
+                    native: true,
+                    response:
+                        normalize(response)
+                };
+            })
+
+            .catch(function (error) {
+
+                return {
+                    ok: false,
+                    native: false,
+                    error:
+                        error &&
+                        error.message
+                            ? error.message
+                            : String(error)
+                };
+            });
     }
 
-    // ----------------------------------------------------
+    // ====================================================
     // Native diagnostic test
-    // ----------------------------------------------------
+    // ====================================================
 
     if (type === "AICHAT_NATIVE_TEST") {
 
@@ -228,53 +273,76 @@ function (message, sender) {
             "🧪 AICHAT_NATIVE_TEST received"
         );
 
-        return sendToNative({
+        var payload = {
 
             type: "AICHAT_NATIVE_TEST",
 
             source:
-                message.source || "content.js",
+                message.source ||
+                "content.js",
 
             timestamp:
                 message.timestamp ||
                 new Date().toLocaleTimeString(),
 
             test: true
+        };
 
-        })
+        logLocal(
+            "🧪 Sending diagnostic test to Kotlin"
+        );
 
-        .then(function (response) {
+        return sendToNative(payload)
 
-            return {
+            .then(function (response) {
 
-                ok: true,
+                var normalized =
+                    normalize(response);
 
-                native: true,
+                logLocal(
+                    "🎯 Kotlin response received: " +
+                    JSON.stringify(normalized)
+                );
 
-                response:
-                    normalize(response)
-            };
-        })
+                return {
 
-        .catch(function (error) {
+                    ok: true,
 
-            return {
+                    native: true,
 
-                ok: false,
+                    response:
+                        normalized
+                };
+            })
 
-                native: false,
+            .catch(function (error) {
 
-                error:
-                    error && error.message
+                var errorMessage =
+                    error &&
+                    error.message
                         ? error.message
-                        : String(error)
-            };
-        });
+                        : String(error);
+
+                logLocal(
+                    "❌ Kotlin response failed: " +
+                    errorMessage
+                );
+
+                return {
+
+                    ok: false,
+
+                    native: false,
+
+                    error:
+                        errorMessage
+                };
+            });
     }
 
-    // ----------------------------------------------------
+    // ====================================================
     // Unknown message
-    // ----------------------------------------------------
+    // ====================================================
 
     logLocal(
         "⚠️ UNKNOWN_TYPE: " +
@@ -282,6 +350,8 @@ function (message, sender) {
     );
 
     return Promise.resolve({
+
+        ok: false,
 
         error:
             "Unknown message type: " +
@@ -360,7 +430,8 @@ logLocal(
 logLocal(
     "🏓 PING failed: " +
     (
-        error && error.message
+        error &&
+        error.message
             ? error.message
             : String(error)
     )
