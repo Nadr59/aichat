@@ -1,5 +1,5 @@
 "use strict";
-var NATIVE_APP = "browser"; // اتركه "browser" لأن PING نجح عندك بهذا الاسم
+var NATIVE_APP = "browser"; // اتركه "browser" لأن PING نجح بهذا الاسم عندك
 var FORWARD_TYPES = { AI_RESPONSE: true, CAPTURE_RESULT: true, CONTEXT_WRITTEN: true, CONTEXT_CONSUMED: true, DEBUG_INFO: true };
 var QUIET_TYPES = { POLL: true, DEBUG_INFO: true };
 var EMPTY_POLL = { capture: false, hasContext: false, context: "", id: 0 };
@@ -27,26 +27,29 @@ browser.runtime.onMessage.addListener(function(message, sender){
   var type = message.type;
   logLocal("📩 ← content: " + type + " " + JSON.stringify(message).substring(0,200));
 
+  if(type === "PING"){
+    return sendToNative({type:"PING"}).then(function(r){ return {ok:true, pong:true, native: normalize(r)}; });
+  }
+
   if(type === "POLL"){
     return sendToNative({type:"POLL", domain: message.domain||"", visible: message.visible!==false})
       .then(function(r){ r=r||{}; lastPollError=""; return {ok:true, capture:!!r.capture, hasContext:!!r.hasContext, context:r.context||"", id:r.id||0}; })
       .catch(function(e){ logPollErrorOnce(e&&e.message?e.message:String(e)); return EMPTY_POLL; });
   }
 
-  // === الاختبار الحاسم - الآن خارج أي if آخر ===
   if(type === "DIRECT_TEST_2"){
-    logLocal(\'🧪 DIRECT_TEST_2 received from content.js: \' + (message.text||\'\'));
+    logLocal("🧪 DIRECT_TEST_2 received from content.js: " + (message.text||""));
     return sendToNative({
         type: "DIRECT_TEST_2",
         source: message.source || "unknown",
         text: message.text || "",
         timestamp: message.timestamp || ""
     }).then(function(response){
-        logLocal(\'✅ DIRECT_TEST_2 native response received: \'+JSON.stringify(response));
+        logLocal("✅ DIRECT_TEST_2 native response received: "+JSON.stringify(response));
         return { ok: true, native: true, response: normalize(response) };
     }).catch(function(error){
         var msg = error&&error.message?error.message:String(error);
-        logLocal(\'❌ DIRECT_TEST_2 native FAILED: \' + msg);
+        logLocal("❌ DIRECT_TEST_2 native FAILED: " + msg);
         return { ok: false, native: false, error: msg };
     });
   }
