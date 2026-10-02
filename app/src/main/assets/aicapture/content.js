@@ -6,7 +6,7 @@
     var element = document.createElement("div");
 
     element.textContent =
-        "🧪 AiChat: اختبار Content → Background";
+        "🧪 اختبار Content → Background → Native";
 
     element.style.position = "fixed";
     element.style.top = "10px";
@@ -21,13 +21,7 @@
 
     document.documentElement.appendChild(element);
 
-    console.log("[AiChat TEST] content.js loaded");
-
     setTimeout(function () {
-
-        console.log(
-            "[AiChat TEST] Sending DIRECT_TEST_2 to background..."
-        );
 
         browser.runtime.sendMessage({
             type: "DIRECT_TEST_2",
@@ -42,8 +36,20 @@
                 response
             );
 
-            element.textContent =
-                "✅ Content → Background نجح";
+            if (
+                response &&
+                response.ok === true &&
+                response.native === true
+            ) {
+                element.textContent =
+                    "✅ Content → Background → Native نجح";
+            } else {
+                element.textContent =
+                    "❌ Content → Background نجح، Native فشل: " +
+                    (response && response.error
+                        ? response.error
+                        : "unknown");
+            }
 
         })
         .catch(function (error) {
@@ -54,7 +60,8 @@
             );
 
             element.textContent =
-                "❌ Content → Background فشل";
+                "❌ Content → Background فشل: " +
+                error;
 
         });
 
