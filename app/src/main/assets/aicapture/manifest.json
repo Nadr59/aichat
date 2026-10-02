@@ -1,38 +1,23 @@
 {
-"manifest_version": 2,
-"name": "AiChat Web Extension",
-"version": "1.0.22",
-"description": "AiChat GeckoView WebExtension",
-
-"permissions": [
-"nativeMessaging",
-"nativeMessagingFromContent",
-"geckoViewAddons",
-"tabs",
-"<all_urls>"
-],
-
-"background": {
-"scripts": [
-"background.js"
-]
-},
-
-"content_scripts": [
-{
-"matches": [
-"<all_urls>"
-],
-"js": [
-"content.js"
-],
-"run_at": "document_idle"
-}
-],
-
-"browser_specific_settings": {
-"gecko": {
-"id": "aicapture@aichat.example.com"
-}
-}
+  "manifest_version": 2,
+  "name": "AiChat Web Extension",
+  "version": "1.0.23",
+  "description": "AiChat GeckoView WebExtension",
+  "permissions": [
+    "nativeMessaging",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "aicapture@aichat.example.com"
+    }
+  }
 }
