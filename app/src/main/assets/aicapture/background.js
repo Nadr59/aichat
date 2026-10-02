@@ -1,478 +1,75 @@
 "use strict";
-
-var NATIVE_APP = "browser";
-
-// ============================================================
-// Message types forwarded to Kotlin
-// ============================================================
-
-var FORWARD_TYPES = {
-AI_RESPONSE: true,
-CAPTURE_RESULT: true,
-CONTEXT_WRITTEN: true,
-CONTEXT_CONSUMED: true,
-DEBUG_INFO: true
-};
-
-// ============================================================
-// Quiet message types
-// ============================================================
-
-var QUIET_TYPES = {
-POLL: true,
-DEBUG_INFO: true
-};
-
-// ============================================================
-// Empty POLL response
-// ============================================================
-
-var EMPTY_POLL = {
-capture: false,
-hasContext: false,
-context: "",
-id: 0
-};
-
-// ============================================================
-// Logging
-// ============================================================
+var NATIVE_APP = "browser"; // اتركه "browser" لأن PING نجح عندك بهذا الاسم
+var FORWARD_TYPES = { AI_RESPONSE: true, CAPTURE_RESULT: true, CONTEXT_WRITTEN: true, CONTEXT_CONSUMED: true, DEBUG_INFO: true };
+var QUIET_TYPES = { POLL: true, DEBUG_INFO: true };
+var EMPTY_POLL = { capture: false, hasContext: false, context: "", id: 0 };
 
 function logLocal(message) {
-
-var timestamp = new Date().toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-});
-
-console.log(
-    "[Background] " +
-    timestamp +
-    "  " +
-    message
-);
-
+  var ts = new Date().toLocaleTimeString("en-US", {hour12:false});
+  console.log("[Background] " + ts + "  " + message);
 }
-
 var lastPollError = "";
-
-function logPollErrorOnce(msg) {
-
-if (msg !== lastPollError) {
-
-    lastPollError = msg;
-
-    logLocal(
-        "❌ POLL error: " +
-        msg
-    );
+function logPollErrorOnce(msg) { if(msg !== lastPollError){ lastPollError=msg; logLocal("❌ POLL error: "+msg); } }
+function normalize(r){ if(typeof r==="string"){ try{return JSON.parse(r)}catch(e){return r} } return r; }
+function sendToNative(payload){
+  var quiet = !!QUIET_TYPES[payload.type];
+  if(!quiet) logLocal("🔄 → native: " + payload.type);
+  return browser.runtime.sendNativeMessage(NATIVE_APP, payload)
+    .then(function(r){ var n=normalize(r); if(!quiet) logLocal("✅ native replied: "+payload.type+" → "+JSON.stringify(n)); return n; })
+    .catch(function(e){ var m=e&&e.message?e.message:String(e); logLocal("❌ native failed: "+payload.type+" — "+m); throw e; });
 }
 
-}
-
-// ============================================================
-// Normalize Native response
-// ============================================================
-
-function normalize(response) {
-
-if (typeof response === "string") {
-
-    try {
-        return JSON.parse(response);
-    } catch (e) {
-        return response;
-    }
-}
-
-return response;
-
-}
-
-// ============================================================
-// Send to GeckoView / Kotlin
-// ============================================================
-
-function sendToNative(payload) {
-
-var quiet =
-    !!QUIET_TYPES[payload.type];
-
-if (!quiet) {
-
-    logLocal(
-        "🔄 → native: " +
-        payload.type
-    );
-}
-
-return browser.runtime
-    .sendNativeMessage(
-        NATIVE_APP,
-        payload
-    )
-
-    .then(function (response) {
-
-        var normalized =
-            normalize(response);
-
-        if (!quiet) {
-
-            logLocal(
-                "✅ native replied: " +
-                payload.type +
-                " → " +
-                JSON.stringify(normalized)
-            );
-        }
-
-        return normalized;
-    })
-
-    .catch(function (error) {
-
-        var message =
-            (error && error.message)
-                ? error.message
-                : String(error);
-
-        logLocal(
-            "❌ native failed: " +
-            payload.type +
-            " — " +
-            message
-        );
-
-        throw error;
-    });
-
-}
-
-// ============================================================
-// Message Listener
-// ============================================================
-
-browser.runtime.onMessage.addListener(
-function (message, sender) {
-
-    if (!message || !message.type) {
-
-        logLocal(
-            "❌ Message without type"
-        );
-
-        return Promise.resolve({
-            ok: false,
-            error: "No message type"
-        });
-    }
-
-    var type =
-        message.type;
-
-    logLocal(
-        "📩 ← content: " +
-        type
-    );
-
-    // ====================================================
-    // POLL
-    // ====================================================
-
-    if (type === "POLL") {
-
-        return sendToNative({
-
-            type: "POLL",
-
-            domain:
-                message.domain || "",
-
-            visible:
-                message.visible !== false
-        })
-
-        .then(function (r) {
-
-            r = r || {};
-
-            lastPollError = "";
-
-            return {
-
-                ok: true,
-
-                capture:
-                    !!r.capture,
-
-                hasContext:
-                    !!r.hasContext,
-
-                context:
-                    r.context || "",
-
-                id:
-                    r.id || 0
-            };
-        })
-
-        .catch(function (e) {
-
-            logPollErrorOnce(
-                (e && e.message)
-                    ? e.message
-                    : String(e)
-            );
-
-            return EMPTY_POLL;
-        });
-    }
-
-    // ====================================================
-    // Forward messages to Kotlin
-    // ====================================================
-
-    if (FORWARD_TYPES[type]) {
-
-        return sendToNative(message)
-
-            .then(function (response) {
-
-                return {
-                    ok: true,
-                    native: true,
-                    response:
-                        normalize(response)
-                };
-            })
-
-            .catch(function (error) {
-
-                return {
-                    ok: false,
-                    native: false,
-                    error:
-                        error &&
-                        error.message
-                            ? error.message
-                            : String(error)
-                };
-            });
-    }
-
-    // ====================================================
-    // Native diagnostic test
-    // ====================================================
-
-    if (type === "AICHAT_NATIVE_TEST") {
-
-        logLocal(
-            "🧪 AICHAT_NATIVE_TEST received"
-        );
-
-        var payload = {
-
-            type: "AICHAT_NATIVE_TEST",
-
-            source:
-                message.source ||
-                "content.js",
-
-            timestamp:
-                message.timestamp ||
-                new Date().toLocaleTimeString(),
-
-            test: true
-        };
-
-        logLocal(
-            "🧪 Sending diagnostic test to Kotlin"
-        );
-
-        return sendToNative(payload)
-
-            .then(function (response) {
-
-                var normalized =
-                    normalize(response);
-
-                logLocal(
-                    "🎯 Kotlin response received: " +
-                    JSON.stringify(normalized)
-                );
-
-                return {
-
-                    ok: true,
-
-                    native: true,
-
-                    response:
-                        normalized
-                };
-            })
-
-            .catch(function (error) {
-
-                var errorMessage =
-                    error &&
-                    error.message
-                        ? error.message
-                        : String(error);
-
-                logLocal(
-                    "❌ Kotlin response failed: " +
-                    errorMessage
-                );
-
-                return {
-
-                    ok: false,
-
-                    native: false,
-
-                    error:
-                        errorMessage
-                };
-            });
-        if (type === "DIRECT_TEST_2") {
-
-    logLocal(
-        '🧪 DIRECT_TEST_2 received from content.js: ' +
-        (message.text || '')
-    );
-
-    sendToNative({
+browser.runtime.onMessage.addListener(function(message, sender){
+  if(!message || !message.type){
+    logLocal("❌ Message without type");
+    return Promise.resolve({ok:false, error:"No message type"});
+  }
+  var type = message.type;
+  logLocal("📩 ← content: " + type + " " + JSON.stringify(message).substring(0,200));
+
+  if(type === "POLL"){
+    return sendToNative({type:"POLL", domain: message.domain||"", visible: message.visible!==false})
+      .then(function(r){ r=r||{}; lastPollError=""; return {ok:true, capture:!!r.capture, hasContext:!!r.hasContext, context:r.context||"", id:r.id||0}; })
+      .catch(function(e){ logPollErrorOnce(e&&e.message?e.message:String(e)); return EMPTY_POLL; });
+  }
+
+  // === الاختبار الحاسم - الآن خارج أي if آخر ===
+  if(type === "DIRECT_TEST_2"){
+    logLocal(\'🧪 DIRECT_TEST_2 received from content.js: \' + (message.text||\'\'));
+    return sendToNative({
         type: "DIRECT_TEST_2",
         source: message.source || "unknown",
         text: message.text || "",
         timestamp: message.timestamp || ""
-    }).then(function (response) {
-
-        logLocal(
-            '✅ DIRECT_TEST_2 native response received'
-        );
-
-        sendResponse(response || {
-            ok: true
-        });
-
-    }).catch(function (error) {
-
-        logLocal(
-            '❌ DIRECT_TEST_2 native FAILED: ' +
-            error.message
-        );
-
-        sendResponse({
-            ok: false,
-            error: error.message
-        });
-
+    }).then(function(response){
+        logLocal(\'✅ DIRECT_TEST_2 native response received: \'+JSON.stringify(response));
+        return { ok: true, native: true, response: normalize(response) };
+    }).catch(function(error){
+        var msg = error&&error.message?error.message:String(error);
+        logLocal(\'❌ DIRECT_TEST_2 native FAILED: \' + msg);
+        return { ok: false, native: false, error: msg };
     });
+  }
 
-    return true;
-        }
-    }
+  if(type === "AICHAT_NATIVE_TEST"){
+    logLocal("🧪 AICHAT_NATIVE_TEST received");
+    var payload = { type:"AICHAT_NATIVE_TEST", source: message.source||"content.js", timestamp: message.timestamp||new Date().toLocaleTimeString(), test:true };
+    return sendToNative(payload)
+      .then(function(r){ var n=normalize(r); logLocal("🎯 Kotlin response: "+JSON.stringify(n)); return {ok:true, native:true, response:n}; })
+      .catch(function(e){ var m=e&&e.message?e.message:String(e); logLocal("❌ Kotlin response failed: "+m); return {ok:false, native:false, error:m}; });
+  }
 
-    // ====================================================
-    // Unknown message
-    // ====================================================
+  if(FORWARD_TYPES[type]){
+    return sendToNative(message)
+      .then(function(r){ return {ok:true, native:true, response:normalize(r)}; })
+      .catch(function(e){ return {ok:false, native:false, error:e&&e.message?e.message:String(e)}; });
+  }
 
-    logLocal(
-        "⚠️ UNKNOWN_TYPE: " +
-        type
-    );
-
-    return Promise.resolve({
-
-        ok: false,
-
-        error:
-            "Unknown message type: " +
-            type
-    });
-}
-
-);
-
-// ============================================================
-// Extension Events
-// ============================================================
-
-browser.runtime.onInstalled.addListener(
-function (details) {
-
-    if (details.reason === "install") {
-
-        logLocal(
-            "🎉 Extension installed"
-        );
-
-    } else if (
-        details.reason === "update"
-    ) {
-
-        logLocal(
-            "🔄 Extension updated"
-        );
-
-    } else {
-
-        logLocal(
-            "ℹ️ onInstalled: " +
-            details.reason
-        );
-    }
-}
-
-);
-
-// ============================================================
-// Startup
-// ============================================================
-
-logLocal(
-"✅ Background script ready, v=" +
-browser.runtime.getManifest().version
-);
-
-// ============================================================
-// Native channel diagnostic
-// ============================================================
-
-logLocal(
-"🧪 Testing Native Messaging..."
-);
-
-sendToNative({
-
-type: "PING"
-
-})
-
-.then(function (response) {
-
-logLocal(
-    "🏓 PING reply: " +
-    JSON.stringify(response)
-);
-
-})
-
-.catch(function (error) {
-
-logLocal(
-    "🏓 PING failed: " +
-    (
-        error &&
-        error.message
-            ? error.message
-            : String(error)
-    )
-);
-
+  logLocal("⚠️ UNKNOWN_TYPE: " + type);
+  return Promise.resolve({ok:false, error:"Unknown message type: "+type});
 });
+
+browser.runtime.onInstalled.addListener(function(d){ logLocal(d.reason==="install"?"🎉 Extension installed":d.reason==="update"?"🔄 Extension updated":"ℹ️ onInstalled: "+d.reason); });
+logLocal("✅ Background script ready, v=" + browser.runtime.getManifest().version);
+logLocal("🧪 Testing Native Messaging...");
+sendToNative({type:"PING"}).then(function(r){ logLocal("🏓 PING reply: "+JSON.stringify(r)); }).catch(function(e){ logLocal("🏓 PING failed: "+(e&&e.message?e.message:String(e))); });
