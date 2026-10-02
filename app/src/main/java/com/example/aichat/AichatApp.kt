@@ -874,15 +874,32 @@ private fun loadAiCaptureExtension(
                         ext.metaData?.version
                             ?: "?"
 
-                    Log.d(
-                        TAG,
-                        "✅ Extension loaded: ${ext.id} v=$ver"
-                    )
+                    val ver =
+    ext.metaData?.version ?: "?"
 
-                    logDebug(
-                        "✅ Extension loaded: v=$ver"
-                    )
+val baseUrl =
+    ext.metaData?.baseUrl ?: "?"
 
+val temporary =
+    ext.metaData?.temporary ?: false
+
+Log.d(
+    TAG,
+    "✅ Extension loaded: " +
+        "id=${ext.id}, " +
+        "version=$ver, " +
+        "isBuiltIn=${ext.isBuiltIn}, " +
+        "temporary=$temporary, " +
+        "baseUrl=$baseUrl"
+)
+
+logDebug(
+    "✅ Extension: " +
+        "id=${ext.id}, " +
+        "v=$ver, " +
+        "builtIn=${ext.isBuiltIn}, " +
+        "temporary=$temporary"
+)
                 } else {
 
                     Log.e(
