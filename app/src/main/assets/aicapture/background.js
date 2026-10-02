@@ -1,5 +1,5 @@
 "use strict";
-var NATIVE_APP = "browser"; // اتركه "browser" لأن PING نجح بهذا الاسم عندك
+var NATIVE_APP = "aichat"; // اتركه "browser" لأن PING نجح بهذا الاسم عندك
 var FORWARD_TYPES = { AI_RESPONSE: true, CAPTURE_RESULT: true, CONTEXT_WRITTEN: true, CONTEXT_CONSUMED: true, DEBUG_INFO: true };
 var QUIET_TYPES = { POLL: true, DEBUG_INFO: true };
 var EMPTY_POLL = { capture: false, hasContext: false, context: "", id: 0 };
