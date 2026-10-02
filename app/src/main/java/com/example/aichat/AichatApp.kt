@@ -870,9 +870,7 @@ private fun loadAiCaptureExtension(
                         "browser"
                     )
 
-                    val ver =
-                        ext.metaData?.version
-                            ?: "?"
+                    
 
                     val ver =
     ext.metaData?.version ?: "?"
