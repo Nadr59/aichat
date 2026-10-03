@@ -50,7 +50,8 @@ class AichatApp : Application() {
     private var contextTarget = ""
     private var contextDeliveredAt = 0L
 
-    var onAiResponseCaptured: ((domain: String, text: String) -> Unit)? = null
+    var onAiResponseCaptured:
+        ((domain: String, text: String) -> Unit)? = null
 
     var onManualCaptureResult:
         ((success: Boolean, text: String, debug: JSONObject?) -> Unit)? = null
@@ -175,31 +176,22 @@ class AichatApp : Application() {
         }
 
         val contextText = buildString {
-
             appendLine(
                 "السياق من محادثاتي السابقة:"
             )
-
             appendLine()
-
             appendLine(memoryContext)
-
             appendLine()
-
             appendLine("───────────")
-
             appendLine()
 
             if (customInstruction.isNotBlank()) {
-
                 appendLine(
                     "تعليمات مخصصة:"
                 )
-
                 appendLine(
                     customInstruction
                 )
-
                 appendLine()
             }
 
@@ -221,7 +213,6 @@ class AichatApp : Application() {
         domain: String,
         target: String
     ): Boolean {
-
         if (target.isBlank()) {
             return true
         }
@@ -241,7 +232,6 @@ class AichatApp : Application() {
             System.currentTimeMillis()
 
         var expired = false
-
         var result: ContextDelivery? = null
 
         synchronized(ctxLock) {
@@ -254,7 +244,6 @@ class AichatApp : Application() {
                 now - contextSetAt >
                 CONTEXT_TTL_MS
             ) {
-
                 contextPending = ""
                 lastContextId = 0L
                 expired = true
@@ -339,14 +328,15 @@ class AichatApp : Application() {
                     object : WebExtension.PortDelegate {
 
                         override fun onPortMessage(
-    message: Any,
-    port: WebExtension.Port
-) {
-    logDebug(
-        "📩 REVERSE TEST: " +
-        "Background → Kotlin: $message"
-    )
+                            message: Any,
+                            port: WebExtension.Port
+                        ) {
+                            logDebug(
+                                "📩 REVERSE TEST: " +
+                                    "Background → Kotlin: $message"
+                            )
                         }
+
                         override fun onDisconnect(
                             port: WebExtension.Port
                         ) {
@@ -366,15 +356,9 @@ class AichatApp : Application() {
                     "✅ REVERSE TEST: Port delegate attached"
                 )
 
-                /*
-                 * نؤخر الإرسال قليلًا.
-                 *
-                 * الهدف:
-                 * التأكد من أن Background أصبح جاهزًا
-                 * لاستقبال رسائل الـ Port قبل إرسال
-                 * الرسالة من Kotlin.
-                 */
-                Handler(Looper.getMainLooper()).postDelayed({
+                Handler(
+                    Looper.getMainLooper()
+                ).postDelayed({
 
                     val testMessage =
                         JSONObject()
@@ -397,18 +381,20 @@ class AichatApp : Application() {
 
                     try {
 
-                        port.postMessage(testMessage)
+                        port.postMessage(
+                            testMessage
+                        )
 
                         logDebug(
                             "📤 REVERSE TEST: Kotlin → Background " +
-                            "postMessage() SENT AFTER DELAY"
+                                "postMessage() SENT AFTER DELAY"
                         )
 
                     } catch (e: Exception) {
 
                         logDebug(
                             "❌ REVERSE TEST: Kotlin → Background FAILED: " +
-                            (e.message ?: e.toString())
+                                (e.message ?: e.toString())
                         )
                     }
 
@@ -421,7 +407,6 @@ class AichatApp : Application() {
                 sender: WebExtension.MessageSender
             ): GeckoResult<Any>? {
 
-                // بقية onMessage الحالية لديك تبقى كما هي
                 val json =
                     parseMessage(message)
 
@@ -457,10 +442,6 @@ class AichatApp : Application() {
                 }
 
                 return when (type) {
-
-                    // ====================================================
-                    // Native Messaging diagnostic test
-                    // ====================================================
 
                     "AICHAT_NATIVE_TEST" -> {
 
@@ -506,9 +487,24 @@ class AichatApp : Application() {
                     }
 
                     "DIRECT_TEST_2" -> {
-                        val source = json.optString("source", "")
-                        val text = json.optString("text", "")
-                        val timestamp = json.optString("timestamp", "")
+
+                        val source =
+                            json.optString(
+                                "source",
+                                ""
+                            )
+
+                        val text =
+                            json.optString(
+                                "text",
+                                ""
+                            )
+
+                        val timestamp =
+                            json.optString(
+                                "timestamp",
+                                ""
+                            )
 
                         logDebug(
                             "🧪 DIRECT_TEST_2 RECEIVED: " +
@@ -517,15 +513,20 @@ class AichatApp : Application() {
 
                         reply(
                             JSONObject()
-                                .put("ok", true)
-                                .put("native", true)
-                                .put("test", "DIRECT_TEST_2")
+                                .put(
+                                    "ok",
+                                    true
+                                )
+                                .put(
+                                    "native",
+                                    true
+                                )
+                                .put(
+                                    "test",
+                                    "DIRECT_TEST_2"
+                                )
                         )
                     }
-
-                    // ====================================================
-                    // Direct test
-                    // ====================================================
 
                     "DIRECT_TEST" -> {
 
@@ -562,10 +563,6 @@ class AichatApp : Application() {
                         )
                     }
 
-                    // ====================================================
-                    // Ping
-                    // ====================================================
-
                     "PING" -> {
 
                         logDebug(
@@ -580,10 +577,6 @@ class AichatApp : Application() {
                                 )
                         )
                     }
-
-                    // ====================================================
-                    // Poll
-                    // ====================================================
 
                     "POLL" -> {
 
@@ -670,10 +663,6 @@ class AichatApp : Application() {
                         reply(resp)
                     }
 
-                    // ====================================================
-                    // Capture result
-                    // ====================================================
-
                     "CAPTURE_RESULT" -> {
 
                         val success =
@@ -713,10 +702,6 @@ class AichatApp : Application() {
                         reply()
                     }
 
-                    // ====================================================
-                    // AI response
-                    // ====================================================
-
                     "AI_RESPONSE" -> {
 
                         val text =
@@ -748,10 +733,6 @@ class AichatApp : Application() {
 
                         reply()
                     }
-
-                    // ====================================================
-                    // Context written
-                    // ====================================================
 
                     "CONTEXT_WRITTEN" -> {
 
@@ -815,10 +796,6 @@ class AichatApp : Application() {
                         reply()
                     }
 
-                    // ====================================================
-                    // Context consumed
-                    // ====================================================
-
                     "CONTEXT_CONSUMED" -> {
 
                         val contextId =
@@ -839,10 +816,6 @@ class AichatApp : Application() {
                         reply()
                     }
 
-                    // ====================================================
-                    // Debug information
-                    // ====================================================
-
                     "DEBUG_INFO" -> {
 
                         logDebug(
@@ -854,10 +827,6 @@ class AichatApp : Application() {
 
                         reply()
                     }
-
-                    // ====================================================
-                    // Unknown
-                    // ====================================================
 
                     else -> {
 
@@ -1010,6 +979,7 @@ class AichatApp : Application() {
                                 "builtIn=${ext.isBuiltIn}, " +
                                 "temporary=$temporary"
                         )
+
                     } else {
 
                         Log.e(
