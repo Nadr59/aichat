@@ -390,15 +390,21 @@ private val messageDelegateAiCapture =
                         System.currentTimeMillis()
                     )
 
-            port.postMessage(
-                testMessage
-            )
+            try {
+    port.postMessage(testMessage)
 
-            logDebug(
-                "📤 REVERSE TEST: " +
-                "Kotlin → Background"
-            )
-        }
+    logDebug(
+        "📤 REVERSE TEST: Kotlin → Background " +
+        "postMessage() called"
+    )
+
+} catch (e: Exception) {
+
+    logDebug(
+        "❌ REVERSE TEST: Kotlin → Background FAILED: " +
+        (e.message ?: e.toString())
+    )
+            }
 
 
         override fun onMessage(
