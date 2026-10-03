@@ -25,7 +25,6 @@ class AichatApp : Application() {
     companion object {
         private const val TAG = "AichatApp"
         private const val CONTEXT_TTL_MS = 120_000L
-        private const val REDELIVER_AFTER_MS = 20_000L
     }
 
     @Volatile
@@ -48,7 +47,6 @@ class AichatApp : Application() {
     private var lastContextId = 0L
     private var contextSetAt = 0L
     private var contextTarget = ""
-    private var contextDeliveredAt = 0L
 
     var onAiResponseCaptured:
         ((domain: String, text: String) -> Unit)? = null
@@ -144,7 +142,6 @@ class AichatApp : Application() {
                 targetDomain
                     .trim()
                     .lowercase(Locale.ROOT)
-            contextDeliveredAt = 0L
         }
 
         logDebug(
@@ -156,6 +153,8 @@ class AichatApp : Application() {
                 },
             toast = true
         )
+
+        sendPendingContextToPort()
     }
 
     fun sendContextToPage(
@@ -204,11 +203,6 @@ class AichatApp : Application() {
         )
     }
 
-    private data class ContextDelivery(
-        val text: String,
-        val id: Long
-    )
-
     private fun domainMatches(
         domain: String,
         target: String
@@ -218,65 +212,122 @@ class AichatApp : Application() {
         }
 
         val d =
-            domain.lowercase(Locale.ROOT)
+            domain
+                .lowercase(Locale.ROOT)
+                .trim()
 
         return d == target ||
             d.endsWith(".$target")
     }
 
-    private fun takeContextFor(
-        domain: String
-    ): ContextDelivery? {
+    /**
+     * إرسال النص الحالي مباشرة إلى background.js.
+     *
+     * المسار:
+     *
+     * AichatApp
+     *      ↓
+     * WebExtension.Port
+     *      ↓
+     * background.js
+     *      ↓
+     * content.js
+     */
+    private fun sendPendingContextToPort(
+        forcedPort: WebExtension.Port? = null
+    ) {
+        val port =
+            forcedPort ?: aiCapturePort
 
-        val now =
-            System.currentTimeMillis()
+        if (port == null) {
+            logDebug(
+                "⚠️ CONTEXT_TO_PAGE: Native Port unavailable"
+            )
+            return
+        }
 
-        var expired = false
-        var result: ContextDelivery? = null
+        val snapshot: JSONObject
 
         synchronized(ctxLock) {
 
             if (contextPending.isBlank()) {
-                return null
+                logDebug(
+                    "⚠️ CONTEXT_TO_PAGE: No pending context"
+                )
+                return
             }
 
             if (
-                now - contextSetAt >
+                System.currentTimeMillis() - contextSetAt >
                 CONTEXT_TTL_MS
             ) {
                 contextPending = ""
                 lastContextId = 0L
-                expired = true
 
-            } else if (
-                domainMatches(
-                    domain,
+                logDebug(
+                    "⌛ CONTEXT_TO_PAGE: Context expired"
+                )
+
+                return
+            }
+
+            if (
+                !domainMatches(
+                    contextTarget,
                     contextTarget
-                ) &&
-                (
-                    contextDeliveredAt == 0L ||
-                    now - contextDeliveredAt >
-                    REDELIVER_AFTER_MS
                 )
             ) {
+                return
+            }
 
-                contextDeliveredAt = now
-
-                result =
-                    ContextDelivery(
-                        contextPending,
+            snapshot =
+                JSONObject()
+                    .put(
+                        "type",
+                        "CONTEXT_TO_PAGE"
+                    )
+                    .put(
+                        "text",
+                        contextPending
+                    )
+                    .put(
+                        "contextId",
                         lastContextId
                     )
-            }
+                    .put(
+                        "domain",
+                        contextTarget
+                    )
+                    .put(
+                        "timestamp",
+                        System.currentTimeMillis()
+                    )
         }
 
-        if (expired) {
+        try {
+
+            port.postMessage(
+                snapshot
+            )
+
             logDebug(
-                "⌛ Context expired, cleared"
+                "📤 CONTEXT_TO_PAGE SENT: " +
+                    "len=${snapshot.optString("text").length}, " +
+                    "id=${snapshot.optLong("contextId")}" +
+                    if (snapshot.optString("domain").isNotBlank()) {
+                        ", target=${snapshot.optString("domain")}"
+                    } else {
+                        ""
+                    }
+            )
+
+        } catch (e: Exception) {
+
+            logDebug(
+                "❌ CONTEXT_TO_PAGE FAILED: " +
+                    (e.message ?: e.toString())
             )
         }
-
-        return result
     }
 
     private fun clearContextIfMatches(
@@ -292,7 +343,7 @@ class AichatApp : Application() {
 
                 contextPending = ""
                 lastContextId = 0L
-                contextDeliveredAt = 0L
+                contextSetAt = 0L
 
                 return true
             }
@@ -312,136 +363,203 @@ class AichatApp : Application() {
     }
 
     /**
-     * بناء استجابة POLL القادمة عبر WebExtension.Port.
+     * معالجة رسائل content.js التي تصل عبر Native Port.
      *
-     * المسار:
-     *
-     * content.js
-     *   → background.js
-     *   → nativePort
-     *   → onPortMessage()
-     *   → takeContextFor()
-     *   → port.postMessage()
+     * هذه الرسائل لا تأتي من onMessage().
+     * لذلك يجب التعامل معها هنا.
      */
-    private fun handlePollFromPort(
-        json: JSONObject,
+    private fun handlePortMessage(
+        message: Any,
         port: WebExtension.Port
     ) {
-        val domain =
-            json.optString(
-                "domain"
-            )
+        val json =
+            parseMessage(message)
 
-        val visible =
-            json.optBoolean(
-                "visible",
-                true
-            )
-
-        logDebug(
-            "🔄 POLL PORT handler ENTER: domain=$domain, visible=$visible"
-        )
-
-        val resp =
-            JSONObject()
-
-        var capture =
-            false
-
-        if (
-            visible &&
-            captureFlag
-        ) {
-
-            captureFlag =
-                false
-
-            capture =
-                true
-
+        if (json == null) {
             logDebug(
-                "📡 Capture triggered from PORT for $domain"
+                "❌ PORT parseMessage=null"
             )
+            return
         }
 
-        resp.put(
-            "capture",
-            capture
-        )
+        val type =
+            json.optString("type")
 
-        val delivery =
-            takeContextFor(domain)
-
-        synchronized(ctxLock) {
+        if (type.isBlank()) {
             logDebug(
-                "🔎 PORT POLL context state: " +
-                    "pending=${contextPending.isNotBlank()}, " +
-                    "len=${contextPending.length}, " +
-                    "id=$lastContextId, " +
-                    "target=$contextTarget, " +
-                    "deliveredAt=$contextDeliveredAt"
+                "❌ PORT message has empty type"
             )
+            return
         }
 
-        if (delivery != null) {
+        when (type) {
 
-            logDebug(
-                "📤 PORT delivering context: " +
-                    "len=${delivery.text.length}, " +
-                    "id=${delivery.id}, " +
-                    "domain=$domain, " +
-                    "visible=$visible"
-            )
+            "CONTEXT_WRITTEN" -> {
 
-            resp.put(
-                "hasContext",
-                true
-            )
+                val success =
+                    json.optBoolean(
+                        "success",
+                        false
+                    )
 
-            resp.put(
-                "context",
-                delivery.text
-            )
+                val contextId =
+                    json.optLong(
+                        "contextId",
+                        0L
+                    )
 
-            resp.put(
-                "id",
-                delivery.id
-            )
+                val stage =
+                    json.optString(
+                        "stage",
+                        ""
+                    )
 
-        } else {
+                val detail =
+                    json.optString(
+                        "detail",
+                        ""
+                    )
 
-            resp.put(
-                "hasContext",
-                false
-            )
+                logDebug(
+                    "✏️ CONTEXT_WRITTEN: " +
+                        "success=$success, " +
+                        "id=$contextId, " +
+                        "stage=$stage, " +
+                        "detail=$detail"
+                )
 
-            resp.put(
-                "context",
-                ""
-            )
+                mainHandler.post {
 
-            resp.put(
-                "id",
-                0L
-            )
-        }
+                    onContextWritten
+                        ?.invoke(
+                            success,
+                            stage,
+                            detail
+                        )
+                }
 
-        try {
+                showToast(
+                    when {
 
-            port.postMessage(
-                resp
-            )
+                        !success ->
+                            "❌ فشل الإرسال: $stage ($detail)"
 
-            logDebug(
-                "📤 POLL response sent through same Port"
-            )
+                        stage ==
+                            "enter_sent" ->
+                            "✅ أُرسل بالضغط على Enter"
 
-        } catch (e: Exception) {
+                        stage ==
+                            "text_injected" ->
+                            "✅ تمت الكتابة في المنصة"
 
-            logDebug(
-                "❌ POLL response failed: " +
-                    (e.message ?: e.toString())
-            )
+                        else ->
+                            "✅ تمت الكتابة"
+                    }
+                )
+            }
+
+            "CONTEXT_CONSUMED" -> {
+
+                val contextId =
+                    json.optLong(
+                        "contextId",
+                        0L
+                    )
+
+                val cleared =
+                    clearContextIfMatches(
+                        contextId
+                    )
+
+                logDebug(
+                    "🗑️ CONTEXT_CONSUMED: " +
+                        "id=$contextId, cleared=$cleared"
+                )
+            }
+
+            "DEBUG_INFO" -> {
+
+                logDebug(
+                    "🔍 JS: " +
+                        json.optString(
+                            "info"
+                        )
+                )
+            }
+
+            "CAPTURE_RESULT" -> {
+
+                val success =
+                    json.optBoolean(
+                        "success",
+                        false
+                    )
+
+                val text =
+                    json.optString(
+                        "text"
+                    )
+
+                val debug =
+                    json.optJSONObject(
+                        "debug"
+                    )
+
+                logDebug(
+                    if (success) {
+                        "🧠 Capture OK: ${text.take(60)}…"
+                    } else {
+                        "⚠️ Capture Failed"
+                    }
+                )
+
+                mainHandler.post {
+
+                    onManualCaptureResult
+                        ?.invoke(
+                            success,
+                            text,
+                            debug
+                        )
+                }
+            }
+
+            "AI_RESPONSE" -> {
+
+                val text =
+                    json.optString(
+                        "text"
+                    )
+
+                val domain =
+                    json.optString(
+                        "domain",
+                        "unknown"
+                    )
+
+                if (text.length >= 80) {
+
+                    logDebug(
+                        "📨 Auto Response: ${text.take(60)}…"
+                    )
+
+                    mainHandler.post {
+
+                        onAiResponseCaptured
+                            ?.invoke(
+                                domain,
+                                text
+                            )
+                    }
+                }
+            }
+
+            else -> {
+
+                logDebug(
+                    "ℹ️ PORT message received: $type"
+                )
+            }
         }
     }
 
@@ -453,7 +571,7 @@ class AichatApp : Application() {
             ) {
 
                 logDebug(
-                    "🔌 REVERSE TEST: Kotlin Port connected"
+                    "🔌 Native Port connected"
                 )
 
                 aiCapturePort = port
@@ -466,79 +584,13 @@ class AichatApp : Application() {
                             port: WebExtension.Port
                         ) {
                             logDebug(
-                                "📩 REVERSE TEST: " +
-                                    "Background → Kotlin: $message"
+                                "📩 Background → Kotlin: $message"
                             )
 
-                            /*
-                             * مهم:
-                             *
-                             * رسائل content.js التي تمر عبر
-                             * background.js تصل إلى Kotlin هنا
-                             * عبر nativePort.
-                             *
-                             * سابقًا كان onPortMessage() يكتفي
-                             * بتسجيل الرسالة، بينما كان POLL
-                             * موجودًا داخل onMessage().
-                             *
-                             * لذلك كان POLL يصل فعلًا إلى Kotlin
-                             * لكنه لا يدخل معالج POLL.
-                             */
-
-                            val json =
-                                parseMessage(message)
-
-                            if (json == null) {
-                                logDebug(
-                                    "❌ PORT parseMessage=null"
-                                )
-                                return
-                            }
-
-                            val type =
-                                json.optString(
-                                    "type"
-                                )
-
-                            if (type.isBlank()) {
-                                logDebug(
-                                    "❌ PORT message has empty type"
-                                )
-                                return
-                            }
-
-                            when (type) {
-
-                                "POLL" -> {
-
-                                    handlePollFromPort(
-                                        json,
-                                        port
-                                    )
-                                }
-
-                                "DEBUG_INFO" -> {
-
-                                    logDebug(
-                                        "🔍 JS: " +
-                                            json.optString(
-                                                "info"
-                                            )
-                                    )
-                                }
-
-                                else -> {
-
-                                    /*
-                                     * لا نغير حاليًا معالجة بقية
-                                     * الرسائل. هذا الاختبار مخصص
-                                     * لمسار POLL → Context Injection.
-                                     */
-                                    logDebug(
-                                        "ℹ️ PORT message received: $type"
-                                    )
-                                }
-                            }
+                            handlePortMessage(
+                                message,
+                                port
+                            )
                         }
 
                         override fun onDisconnect(
@@ -546,7 +598,7 @@ class AichatApp : Application() {
                         ) {
 
                             logDebug(
-                                "⚠️ REVERSE TEST: Port disconnected"
+                                "⚠️ Native Port disconnected"
                             )
 
                             if (aiCapturePort === port) {
@@ -557,52 +609,20 @@ class AichatApp : Application() {
                 )
 
                 logDebug(
-                    "✅ REVERSE TEST: Port delegate attached"
+                    "✅ Port delegate attached"
                 )
 
-                Handler(
-                    Looper.getMainLooper()
-                ).postDelayed({
+                /*
+                 * إذا كان هناك نص pending قبل اتصال الـPort،
+                 * أرسله الآن مباشرة.
+                 */
+                mainHandler.postDelayed({
 
-                    val testMessage =
-                        JSONObject()
-                            .put(
-                                "type",
-                                "REVERSE_TEST"
-                            )
-                            .put(
-                                "source",
-                                "AichatApp.kt"
-                            )
-                            .put(
-                                "text",
-                                "HELLO_FROM_KOTLIN"
-                            )
-                            .put(
-                                "timestamp",
-                                System.currentTimeMillis()
-                            )
+                    sendPendingContextToPort(
+                        port
+                    )
 
-                    try {
-
-                        port.postMessage(
-                            testMessage
-                        )
-
-                        logDebug(
-                            "📤 REVERSE TEST: Kotlin → Background " +
-                                "postMessage() SENT AFTER DELAY"
-                        )
-
-                    } catch (e: Exception) {
-
-                        logDebug(
-                            "❌ REVERSE TEST: Kotlin → Background FAILED: " +
-                                (e.message ?: e.toString())
-                        )
-                    }
-
-                }, 1000)
+                }, 500)
             }
 
             override fun onMessage(
@@ -784,6 +804,11 @@ class AichatApp : Application() {
 
                     "POLL" -> {
 
+                        /*
+                         * أبقينا هذا المسار للتوافق مع الاختبارات
+                         * السابقة، لكن التدفق العملي الجديد لا يعتمد عليه.
+                         */
+
                         val domain =
                             json.optString(
                                 "domain"
@@ -796,7 +821,8 @@ class AichatApp : Application() {
                             )
 
                         logDebug(
-                            "🔄 POLL handler ENTER: domain=$domain, visible=$visible"
+                            "🔄 POLL received through onMessage: " +
+                                "domain=$domain, visible=$visible"
                         )
 
                         val resp =
@@ -815,10 +841,6 @@ class AichatApp : Application() {
 
                             capture =
                                 true
-
-                            logDebug(
-                                "📡 Capture triggered for $domain"
-                            )
                         }
 
                         resp.put(
@@ -826,58 +848,20 @@ class AichatApp : Application() {
                             capture
                         )
 
-                        val delivery =
-                            takeContextFor(domain)
+                        resp.put(
+                            "hasContext",
+                            false
+                        )
 
-                        synchronized(ctxLock) {
-                            logDebug(
-                                "🔎 POLL context state: " +
-                                    "pending=${contextPending.isNotBlank()}, " +
-                                    "len=${contextPending.length}, " +
-                                    "id=$lastContextId, " +
-                                    "target=$contextTarget, " +
-                                    "deliveredAt=$contextDeliveredAt"
-                            )
-                        }
+                        resp.put(
+                            "context",
+                            ""
+                        )
 
-                        if (delivery != null) {
-
-                            logDebug(
-                                "📤 Delivering context: len=${delivery.text.length}, id=${delivery.id}, domain=$domain, visible=$visible"
-                            )
-
-                            resp.put(
-                                "hasContext",
-                                true
-                            )
-
-                            resp.put(
-                                "context",
-                                delivery.text
-                            )
-
-                            resp.put(
-                                "id",
-                                delivery.id
-                            )
-
-                        } else {
-
-                            resp.put(
-                                "hasContext",
-                                false
-                            )
-
-                            resp.put(
-                                "context",
-                                ""
-                            )
-
-                            resp.put(
-                                "id",
-                                0L
-                            )
-                        }
+                        resp.put(
+                            "id",
+                            0L
+                        )
 
                         reply(resp)
                     }
