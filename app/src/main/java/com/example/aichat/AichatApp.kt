@@ -326,28 +326,96 @@ class AichatApp : Application() {
         object : WebExtension.MessageDelegate {
 
             override fun onConnect(
+    port: WebExtension.Port
+) {
+
+    logDebug(
+        "🔌 REVERSE TEST: Kotlin Port connected"
+    )
+
+    aiCapturePort = port
+
+    port.setDelegate(
+        object : WebExtension.PortDelegate {
+
+            override fun onPortMessage(
+                message: Any,
+                port: WebExtension.Port
+            ) {
+                logDebug(
+                    "📩 REVERSE TEST: " +
+                    "Background → Kotlin: $message"
+                )
+            }
+
+            override fun onDisconnect(
                 port: WebExtension.Port
             ) {
 
                 logDebug(
-                    "🔌 REVERSE TEST: Kotlin Port connected"
+                    "⚠️ REVERSE TEST: Port disconnected"
                 )
 
-                aiCapturePort = port
+                if (aiCapturePort === port) {
+                    aiCapturePort = null
+                }
+            }
+        }
+    )
 
-                port.setDelegate(
-                    object : WebExtension.PortDelegate {
+    logDebug(
+        "✅ REVERSE TEST: Port delegate attached"
+    )
 
-                        override fun onPortMessage(
-                            message: Any,
-                            port: WebExtension.Port
-                        ) {
+    /*
+     * نؤخر الإرسال قليلًا.
+     *
+     * الهدف:
+     * التأكد من أن Background أصبح جاهزًا
+     * لاستقبال رسائل الـ Port قبل إرسال
+     * الرسالة من Kotlin.
+     */
+    Handler(Looper.getMainLooper()).postDelayed({
 
-                            logDebug(
-                                "📩 REVERSE TEST: " +
-                                "Background → Kotlin: $message"
-                            )
-                        }
+        val testMessage =
+            JSONObject()
+                .put(
+                    "type",
+                    "REVERSE_TEST"
+                )
+                .put(
+                    "source",
+                    "AichatApp.kt"
+                )
+                .put(
+                    "text",
+                    "HELLO_FROM_KOTLIN"
+                )
+                .put(
+                    "timestamp",
+                    System.currentTimeMillis()
+                )
+
+        try {
+
+            port.postMessage(testMessage)
+
+            logDebug(
+                "📤 REVERSE TEST: Kotlin → Background " +
+                "postMessage() SENT AFTER DELAY"
+            )
+
+        } catch (e: Exception) {
+
+            logDebug(
+                "❌ REVERSE TEST: Kotlin → Background FAILED: " +
+                (e.message ?: e.toString())
+            )
+        }
+
+    }, 1000)
+            }
+            
 
                         override fun onDisconnect(
                             port: WebExtension.Port
