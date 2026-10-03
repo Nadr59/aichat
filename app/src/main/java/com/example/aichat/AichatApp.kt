@@ -34,7 +34,10 @@ var geckoRuntime: GeckoRuntime? = null
 
 @Volatile
 var aiChatExtension: WebExtension? = null
+    
     private set
+    @Volatile
+private var aiCapturePort: WebExtension.Port? = null
 
 @Volatile
 private var captureFlag = false
@@ -323,12 +326,88 @@ private fun reply(
 private val messageDelegateAiCapture =
     object : WebExtension.MessageDelegate {
 
+        override fun onConnect(
+            port: WebExtension.Port
+        ) {
+
+            logDebug(
+                "🔌 REVERSE TEST: Kotlin Port connected"
+            )
+
+            aiCapturePort = port
+
+            port.setDelegate(
+                object : WebExtension.PortDelegate {
+
+                    override fun onPortMessage(
+                        message: Any,
+                        port: WebExtension.Port
+                    ) {
+
+                        logDebug(
+                            "📩 REVERSE TEST: " +
+                            "Background → Kotlin: $message"
+                        )
+                    }
+
+                    override fun onDisconnect(
+                        port: WebExtension.Port
+                    ) {
+
+                        logDebug(
+                            "⚠️ REVERSE TEST: Port disconnected"
+                        )
+
+                        if (
+                            aiCapturePort === port
+                        ) {
+                            aiCapturePort = null
+                        }
+                    }
+                }
+            )
+
+            /*
+             * الآن نرسل رسالة حقيقية
+             * من Kotlin → Background
+             */
+            val testMessage =
+                JSONObject()
+                    .put(
+                        "type",
+                        "REVERSE_TEST"
+                    )
+                    .put(
+                        "source",
+                        "AichatApp.kt"
+                    )
+                    .put(
+                        "text",
+                        "HELLO_FROM_KOTLIN"
+                    )
+                    .put(
+                        "timestamp",
+                        System.currentTimeMillis()
+                    )
+
+            port.postMessage(
+                testMessage
+            )
+
+            logDebug(
+                "📤 REVERSE TEST: " +
+                "Kotlin → Background"
+            )
+        }
+
+
         override fun onMessage(
             nativeApp: String,
             message: Any,
             sender: WebExtension.MessageSender
         ): GeckoResult<Any>? {
 
+            // بقية onMessage الحالية لديك تبقى كما هي
             val json =
                 parseMessage(message)
 
