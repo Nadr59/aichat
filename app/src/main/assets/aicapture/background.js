@@ -41,6 +41,10 @@ function connectToNative() {
 
                 nativePort.onMessage.addListener(
     function (message) {
+        logLocal(
+            "🚨 NATIVE PORT MESSAGE RECEIVED: " +
+            JSON.stringify(message)
+        );
 
         logLocal(
             "📩 Kotlin → Background: " +
