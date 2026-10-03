@@ -7,101 +7,276 @@ function logLocal(message) {
     var ts = new Date().toLocaleTimeString("en-US", {
         hour12: false
     });
-    console.log("[Background] " + ts + "  " + message);
+
+    console.log(
+        "[Background] " +
+        ts +
+        "  " +
+        message
+    );
+}
+
+function sendToActiveTab(message) {
+
+    return browser.tabs.query({
+        active: true,
+        currentWindow: true
+    }).then(function (tabs) {
+
+        logLocal(
+            "🔎 Active tabs: " +
+            tabs.length
+        );
+
+        if (!tabs || tabs.length === 0) {
+            throw new Error(
+                "NO_ACTIVE_TAB"
+            );
+        }
+
+        var tabId =
+            tabs[0].id;
+
+        logLocal(
+            "📤 Background → Content: " +
+            "tab=" +
+            tabId +
+            ", type=" +
+            message.type
+        );
+
+        return browser.tabs.sendMessage(
+            tabId,
+            message
+        );
+    });
 }
 
 function connectToNative() {
+
     try {
-        logLocal("🔌 Connecting to Native: " + NATIVE_APP);
 
-        nativePort = browser.runtime.connectNative(NATIVE_APP);
+        logLocal(
+            "🔌 Connecting to Native: " +
+            NATIVE_APP
+        );
 
-        logLocal("✅ Native Port created");
-
-        nativePort.onMessage.addListener(function (message) {
-            logLocal(
-                "🚨 RECEIVED FROM KOTLIN: " +
-                JSON.stringify(message)
+        nativePort =
+            browser.runtime.connectNative(
+                NATIVE_APP
             );
 
-            if (message && message.type === "REVERSE_TEST") {
-                browser.tabs.query({
-                    active: true,
-                    currentWindow: true
-                }).then(function (tabs) {
+        logLocal(
+            "✅ Native Port created"
+        );
 
-                    logLocal(
-                        "🔎 Active tabs: " +
-                        tabs.length
-                    );
+        nativePort.onMessage.addListener(
+            function (message) {
 
-                    if (!tabs || tabs.length === 0) {
-                        throw new Error("NO_ACTIVE_TAB");
-                    }
+                logLocal(
+                    "🚨 RECEIVED FROM KOTLIN: " +
+                    JSON.stringify(message)
+                );
 
-                    var tabId = tabs[0].id;
+                if (
+                    !message ||
+                    !message.type
+                ) {
+                    return;
+                }
 
-                    logLocal(
-                        "📤 Background → Content: tab=" +
-                        tabId
-                    );
+                /*
+                 * المسار الرئيسي الجديد:
+                 *
+                 * Kotlin
+                 *   ↓
+                 * background.js
+                 *   ↓
+                 * content.js
+                 */
+                if (
+                    message.type ===
+                    "CONTEXT_TO_PAGE"
+                ) {
 
-                    return browser.tabs.sendMessage(
-                        tabId,
-                        {
-                            type: "REVERSE_TEST",
-                            text: message.text ||
-                                "HELLO_FROM_KOTLIN",
-                            original: message
+                    sendToActiveTab({
+
+                        type:
+                            "CONTEXT_TO_PAGE",
+
+                        text:
+                            message.text ||
+                            "",
+
+                        contextId:
+                            message.contextId ||
+                            0,
+
+                        domain:
+                            message.domain ||
+                            "",
+
+                        timestamp:
+                            message.timestamp ||
+                            Date.now()
+
+                    }).then(function (response) {
+
+                        logLocal(
+                            "✅ Content replied: " +
+                            JSON.stringify(response)
+                        );
+
+                    }).catch(function (error) {
+
+                        logLocal(
+                            "❌ Background → Content FAILED: " +
+                            (
+                                error &&
+                                error.message
+                                    ? error.message
+                                    : String(error)
+                            )
+                        );
+
+                        /*
+                         * إبلاغ Kotlin بالفشل.
+                         */
+                        if (nativePort) {
+
+                            try {
+
+                                nativePort.postMessage({
+
+                                    type:
+                                        "CONTEXT_WRITTEN",
+
+                                    success:
+                                        false,
+
+                                    stage:
+                                        "background_to_content_failed",
+
+                                    detail:
+                                        error &&
+                                        error.message
+                                            ? error.message
+                                            : String(error),
+
+                                    contextId:
+                                        message.contextId ||
+                                        0
+
+                                });
+
+                            } catch (e) {
+
+                                logLocal(
+                                    "❌ Failed reporting error to Kotlin"
+                                );
+                            }
                         }
-                    );
+                    });
 
-                }).then(function (response) {
+                    return;
+                }
 
-                    logLocal(
-                        "✅ Content replied: " +
-                        JSON.stringify(response)
-                    );
+                /*
+                 * اختبار الاتجاه القديم.
+                 * نتركه للتوافق فقط.
+                 */
+                if (
+                    message.type ===
+                    "REVERSE_TEST"
+                ) {
 
-                }).catch(function (error) {
+                    sendToActiveTab({
 
-                    logLocal(
-                        "❌ Background → Content FAILED: " +
-                        (
-                            error && error.message
-                                ? error.message
-                                : String(error)
-                        )
-                    );
-                });
+                        type:
+                            "REVERSE_TEST",
+
+                        text:
+                            message.text ||
+                            "HELLO_FROM_KOTLIN",
+
+                        original:
+                            message
+
+                    }).then(function (response) {
+
+                        logLocal(
+                            "✅ Reverse Content replied: " +
+                            JSON.stringify(response)
+                        );
+
+                    }).catch(function (error) {
+
+                        logLocal(
+                            "❌ Reverse Background → Content FAILED: " +
+                            (
+                                error &&
+                                error.message
+                                    ? error.message
+                                    : String(error)
+                            )
+                        );
+                    });
+
+                    return;
+                }
             }
-        });
+        );
 
-        nativePort.onDisconnect.addListener(function () {
-            logLocal("⚠️ Native Port disconnected");
-            nativePort = null;
+        nativePort.onDisconnect.addListener(
+            function () {
 
-            setTimeout(function () {
-                logLocal("🔄 Reconnecting...");
-                connectToNative();
-            }, 1000);
-        });
+                logLocal(
+                    "⚠️ Native Port disconnected"
+                );
+
+                nativePort =
+                    null;
+
+                setTimeout(
+                    function () {
+
+                        logLocal(
+                            "🔄 Reconnecting..."
+                        );
+
+                        connectToNative();
+
+                    },
+                    1000
+                );
+            }
+        );
 
         nativePort.postMessage({
-            type: "REVERSE_TEST_READY",
-            source: "background.js",
-            timestamp: new Date().toISOString()
+
+            type:
+                "REVERSE_TEST_READY",
+
+            source:
+                "background.js",
+
+            timestamp:
+                new Date().toISOString()
+
         });
 
         logLocal(
-            "📤 Background → Kotlin: REVERSE_TEST_READY"
+            "📤 Background → Kotlin: " +
+            "REVERSE_TEST_READY"
         );
 
     } catch (error) {
+
         logLocal(
             "❌ connectNative failed: " +
             (
-                error && error.message
+                error &&
+                error.message
                     ? error.message
                     : String(error)
             )
@@ -109,74 +284,141 @@ function connectToNative() {
     }
 }
 
-browser.runtime.onMessage.addListener(function (
-    message,
-    sender
-) {
-    if (!message || !message.type) {
-        return Promise.resolve({
-            ok: false
-        });
-    }
+browser.runtime.onMessage.addListener(
+    function (
+        message,
+        sender
+    ) {
 
-    if (message.type === "PING") {
-        return browser.runtime.sendNativeMessage(
-            NATIVE_APP,
-            {
-                type: "PING"
-            }
-        ).then(function (response) {
-            return {
-                ok: true,
-                pong: true,
-                native: response
-            };
-        }).catch(function (error) {
-            logLocal(
-                "❌ PING failed: " +
-                (
-                    error && error.message
-                        ? error.message
-                        : String(error)
+        if (
+            !message ||
+            !message.type
+        ) {
+
+            return Promise.resolve({
+                ok: false
+            });
+        }
+
+        /*
+         * PING القديم.
+         */
+        if (
+            message.type ===
+            "PING"
+        ) {
+
+            return browser.runtime
+                .sendNativeMessage(
+                    NATIVE_APP,
+                    {
+                        type:
+                            "PING"
+                    }
                 )
+                .then(
+                    function (response) {
+
+                        return {
+                            ok:
+                                true,
+
+                            pong:
+                                true,
+
+                            native:
+                                response
+                        };
+                    }
+                )
+                .catch(
+                    function (error) {
+
+                        logLocal(
+                            "❌ PING failed: " +
+                            (
+                                error &&
+                                error.message
+                                    ? error.message
+                                    : String(error)
+                            )
+                        );
+
+                        return {
+                            ok:
+                                false,
+
+                            pong:
+                                false
+                        };
+                    }
+                );
+        }
+
+        /*
+         * أي رسالة أخرى من content.js
+         * تمر إلى Kotlin عبر Native Port.
+         *
+         * هذا يشمل:
+         * CONTEXT_WRITTEN
+         * CONTEXT_CONSUMED
+         * DEBUG_INFO
+         * CAPTURE_RESULT
+         * AI_RESPONSE
+         */
+        if (nativePort) {
+
+            logLocal(
+                "↗️ Content → Kotlin: " +
+                JSON.stringify(message)
             );
 
-            return {
-                ok: false,
-                pong: false
-            };
-        });
-    }
+            try {
 
-    if (nativePort) {
-        logLocal(
-            "↗️ Content → Kotlin: " +
-            JSON.stringify(message)
-        );
+                nativePort.postMessage(
+                    message
+                );
 
-        try {
-            nativePort.postMessage(message);
-        } catch (error) {
+            } catch (error) {
+
+                logLocal(
+                    "❌ Content → Kotlin FAILED: " +
+                    (
+                        error &&
+                        error.message
+                            ? error.message
+                            : String(error)
+                    )
+                );
+
+                return Promise.resolve({
+                    ok:
+                        false
+                });
+            }
+
+        } else {
+
             logLocal(
                 "❌ Content → Kotlin FAILED: " +
-                (
-                    error && error.message
-                        ? error.message
-                        : String(error)
-                )
+                "Native Port unavailable"
             );
+
+            return Promise.resolve({
+                ok:
+                    false
+            });
         }
-    } else {
-        logLocal(
-            "❌ Content → Kotlin FAILED: " +
-            "Native Port unavailable"
-        );
+
+        return Promise.resolve({
+            ok:
+                true
+        });
     }
+);
 
-    return Promise.resolve({
-        ok: true
-    });
-});
+logLocal(
+    "✅ Background script ready"
+);
 
-logLocal("✅ Background script ready");
 connectToNative();
