@@ -8,49 +8,103 @@ function logLocal(message) {
         hour12: false
     });
 
-    console.log(
-        "[Background] " +
-        ts +
-        "  " +
-        message
-    );
+    console.log("[Background] " + ts + "  " + message);
 }
 
-function sendToActiveTab(message) {
+
+// ============================================================
+// Find ChatGPT tab
+// ============================================================
+
+function findChatGPTTab() {
 
     return browser.tabs.query({
-        active: true,
-        currentWindow: true
+        url: [
+            "https://chatgpt.com/*",
+            "https://chat.openai.com/*"
+        ]
     }).then(function (tabs) {
 
         logLocal(
-            "🔎 Active tabs: " +
+            "🔎 ChatGPT tabs found: " +
             tabs.length
         );
 
         if (!tabs || tabs.length === 0) {
-            throw new Error(
-                "NO_ACTIVE_TAB"
-            );
+            throw new Error("NO_CHATGPT_TAB");
         }
 
-        var tabId =
-            tabs[0].id;
+        // Prefer the active tab if one exists.
+        for (var i = 0; i < tabs.length; i++) {
+            if (tabs[i].active) {
+                logLocal(
+                    "🎯 Using active ChatGPT tab: " +
+                    tabs[i].id
+                );
 
+                return tabs[i];
+            }
+        }
+
+        // Otherwise use the first ChatGPT tab.
         logLocal(
-            "📤 Background → Content: " +
-            "tab=" +
-            tabId +
-            ", type=" +
-            message.type
+            "🎯 Using first ChatGPT tab: " +
+            tabs[0].id
         );
 
-        return browser.tabs.sendMessage(
-            tabId,
-            message
-        );
+        return tabs[0];
     });
 }
+
+
+// ============================================================
+// Send message to ChatGPT content.js
+// ============================================================
+
+function sendToChatGPT(message) {
+
+    return findChatGPTTab()
+        .then(function (tab) {
+
+            logLocal(
+                "📤 Background → Content: tab=" +
+                tab.id
+            );
+
+            return browser.tabs.sendMessage(
+                tab.id,
+                {
+                    type: "CONTEXT_TO_PAGE",
+
+                    text: message.text || "",
+
+                    contextId:
+                        message.contextId || 0,
+
+                    domain:
+                        message.domain || "",
+
+                    timestamp:
+                        message.timestamp ||
+                        Date.now()
+                }
+            );
+        })
+        .then(function (response) {
+
+            logLocal(
+                "✅ Content replied: " +
+                JSON.stringify(response)
+            );
+
+            return response;
+        });
+}
+
+
+// ============================================================
+// Connect Native Messaging
+// ============================================================
 
 function connectToNative() {
 
@@ -70,6 +124,11 @@ function connectToNative() {
             "✅ Native Port created"
         );
 
+
+        // ====================================================
+        // Kotlin → Background
+        // ====================================================
+
         nativePort.onMessage.addListener(
             function (message) {
 
@@ -78,154 +137,152 @@ function connectToNative() {
                     JSON.stringify(message)
                 );
 
-                if (
-                    !message ||
-                    !message.type
-                ) {
-                    return;
-                }
 
-                /*
-                 * المسار الرئيسي الجديد:
-                 *
-                 * Kotlin
-                 *   ↓
-                 * background.js
-                 *   ↓
-                 * content.js
-                 */
+                // ------------------------------------------------
+                // DIRECT CONTEXT INJECTION
+                // ------------------------------------------------
+
                 if (
+                    message &&
                     message.type ===
-                    "CONTEXT_TO_PAGE"
+                        "CONTEXT_TO_PAGE"
                 ) {
 
-                    sendToActiveTab({
+                    logLocal(
+                        "📥 CONTEXT_TO_PAGE received from Kotlin"
+                    );
 
-                        type:
-                            "CONTEXT_TO_PAGE",
+                    sendToChatGPT(message)
 
-                        text:
-                            message.text ||
-                            "",
+                        .then(function () {
 
-                        contextId:
-                            message.contextId ||
-                            0,
+                            logLocal(
+                                "✅ CONTEXT_TO_PAGE delivered"
+                            );
 
-                        domain:
-                            message.domain ||
-                            "",
+                        })
 
-                        timestamp:
-                            message.timestamp ||
-                            Date.now()
+                        .catch(function (error) {
 
-                    }).then(function (response) {
-
-                        logLocal(
-                            "✅ Content replied: " +
-                            JSON.stringify(response)
-                        );
-
-                    }).catch(function (error) {
-
-                        logLocal(
-                            "❌ Background → Content FAILED: " +
-                            (
+                            var detail =
                                 error &&
                                 error.message
                                     ? error.message
-                                    : String(error)
-                            )
-                        );
+                                    : String(error);
 
-                        /*
-                         * إبلاغ Kotlin بالفشل.
-                         */
-                        if (nativePort) {
+                            logLocal(
+                                "❌ Background → Content FAILED: " +
+                                detail
+                            );
 
-                            try {
 
-                                nativePort.postMessage({
+                            // Report failure back to Kotlin
+                            if (nativePort) {
 
-                                    type:
-                                        "CONTEXT_WRITTEN",
+                                try {
 
-                                    success:
-                                        false,
+                                    nativePort.postMessage({
 
-                                    stage:
-                                        "background_to_content_failed",
+                                        type:
+                                            "CONTEXT_WRITTEN",
 
-                                    detail:
-                                        error &&
-                                        error.message
-                                            ? error.message
-                                            : String(error),
+                                        success:
+                                            false,
 
-                                    contextId:
-                                        message.contextId ||
-                                        0
+                                        detail:
+                                            detail,
 
-                                });
+                                        contextId:
+                                            message.contextId ||
+                                            0,
 
-                            } catch (e) {
+                                        stage:
+                                            "background_to_content_failed"
+                                    });
 
-                                logLocal(
-                                    "❌ Failed reporting error to Kotlin"
-                                );
+                                } catch (postError) {
+
+                                    logLocal(
+                                        "❌ Failed to report error to Kotlin: " +
+                                        (
+                                            postError &&
+                                            postError.message
+                                                ? postError.message
+                                                : String(postError)
+                                        )
+                                    );
+                                }
                             }
-                        }
-                    });
+                        });
 
                     return;
                 }
 
-                /*
-                 * اختبار الاتجاه القديم.
-                 * نتركه للتوافق فقط.
-                 */
+
+                // ------------------------------------------------
+                // OLD REVERSE TEST
+                // ------------------------------------------------
+
                 if (
+                    message &&
                     message.type ===
-                    "REVERSE_TEST"
+                        "REVERSE_TEST"
                 ) {
 
-                    sendToActiveTab({
+                    findChatGPTTab()
 
-                        type:
-                            "REVERSE_TEST",
+                        .then(function (tab) {
 
-                        text:
-                            message.text ||
-                            "HELLO_FROM_KOTLIN",
+                            logLocal(
+                                "📤 Reverse test → Content: tab=" +
+                                tab.id
+                            );
 
-                        original:
-                            message
+                            return browser.tabs.sendMessage(
+                                tab.id,
+                                {
+                                    type:
+                                        "REVERSE_TEST",
 
-                    }).then(function (response) {
+                                    text:
+                                        message.text ||
+                                        "HELLO_FROM_KOTLIN",
 
-                        logLocal(
-                            "✅ Reverse Content replied: " +
-                            JSON.stringify(response)
-                        );
+                                    original:
+                                        message
+                                }
+                            );
+                        })
 
-                    }).catch(function (error) {
+                        .then(function (response) {
 
-                        logLocal(
-                            "❌ Reverse Background → Content FAILED: " +
-                            (
-                                error &&
-                                error.message
-                                    ? error.message
-                                    : String(error)
-                            )
-                        );
-                    });
+                            logLocal(
+                                "✅ Content replied: " +
+                                JSON.stringify(response)
+                            );
 
-                    return;
+                        })
+
+                        .catch(function (error) {
+
+                            logLocal(
+                                "❌ Background → Content FAILED: " +
+                                (
+                                    error &&
+                                    error.message
+                                        ? error.message
+                                        : String(error)
+                                )
+                            );
+                        });
                 }
             }
         );
+
+
+        // ====================================================
+        // Native Port disconnect
+        // ====================================================
 
         nativePort.onDisconnect.addListener(
             function () {
@@ -234,8 +291,8 @@ function connectToNative() {
                     "⚠️ Native Port disconnected"
                 );
 
-                nativePort =
-                    null;
+                nativePort = null;
+
 
                 setTimeout(
                     function () {
@@ -252,6 +309,11 @@ function connectToNative() {
             }
         );
 
+
+        // ====================================================
+        // Ready message
+        // ====================================================
+
         nativePort.postMessage({
 
             type:
@@ -262,13 +324,13 @@ function connectToNative() {
 
             timestamp:
                 new Date().toISOString()
-
         });
 
+
         logLocal(
-            "📤 Background → Kotlin: " +
-            "REVERSE_TEST_READY"
+            "📤 Background → Kotlin: REVERSE_TEST_READY"
         );
+
 
     } catch (error) {
 
@@ -283,6 +345,11 @@ function connectToNative() {
         );
     }
 }
+
+
+// ============================================================
+// Content → Background
+// ============================================================
 
 browser.runtime.onMessage.addListener(
     function (
@@ -300,12 +367,14 @@ browser.runtime.onMessage.addListener(
             });
         }
 
-        /*
-         * PING القديم.
-         */
+
+        // ----------------------------------------------------
+        // PING
+        // ----------------------------------------------------
+
         if (
             message.type ===
-            "PING"
+                "PING"
         ) {
 
             return browser.runtime
@@ -316,56 +385,40 @@ browser.runtime.onMessage.addListener(
                             "PING"
                     }
                 )
-                .then(
-                    function (response) {
 
-                        return {
-                            ok:
-                                true,
+                .then(function (response) {
 
-                            pong:
-                                true,
+                    return {
+                        ok: true,
+                        pong: true,
+                        native: response
+                    };
+                })
 
-                            native:
-                                response
-                        };
-                    }
-                )
-                .catch(
-                    function (error) {
+                .catch(function (error) {
 
-                        logLocal(
-                            "❌ PING failed: " +
-                            (
-                                error &&
-                                error.message
-                                    ? error.message
-                                    : String(error)
-                            )
-                        );
+                    logLocal(
+                        "❌ PING failed: " +
+                        (
+                            error &&
+                            error.message
+                                ? error.message
+                                : String(error)
+                        )
+                    );
 
-                        return {
-                            ok:
-                                false,
-
-                            pong:
-                                false
-                        };
-                    }
-                );
+                    return {
+                        ok: false,
+                        pong: false
+                    };
+                });
         }
 
-        /*
-         * أي رسالة أخرى من content.js
-         * تمر إلى Kotlin عبر Native Port.
-         *
-         * هذا يشمل:
-         * CONTEXT_WRITTEN
-         * CONTEXT_CONSUMED
-         * DEBUG_INFO
-         * CAPTURE_RESULT
-         * AI_RESPONSE
-         */
+
+        // ----------------------------------------------------
+        // Other Content → Kotlin messages
+        // ----------------------------------------------------
+
         if (nativePort) {
 
             logLocal(
@@ -390,11 +443,6 @@ browser.runtime.onMessage.addListener(
                             : String(error)
                     )
                 );
-
-                return Promise.resolve({
-                    ok:
-                        false
-                });
             }
 
         } else {
@@ -403,19 +451,19 @@ browser.runtime.onMessage.addListener(
                 "❌ Content → Kotlin FAILED: " +
                 "Native Port unavailable"
             );
-
-            return Promise.resolve({
-                ok:
-                    false
-            });
         }
 
+
         return Promise.resolve({
-            ok:
-                true
+            ok: true
         });
     }
 );
+
+
+// ============================================================
+// Startup
+// ============================================================
 
 logLocal(
     "✅ Background script ready"
