@@ -13,7 +13,6 @@ import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
-
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.WebExtension
@@ -312,6 +311,140 @@ class AichatApp : Application() {
         )
     }
 
+    /**
+     * بناء استجابة POLL القادمة عبر WebExtension.Port.
+     *
+     * المسار:
+     *
+     * content.js
+     *   → background.js
+     *   → nativePort
+     *   → onPortMessage()
+     *   → takeContextFor()
+     *   → port.postMessage()
+     */
+    private fun handlePollFromPort(
+        json: JSONObject,
+        port: WebExtension.Port
+    ) {
+        val domain =
+            json.optString(
+                "domain"
+            )
+
+        val visible =
+            json.optBoolean(
+                "visible",
+                true
+            )
+
+        logDebug(
+            "🔄 POLL PORT handler ENTER: domain=$domain, visible=$visible"
+        )
+
+        val resp =
+            JSONObject()
+
+        var capture =
+            false
+
+        if (
+            visible &&
+            captureFlag
+        ) {
+
+            captureFlag =
+                false
+
+            capture =
+                true
+
+            logDebug(
+                "📡 Capture triggered from PORT for $domain"
+            )
+        }
+
+        resp.put(
+            "capture",
+            capture
+        )
+
+        val delivery =
+            takeContextFor(domain)
+
+        synchronized(ctxLock) {
+            logDebug(
+                "🔎 PORT POLL context state: " +
+                    "pending=${contextPending.isNotBlank()}, " +
+                    "len=${contextPending.length}, " +
+                    "id=$lastContextId, " +
+                    "target=$contextTarget, " +
+                    "deliveredAt=$contextDeliveredAt"
+            )
+        }
+
+        if (delivery != null) {
+
+            logDebug(
+                "📤 PORT delivering context: " +
+                    "len=${delivery.text.length}, " +
+                    "id=${delivery.id}, " +
+                    "domain=$domain, " +
+                    "visible=$visible"
+            )
+
+            resp.put(
+                "hasContext",
+                true
+            )
+
+            resp.put(
+                "context",
+                delivery.text
+            )
+
+            resp.put(
+                "id",
+                delivery.id
+            )
+
+        } else {
+
+            resp.put(
+                "hasContext",
+                false
+            )
+
+            resp.put(
+                "context",
+                ""
+            )
+
+            resp.put(
+                "id",
+                0L
+            )
+        }
+
+        try {
+
+            port.postMessage(
+                resp
+            )
+
+            logDebug(
+                "📤 POLL response sent through same Port"
+            )
+
+        } catch (e: Exception) {
+
+            logDebug(
+                "❌ POLL response failed: " +
+                    (e.message ?: e.toString())
+            )
+        }
+    }
+
     private val messageDelegateAiCapture =
         object : WebExtension.MessageDelegate {
 
@@ -336,6 +469,76 @@ class AichatApp : Application() {
                                 "📩 REVERSE TEST: " +
                                     "Background → Kotlin: $message"
                             )
+
+                            /*
+                             * مهم:
+                             *
+                             * رسائل content.js التي تمر عبر
+                             * background.js تصل إلى Kotlin هنا
+                             * عبر nativePort.
+                             *
+                             * سابقًا كان onPortMessage() يكتفي
+                             * بتسجيل الرسالة، بينما كان POLL
+                             * موجودًا داخل onMessage().
+                             *
+                             * لذلك كان POLL يصل فعلًا إلى Kotlin
+                             * لكنه لا يدخل معالج POLL.
+                             */
+
+                            val json =
+                                parseMessage(message)
+
+                            if (json == null) {
+                                logDebug(
+                                    "❌ PORT parseMessage=null"
+                                )
+                                return
+                            }
+
+                            val type =
+                                json.optString(
+                                    "type"
+                                )
+
+                            if (type.isBlank()) {
+                                logDebug(
+                                    "❌ PORT message has empty type"
+                                )
+                                return
+                            }
+
+                            when (type) {
+
+                                "POLL" -> {
+
+                                    handlePollFromPort(
+                                        json,
+                                        port
+                                    )
+                                }
+
+                                "DEBUG_INFO" -> {
+
+                                    logDebug(
+                                        "🔍 JS: " +
+                                            json.optString(
+                                                "info"
+                                            )
+                                    )
+                                }
+
+                                else -> {
+
+                                    /*
+                                     * لا نغير حاليًا معالجة بقية
+                                     * الرسائل. هذا الاختبار مخصص
+                                     * لمسار POLL → Context Injection.
+                                     */
+                                    logDebug(
+                                        "ℹ️ PORT message received: $type"
+                                    )
+                                }
+                            }
                         }
 
                         override fun onDisconnect(
