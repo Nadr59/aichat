@@ -339,13 +339,29 @@ class AichatApp : Application() {
                     object : WebExtension.PortDelegate {
 
                         override fun onPortMessage(
-                            message: Any,
-                            port: WebExtension.Port
-                        ) {
-                            logDebug(
-                                "📩 REVERSE TEST: " +
-                                "Background → Kotlin: $message"
-                            )
+    message: Any,
+    port: WebExtension.Port
+) {
+    logDebug(
+        "📩 REVERSE TEST: Background → Kotlin: $message"
+    )
+
+    try {
+        val echo = JSONObject()
+            .put("type", "REVERSE_TEST_ECHO")
+            .put("text", "ECHO_FROM_KOTLIN")
+            .put("timestamp", System.currentTimeMillis())
+
+        port.postMessage(echo)
+
+        logDebug(
+            "📤 ECHO Kotlin → Background SENT"
+        )
+    } catch (e: Exception) {
+        logDebug(
+            "❌ ECHO FAILED: ${e.message ?: e}"
+        )
+    }
                         }
 
                         override fun onDisconnect(
