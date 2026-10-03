@@ -37,71 +37,70 @@ function connectToNative() {
             "✅ Native Port connected"
         );
 
-        nativePort.onMessage.addListener(
-            function (message) {
+        
 
-                logLocal(
-                    "📩 Kotlin → Background: " +
-                    JSON.stringify(message)
-                );
+                nativePort.onMessage.addListener(
+    function (message) {
 
-                /*
-                 * الآن نرسل الرسالة إلى الصفحة الحالية
-                 */
-                browser.tabs.query({
-                    active: true,
-                    currentWindow: true
-                })
-                .then(function (tabs) {
-
-                    if (
-                        !tabs ||
-                        tabs.length === 0
-                    ) {
-
-                        logLocal(
-                            "❌ No active tab"
-                        );
-
-                        return;
-                    }
-
-                    var tabId =
-                        tabs[0].id;
-
-                    logLocal(
-                        "📤 Background → Content, tab=" +
-                        tabId
-                    );
-
-                    return browser.tabs.sendMessage(
-                        tabId,
-                        message
-                    );
-
-                })
-                .then(function () {
-
-                    logLocal(
-                        "✅ Message delivered to content.js"
-                    );
-
-                })
-                .catch(function (error) {
-
-                    logLocal(
-                        "❌ Background → Content failed: " +
-                        (
-                            error &&
-                            error.message
-                                ? error.message
-                                : String(error)
-                        )
-                    );
-
-                });
-            }
+        logLocal(
+            "📩 Kotlin → Background: " +
+            JSON.stringify(message)
         );
+
+        browser.tabs.query({
+            active: true,
+            currentWindow: true
+        })
+        .then(function (tabs) {
+
+            logLocal(
+                "🔎 tabs.query result count=" +
+                tabs.length
+            );
+
+            if (!tabs || tabs.length === 0) {
+
+                throw new Error(
+                    "No active tab found"
+                );
+            }
+
+            var tab = tabs[0];
+
+            logLocal(
+                "🔎 Active tab: id=" +
+                tab.id +
+                ", url=" +
+                (tab.url || "")
+            );
+
+            return browser.tabs.sendMessage(
+                tab.id,
+                message
+            );
+        })
+        .then(function (response) {
+
+            logLocal(
+                "✅ Background → Content succeeded: " +
+                JSON.stringify(response)
+            );
+
+        })
+        .catch(function (error) {
+
+            logLocal(
+                "❌ Background → Content FAILED: " +
+                (
+                    error &&
+                    error.message
+                        ? error.message
+                        : String(error)
+                )
+            );
+        });
+    }
+);
 
         nativePort.onDisconnect.addListener(
             function () {
