@@ -1,803 +1,601 @@
 (function () {
     "use strict";
 
-    if (window !== window.top) {
-        return;
-    }
+    // ============================================================
+    // AiChat — Content Script
+    // Diagnostic response-element discovery
+    // Version: 1.0.25-test-response-dom
+    //
+    // IMPORTANT:
+    // - لا نغير مسار CONTEXT_TO_PAGE الناجح.
+    // - لا نلتقط الرد ولا نرسله إلى Kotlin.
+    // - هذا الاختبار يبحث فقط عن عناصر رسائل المساعد.
+    // ============================================================
 
-    // ============================================================
-    // AiChat — ChatGPT Direct Injection
-    // ============================================================
+    var TAG = "AiChat";
 
     function log(message) {
-
-        console.log(
-            "[AiChat INJECTION] " +
-            message
-        );
-
         try {
-
             browser.runtime.sendMessage({
-                type: "DEBUG_INFO",
-                info: message
-            }).catch(function () {
+                type: "JS_LOG",
+                message: message
             });
-
         } catch (e) {
+            console.log(TAG + ": " + message);
         }
     }
 
+    log("🔬 Response DOM diagnostic content.js ready");
+    log("🌐 Domain: " + location.hostname);
+
     // ============================================================
-    // Check whether an element is a usable visible input
+    // Input helpers — المسار الناجح السابق محفوظ
     // ============================================================
 
-    function isUsableInput(element) {
+    function isUsableInput(el) {
+        if (!el) return false;
 
-        if (!element) {
+        var rect = el.getBoundingClientRect();
+
+        if (rect.width <= 0 || rect.height <= 0) {
             return false;
         }
 
-        try {
-
-            var rect =
-                element.getBoundingClientRect();
-
-            if (
-                rect.width <= 0 ||
-                rect.height <= 0
-            ) {
-                return false;
-            }
-
-            if (
-                element.disabled === true ||
-                element.getAttribute("disabled") !== null
-            ) {
-                return false;
-            }
-
-            if (
-                element.getAttribute("aria-hidden") === "true"
-            ) {
-                return false;
-            }
-
-            var style =
-                window.getComputedStyle(element);
-
-            if (
-                style.display === "none" ||
-                style.visibility === "hidden"
-            ) {
-                return false;
-            }
-
-            return true;
-
-        } catch (e) {
-
+        if (el.disabled || el.readOnly) {
             return false;
         }
+
+        return true;
     }
-
-    // ============================================================
-    // Find ChatGPT composer
-    // ============================================================
 
     function findChatGPTInput() {
-
         var selectors = [
-
-            // Current / common ChatGPT selectors
             "#prompt-textarea",
-
             "textarea[data-testid='textbox']",
-
             "textarea[data-testid*='textbox']",
-
             "textarea[placeholder*='Message']",
-
             "textarea[placeholder*='message']",
-
             "textarea[aria-label*='Message']",
-
             "textarea[aria-label*='message']",
 
-            // Contenteditable editors
             "div[contenteditable='true'][role='textbox']",
-
             "[contenteditable='true'][role='textbox']",
 
             "div[contenteditable='true'][data-placeholder]",
-
             "[contenteditable='true'][data-placeholder]",
 
-            // ProseMirror / Lexical style editors
             ".ProseMirror",
-
             "[data-lexical-editor='true']",
 
-            // Generic textbox
             "[role='textbox']",
-
-            // Last fallback
             "[contenteditable='true']",
 
             "textarea"
         ];
 
-        for (
-            var i = 0;
-            i < selectors.length;
-            i++
-        ) {
-
-            var elements;
-
+        for (var i = 0; i < selectors.length; i++) {
             try {
+                var elements = document.querySelectorAll(selectors[i]);
 
-                elements =
-                    document.querySelectorAll(
-                        selectors[i]
-                    );
+                for (var j = 0; j < elements.length; j++) {
+                    if (isUsableInput(elements[j])) {
+                        log(
+                            "✅ ChatGPT input found: " +
+                            elements[j].tagName +
+                            (elements[j].id ? "#" + elements[j].id : "")
+                        );
 
-            } catch (e) {
-
-                continue;
-            }
-
-            for (
-                var j = 0;
-                j < elements.length;
-                j++
-            ) {
-
-                var element =
-                    elements[j];
-
-                if (
-                    isUsableInput(element)
-                ) {
-
-                    return element;
+                        return elements[j];
+                    }
                 }
+            } catch (e) {
+                log("⚠️ Input selector error: " + selectors[i]);
             }
         }
 
         return null;
     }
 
-    // ============================================================
-    // Set native value for textarea/input
-    // ============================================================
+    function findInputWithRetry(attempt, delay, callback) {
+        var input = findChatGPTInput();
 
-    function setNativeValue(
-        element,
-        value
-    ) {
-
-        try {
-
-            var prototype = null;
-
-            if (
-                element.tagName === "TEXTAREA"
-            ) {
-
-                prototype =
-                    window.HTMLTextAreaElement
-                        .prototype;
-
-            } else if (
-                element.tagName === "INPUT"
-            ) {
-
-                prototype =
-                    window.HTMLInputElement
-                        .prototype;
-            }
-
-            if (prototype) {
-
-                var descriptor =
-                    Object.getOwnPropertyDescriptor(
-                        prototype,
-                        "value"
-                    );
-
-                if (
-                    descriptor &&
-                    descriptor.set
-                ) {
-
-                    descriptor.set.call(
-                        element,
-                        value
-                    );
-
-                } else {
-
-                    element.value =
-                        value;
-                }
-
-            } else {
-
-                element.value =
-                    value;
-            }
-
-        } catch (e) {
-
-            try {
-                element.value = value;
-            } catch (ignored) {
-            }
+        if (input) {
+            callback(input);
+            return;
         }
+
+        if (attempt <= 0) {
+            callback(null);
+            return;
+        }
+
+        setTimeout(function () {
+            findInputWithRetry(attempt - 1, delay, callback);
+        }, delay);
     }
 
-    // ============================================================
-    // Inject text
-    // ============================================================
-
-    function injectText(
-        element,
-        text
-    ) {
-
+    function injectIntoInput(input, text) {
         try {
-
-            element.focus();
-
-            // ----------------------------------------------------
-            // textarea / input
-            // ----------------------------------------------------
+            input.focus();
 
             if (
-                element.tagName === "TEXTAREA" ||
-                element.tagName === "INPUT"
+                input.tagName === "TEXTAREA" ||
+                input.tagName === "INPUT"
             ) {
+                var prototype =
+                    input.tagName === "TEXTAREA"
+                        ? HTMLTextAreaElement.prototype
+                        : HTMLInputElement.prototype;
 
-                setNativeValue(
-                    element,
-                    text
+                var descriptor = Object.getOwnPropertyDescriptor(
+                    prototype,
+                    "value"
                 );
 
-                element.dispatchEvent(
-                    new Event(
-                        "input",
-                        {
-                            bubbles: true
-                        }
-                    )
+                if (descriptor && descriptor.set) {
+                    descriptor.set.call(input, text);
+                } else {
+                    input.value = text;
+                }
+
+                input.dispatchEvent(
+                    new Event("input", {
+                        bubbles: true,
+                        composed: true
+                    })
                 );
 
-                element.dispatchEvent(
-                    new Event(
-                        "change",
-                        {
-                            bubbles: true
-                        }
-                    )
+                input.dispatchEvent(
+                    new Event("change", {
+                        bubbles: true,
+                        composed: true
+                    })
                 );
 
                 return true;
             }
 
-            // ----------------------------------------------------
-            // contenteditable / ProseMirror / Lexical
-            // ----------------------------------------------------
+            if (input.isContentEditable) {
+                try {
+                    document.execCommand(
+                        "selectAll",
+                        false,
+                        null
+                    );
 
-            element.focus();
-
-            var selection =
-                window.getSelection();
-
-            var range =
-                document.createRange();
-
-            range.selectNodeContents(
-                element
-            );
-
-            selection.removeAllRanges();
-
-            selection.addRange(
-                range
-            );
-
-            var inserted =
-                false;
-
-            // First attempt:
-            // browser editing command. This usually triggers
-            // the browser's native editing path.
-            try {
-
-                inserted =
                     document.execCommand(
                         "insertText",
                         false,
                         text
                     );
-
-            } catch (e) {
-
-                inserted = false;
-            }
-
-            // Fallback
-            if (!inserted) {
-
-                element.textContent =
-                    text;
-
-                try {
-
-                    element.dispatchEvent(
-                        new InputEvent(
-                            "input",
-                            {
-                                bubbles: true,
-                                inputType: "insertText",
-                                data: text
-                            }
-                        )
-                    );
-
                 } catch (e) {
-
-                    element.dispatchEvent(
-                        new Event(
-                            "input",
-                            {
-                                bubbles: true
-                            }
-                        )
-                    );
+                    input.textContent = text;
                 }
+
+                input.dispatchEvent(
+                    new InputEvent("input", {
+                        bubbles: true,
+                        composed: true,
+                        inputType: "insertText",
+                        data: text
+                    })
+                );
+
+                return true;
             }
 
-            return true;
+            return false;
 
         } catch (e) {
-
-            log(
-                "❌ Injection error: " +
-                (
-                    e && e.message
-                        ? e.message
-                        : String(e)
-                )
-            );
-
+            log("❌ Text injection exception: " + e.message);
             return false;
         }
     }
 
-    // ============================================================
-    // Send Enter
-    // ============================================================
-
-    function sendEnter(
-        element
-    ) {
-
+    function sendEnter(input) {
         try {
+            input.focus();
 
-            element.focus();
-
-            var keyboardEventInit = {
-
+            var options = {
                 key: "Enter",
-
                 code: "Enter",
-
                 keyCode: 13,
-
                 which: 13,
-
                 bubbles: true,
-
-                cancelable: true
+                cancelable: true,
+                composed: true
             };
 
-            element.dispatchEvent(
-                new KeyboardEvent(
-                    "keydown",
-                    keyboardEventInit
-                )
-            );
-
-            element.dispatchEvent(
-                new KeyboardEvent(
-                    "keypress",
-                    keyboardEventInit
-                )
-            );
-
-            element.dispatchEvent(
-                new KeyboardEvent(
-                    "keyup",
-                    keyboardEventInit
-                )
-            );
+            input.dispatchEvent(new KeyboardEvent("keydown", options));
+            input.dispatchEvent(new KeyboardEvent("keypress", options));
+            input.dispatchEvent(new KeyboardEvent("keyup", options));
 
             return true;
-
         } catch (e) {
-
-            log(
-                "❌ Enter error: " +
-                (
-                    e && e.message
-                        ? e.message
-                        : String(e)
-                )
-            );
-
+            log("❌ Enter exception: " + e.message);
             return false;
         }
     }
 
     // ============================================================
-    // Report CONTEXT_WRITTEN
+    // Response DOM Diagnostic
     // ============================================================
 
-    function reportWritten(
-        success,
-        stage,
-        detail,
-        contextId
-    ) {
+    function cleanText(text) {
+        if (!text) return "";
 
-        try {
+        return text
+            .replace(/\s+/g, " ")
+            .trim();
+    }
 
-            browser.runtime.sendMessage({
+    function describeElement(el) {
+        if (!el) return "";
 
-                type: "CONTEXT_WRITTEN",
+        var tag = el.tagName || "UNKNOWN";
+        var id = el.id ? "#" + el.id : "";
 
-                success: success,
+        var cls = "";
+        if (typeof el.className === "string" && el.className.trim()) {
+            cls = "." + el.className
+                .trim()
+                .split(/\s+/)
+                .slice(0, 3)
+                .join(".");
+        }
 
-                stage: stage,
+        var role = el.getAttribute("role");
+        var testid = el.getAttribute("data-testid");
+        var authorRole = el.getAttribute("data-message-author-role");
 
-                detail: detail,
+        var extra = "";
 
-                contextId:
-                    contextId || 0
+        if (role) {
+            extra += ' role="' + role + '"';
+        }
 
-            }).catch(function () {
-            });
+        if (testid) {
+            extra += ' data-testid="' + testid + '"';
+        }
 
-        } catch (e) {
+        if (authorRole) {
+            extra += ' data-message-author-role="' + authorRole + '"';
+        }
+
+        return tag + id + cls + extra;
+    }
+
+    function reportCandidate(selector, elements, maxItems) {
+        if (!elements || elements.length === 0) {
+            return 0;
+        }
+
+        var count = 0;
+
+        log(
+            "🔎 SELECTOR: " +
+            selector +
+            " → count=" +
+            elements.length
+        );
+
+        for (
+            var i = Math.max(0, elements.length - maxItems);
+            i < elements.length;
+            i++
+        ) {
+            var el = elements[i];
+
+            if (!el) continue;
+
+            var text = cleanText(el.innerText || el.textContent || "");
+
+            if (!text) {
+                continue;
+            }
+
+            var snippet = text.substring(0, 180);
 
             log(
-                "❌ Could not report CONTEXT_WRITTEN"
+                "   [" +
+                (i + 1) +
+                "] " +
+                describeElement(el) +
+                " | len=" +
+                text.length +
+                " | text=\"" +
+                snippet.replace(/"/g, "'") +
+                "\""
             );
+
+            count++;
         }
+
+        return count;
     }
 
-    // ============================================================
-    // Report CONTEXT_CONSUMED
-    // ============================================================
+    function scanAssistantDOM(reason) {
+        log("================================================");
+        log("🧪 ASSISTANT DOM SCAN: " + reason);
+        log("URL: " + location.href);
 
-    function reportConsumed(
-        contextId
-    ) {
+        var selectorGroups = [
+            "[data-message-author-role='assistant']",
+            "[data-message-author-role='assistant'] .markdown",
+            "[data-testid='conversation-turn-assistant']",
+            "[data-testid*='conversation-turn']",
+            "article",
+            "main article",
+            "[role='article']",
+            "main [role='article']"
+        ];
+
+        var totalReported = 0;
+
+        for (var i = 0; i < selectorGroups.length; i++) {
+            try {
+                var elements = document.querySelectorAll(
+                    selectorGroups[i]
+                );
+
+                totalReported += reportCandidate(
+                    selectorGroups[i],
+                    elements,
+                    5
+                );
+
+            } catch (e) {
+                log(
+                    "⚠️ Scan selector error: " +
+                    selectorGroups[i]
+                );
+            }
+        }
+
+        // --------------------------------------------------------
+        // بحث إضافي عن العناصر التي تحتوي على مؤشرات assistant
+        // --------------------------------------------------------
 
         try {
+            var all = document.querySelectorAll(
+                "[data-message-author-role], [data-testid], article"
+            );
 
-            browser.runtime.sendMessage({
+            var interesting = [];
 
-                type: "CONTEXT_CONSUMED",
+            for (var j = 0; j < all.length; j++) {
+                var el = all[j];
 
-                contextId:
-                    contextId || 0
+                var role =
+                    el.getAttribute("data-message-author-role") || "";
 
-            }).catch(function () {
-            });
-
-        } catch (e) {
-        }
-    }
-
-    // ============================================================
-    // Wait for ChatGPT composer
-    // ============================================================
-
-    function findInputWithRetry(
-        attempts,
-        delay,
-        callback
-    ) {
-
-        var input =
-            findChatGPTInput();
-
-        if (input) {
-
-            callback(input);
-            return;
-        }
-
-        if (attempts <= 0) {
-
-            callback(null);
-            return;
-        }
-
-        setTimeout(
-            function () {
-
-                findInputWithRetry(
-                    attempts - 1,
-                    delay,
-                    callback
-                );
-
-            },
-            delay
-        );
-    }
-
-    // ============================================================
-    // WebExtension message receiver
-    // ============================================================
-
-    browser.runtime.onMessage.addListener(
-        function (message) {
-
-            if (!message) {
-
-                return Promise.resolve({
-                    ok: false
-                });
-            }
-
-            // ====================================================
-            // MAIN PATH
-            //
-            // Kotlin
-            //   ↓
-            // background.js
-            //   ↓
-            // content.js
-            //   ↓
-            // ChatGPT
-            // ====================================================
-
-            if (
-                message.type ===
-                "CONTEXT_TO_PAGE"
-            ) {
+                var testid =
+                    el.getAttribute("data-testid") || "";
 
                 var text =
-                    message.text || "";
+                    cleanText(el.innerText || el.textContent || "");
 
-                var contextId =
-                    Number(
-                        message.contextId || 0
+                if (!text) continue;
+
+                var looksInteresting =
+                    role === "assistant" ||
+                    testid.toLowerCase().indexOf("assistant") >= 0 ||
+                    testid.toLowerCase().indexOf("conversation") >= 0;
+
+                if (looksInteresting) {
+                    interesting.push(el);
+                }
+            }
+
+            log(
+                "🔬 Interesting assistant/conversation candidates: " +
+                interesting.length
+            );
+
+            for (
+                var k = Math.max(0, interesting.length - 5);
+                k < interesting.length;
+                k++
+            ) {
+                var candidate = interesting[k];
+
+                var candidateText =
+                    cleanText(
+                        candidate.innerText ||
+                        candidate.textContent ||
+                        ""
                     );
 
                 log(
-                    "📥 CONTEXT_TO_PAGE received: " +
-                    text.length +
-                    " chars, id=" +
-                    contextId
+                    "   ⭐ " +
+                    describeElement(candidate) +
+                    " | len=" +
+                    candidateText.length +
+                    " | text=\"" +
+                    candidateText
+                        .substring(0, 180)
+                        .replace(/"/g, "'") +
+                    "\""
                 );
+            }
 
-                if (!text) {
+        } catch (e) {
+            log(
+                "⚠️ Interesting-candidate scan failed: " +
+                e.message
+            );
+        }
 
-                    reportWritten(
-                        false,
-                        "empty_text",
-                        "النص المرسل فارغ",
-                        contextId
-                    );
+        log(
+            "🧪 ASSISTANT DOM SCAN END — reported=" +
+            totalReported
+        );
 
-                    return Promise.resolve({
-                        ok: false,
-                        reason: "empty_text"
+        log("================================================");
+    }
+
+    // ============================================================
+    // Diagnostic sequence
+    // ============================================================
+
+    function runResponseDiagnostic() {
+        log("⏳ Waiting for ChatGPT response DOM...");
+
+        // المسح الأول
+        setTimeout(function () {
+            scanAssistantDOM("after 2 seconds");
+        }, 2000);
+
+        // المسح الثاني
+        setTimeout(function () {
+            scanAssistantDOM("after 5 seconds");
+        }, 5000);
+
+        // المسح الثالث
+        setTimeout(function () {
+            scanAssistantDOM("after 8 seconds");
+        }, 8000);
+    }
+
+    // ============================================================
+    // Direct Context → Page
+    // ============================================================
+
+    browser.runtime.onMessage.addListener(function (message) {
+
+        if (!message) {
+            return;
+        }
+
+        // --------------------------------------------------------
+        // المسار الناجح الذي لا نريد تغييره
+        // --------------------------------------------------------
+
+        if (message.type === "CONTEXT_TO_PAGE") {
+
+            var text = message.text || "";
+            var contextId = message.contextId || 0;
+
+            log(
+                "📥 CONTEXT_TO_PAGE received: " +
+                text.length +
+                " chars, id=" +
+                contextId
+            );
+
+            findInputWithRetry(10, 500, function (input) {
+
+                if (!input) {
+
+                    log("❌ ChatGPT input not found");
+
+                    browser.runtime.sendMessage({
+                        type: "CONTEXT_WRITTEN",
+                        success: false,
+                        stage: "input_not_found",
+                        contextId: contextId
                     });
+
+                    return;
                 }
 
-                // ------------------------------------------------
-                // ChatGPT may still be constructing its composer.
-                // Try several times before declaring failure.
-                // ------------------------------------------------
-
-                findInputWithRetry(
-                    10,
-                    500,
-                    function (input) {
-
-                        if (!input) {
-
-                            log(
-                                "❌ ChatGPT input not found after retry"
-                            );
-
-                            reportWritten(
-                                false,
-                                "input_not_found",
-                                "لم يتم العثور على مربع إدخال ChatGPT",
-                                contextId
-                            );
-
-                            return;
-                        }
-
-                        log(
-                            "✅ ChatGPT input found: " +
-                            input.tagName +
-                            (
-                                input.id
-                                    ? "#" + input.id
-                                    : ""
-                            ) +
-                            (
-                                input.getAttribute(
-                                    "contenteditable"
-                                ) === "true"
-                                    ? " [contenteditable]"
-                                    : ""
-                            )
-                        );
-
-                        var injected =
-                            injectText(
-                                input,
-                                text
-                            );
-
-                        if (!injected) {
-
-                            reportWritten(
-                                false,
-                                "injection_failed",
-                                "فشل وضع النص داخل مربع الإدخال",
-                                contextId
-                            );
-
-                            return;
-                        }
-
-                        log(
-                            "✏️ Text injected successfully"
-                        );
-
-                        reportWritten(
-                            true,
-                            "text_injected",
-                            "تم وضع النص في مربع إدخال ChatGPT",
-                            contextId
-                        );
-
-                        // ------------------------------------------------
-                        // Give ChatGPT/React time to process the input.
-                        // ------------------------------------------------
-
-                        setTimeout(
-                            function () {
-
-                                var currentInput =
-                                    findChatGPTInput();
-
-                                if (!currentInput) {
-
-                                    log(
-                                        "⚠️ Input disappeared before Enter"
-                                    );
-
-                                    reportWritten(
-                                        false,
-                                        "input_disappeared",
-                                        "اختفى مربع الإدخال قبل إرسال Enter",
-                                        contextId
-                                    );
-
-                                    return;
-                                }
-
-                                var sent =
-                                    sendEnter(
-                                        currentInput
-                                    );
-
-                                if (sent) {
-
-                                    log(
-                                        "📤 Enter sent to ChatGPT"
-                                    );
-
-                                    reportWritten(
-                                        true,
-                                        "enter_sent",
-                                        "تم الضغط على Enter",
-                                        contextId
-                                    );
-
-                                    setTimeout(
-                                        function () {
-
-                                            reportConsumed(
-                                                contextId
-                                            );
-
-                                        },
-                                        1500
-                                    );
-
-                                } else {
-
-                                    reportWritten(
-                                        false,
-                                        "enter_failed",
-                                        "فشل إرسال Enter",
-                                        contextId
-                                    );
-                                }
-
-                            },
-                            500
-                        );
-                    }
+                var injected = injectIntoInput(
+                    input,
+                    text
                 );
 
-                return Promise.resolve({
+                if (!injected) {
 
-                    ok: true,
+                    log("❌ Text injection failed");
 
-                    received: true,
+                    browser.runtime.sendMessage({
+                        type: "CONTEXT_WRITTEN",
+                        success: false,
+                        stage: "text_injection_failed",
+                        contextId: contextId
+                    });
 
-                    contextId:
-                        contextId
+                    return;
+                }
+
+                log("✏️ Text injected successfully");
+
+                browser.runtime.sendMessage({
+                    type: "CONTEXT_WRITTEN",
+                    success: true,
+                    stage: "text_injected",
+                    contextId: contextId
                 });
-            }
 
-            // ====================================================
-            // Old compatibility test
-            // ====================================================
+                var enterSent = sendEnter(input);
 
-            if (
-                message.type ===
-                "REVERSE_TEST"
-            ) {
+                if (enterSent) {
 
-                log(
-                    "ℹ️ Old REVERSE_TEST received"
-                );
+                    log("📤 Enter sent to ChatGPT");
 
-                return Promise.resolve({
+                    browser.runtime.sendMessage({
+                        type: "CONTEXT_WRITTEN",
+                        success: true,
+                        stage: "enter_sent",
+                        contextId: contextId
+                    });
 
-                    ok: true,
+                    // ------------------------------------------------
+                    // فقط بعد الإرسال نبحث عن عنصر الرد.
+                    // لا نقرأ الرد ولا نرسله إلى Kotlin.
+                    // ------------------------------------------------
 
-                    received: true
-                });
-            }
+                    runResponseDiagnostic();
 
-            return Promise.resolve({
-                ok: false
+                } else {
+
+                    log("❌ Enter failed");
+
+                    browser.runtime.sendMessage({
+                        type: "CONTEXT_WRITTEN",
+                        success: false,
+                        stage: "enter_failed",
+                        contextId: contextId
+                    });
+                }
             });
+
+            return;
         }
-    );
+
+        // --------------------------------------------------------
+        // اختبار يدوي من background إذا احتجناه لاحقاً
+        // --------------------------------------------------------
+
+        if (message.type === "SCAN_ASSISTANT_DOM") {
+            scanAssistantDOM("manual request");
+        }
+
+        // --------------------------------------------------------
+        // الاختبار القديم يبقى بدون تغيير
+        // --------------------------------------------------------
+
+        if (message.type === "REVERSE_TEST") {
+            log("🔁 REVERSE_TEST received");
+        }
+    });
 
     // ============================================================
-    // Ready
+    // جاهزية
     // ============================================================
 
-    log(
-        "✅ Direct injection content.js ready on " +
-        location.href
-    );
-
-    log(
-        "🌐 Domain: " +
-        (
-            location.hostname ||
-            ""
-        )
-    );
+    try {
+        browser.runtime.sendMessage({
+            type: "JS_LOG",
+            message:
+                "✅ Direct injection + response DOM diagnostic ready on " +
+                location.href
+        });
+    } catch (e) {
+        console.log(
+            TAG +
+            ": ready message failed"
+        );
+    }
 
 })();
