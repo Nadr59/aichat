@@ -1,70 +1,107 @@
 (function () {
+
     "use strict";
 
-    if (window !== window.top) return;
+    if (window !== window.top) {
+        return;
+    }
 
-    var element = document.createElement("div");
+    var element =
+        document.createElement("div");
 
     element.textContent =
-        "🧪 اختبار Content → Background → Native";
+        "⏳ في انتظار Kotlin → Background → Content...";
 
-    element.style.position = "fixed";
-    element.style.top = "10px";
-    element.style.left = "10px";
-    element.style.zIndex = "2147483647";
-    element.style.padding = "12px 16px";
-    element.style.background = "black";
-    element.style.color = "white";
-    element.style.fontSize = "16px";
-    element.style.fontFamily = "sans-serif";
-    element.style.borderRadius = "8px";
+    element.style.position =
+        "fixed";
 
-    document.documentElement.appendChild(element);
+    element.style.top =
+        "10px";
 
-    setTimeout(function () {
+    element.style.left =
+        "10px";
 
-        browser.runtime.sendMessage({
-            type: "DIRECT_TEST_2",
-            source: "content.js",
-            text: "HELLO_FROM_CONTENT_JS_2",
-            timestamp: new Date().toISOString()
-        })
-        .then(function (response) {
+    element.style.zIndex =
+        "2147483647";
+
+    element.style.padding =
+        "12px 16px";
+
+    element.style.background =
+        "black";
+
+    element.style.color =
+        "white";
+
+    element.style.fontSize =
+        "16px";
+
+    element.style.fontFamily =
+        "sans-serif";
+
+    element.style.borderRadius =
+        "8px";
+
+    document.documentElement.appendChild(
+        element
+    );
+
+
+    /*
+     * ========================================================
+     * استقبال الرسالة من background.js
+     * ========================================================
+     */
+
+    browser.runtime.onMessage.addListener(
+        function (message) {
 
             console.log(
-                "[AiChat TEST] Background response:",
-                response
+                "[AiChat TEST] Message from background:",
+                message
             );
 
             if (
-                response &&
-                response.ok === true &&
-                response.native === true
+                message &&
+                message.type ===
+                    "REVERSE_TEST"
             ) {
+
                 element.textContent =
-                    "✅ Content → Background → Native نجح";
-            } else {
-                element.textContent =
-                    "❌ Content → Background نجح، Native فشل: " +
-                    (response && response.error
-                        ? response.error
-                        : "unknown");
+                    "✅ Kotlin → Background → Content نجح";
+
+                element.style.background =
+                    "green";
+
+                return Promise.resolve({
+                    ok: true
+                });
             }
 
-        })
-        .catch(function (error) {
+            /*
+             * رسالة الاختبار الأولية
+             */
+            if (
+                message &&
+                message.type ===
+                    "REVERSE_TEST_READY"
+            ) {
 
-            console.error(
-                "[AiChat TEST] sendMessage failed:",
-                error
-            );
+                element.textContent =
+                    "🟡 Kotlin متصل بالـ Background";
 
-            element.textContent =
-                "❌ Content → Background فشل: " +
-                error;
+                element.style.background =
+                    "orange";
 
-        });
+                return Promise.resolve({
+                    ok: true
+                });
+            }
 
-    }, 2000);
+            return Promise.resolve({
+                ok: false
+            });
+        }
+    );
 
 })();
