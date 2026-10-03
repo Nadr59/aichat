@@ -13,6 +13,7 @@ import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
+
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.WebExtension
@@ -591,6 +592,10 @@ class AichatApp : Application() {
                                 true
                             )
 
+                        logDebug(
+                            "🔄 POLL handler ENTER: domain=$domain, visible=$visible"
+                        )
+
                         val resp =
                             JSONObject()
 
@@ -620,6 +625,17 @@ class AichatApp : Application() {
 
                         val delivery =
                             takeContextFor(domain)
+
+                        synchronized(ctxLock) {
+                            logDebug(
+                                "🔎 POLL context state: " +
+                                    "pending=${contextPending.isNotBlank()}, " +
+                                    "len=${contextPending.length}, " +
+                                    "id=$lastContextId, " +
+                                    "target=$contextTarget, " +
+                                    "deliveredAt=$contextDeliveredAt"
+                            )
+                        }
 
                         if (delivery != null) {
 
