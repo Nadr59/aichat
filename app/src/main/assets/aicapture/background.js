@@ -13,7 +13,53 @@ function logLocal(message) {
 
 
 // ============================================================
-// Find ChatGPT tab
+// Find active/current platform tab
+// ============================================================
+
+function findActivePlatformTab() {
+
+    return browser.tabs.query({
+        active: true
+    }).then(function (tabs) {
+
+        logLocal(
+            "🔎 Active tabs found: " +
+            tabs.length
+        );
+
+        if (!tabs || tabs.length === 0) {
+            throw new Error("NO_ACTIVE_TAB");
+        }
+
+        // Prefer the active tab.
+        for (var i = 0; i < tabs.length; i++) {
+
+            if (tabs[i].active) {
+
+                logLocal(
+                    "🎯 Using active platform tab: " +
+                    tabs[i].id +
+                    " url=" +
+                    (tabs[i].url || "")
+                );
+
+                return tabs[i];
+            }
+        }
+
+        // Safety fallback.
+        logLocal(
+            "🎯 Using first active-tab result: " +
+            tabs[0].id
+        );
+
+        return tabs[0];
+    });
+}
+
+
+// ============================================================
+// ChatGPT tab — kept for legacy tests
 // ============================================================
 
 function findChatGPTTab() {
@@ -34,9 +80,11 @@ function findChatGPTTab() {
             throw new Error("NO_CHATGPT_TAB");
         }
 
-        // Prefer the active tab if one exists.
+        // Prefer the active ChatGPT tab.
         for (var i = 0; i < tabs.length; i++) {
+
             if (tabs[i].active) {
+
                 logLocal(
                     "🎯 Using active ChatGPT tab: " +
                     tabs[i].id
@@ -58,17 +106,20 @@ function findChatGPTTab() {
 
 
 // ============================================================
-// Send message to ChatGPT content.js
+// Send message to active platform content.js
 // ============================================================
 
-function sendToChatGPT(message) {
+function sendToActivePlatform(message) {
 
-    return findChatGPTTab()
+    return findActivePlatformTab()
         .then(function (tab) {
 
             logLocal(
-                "📤 Background → Content: tab=" +
-                tab.id
+                "📤 Background → Content: " +
+                "tab=" +
+                tab.id +
+                " url=" +
+                (tab.url || "")
             );
 
             return browser.tabs.sendMessage(
@@ -76,13 +127,17 @@ function sendToChatGPT(message) {
                 {
                     type: "CONTEXT_TO_PAGE",
 
-                    text: message.text || "",
+                    text:
+                        message.text ||
+                        "",
 
                     contextId:
-                        message.contextId || 0,
+                        message.contextId ||
+                        0,
 
                     domain:
-                        message.domain || "",
+                        message.domain ||
+                        "",
 
                     timestamp:
                         message.timestamp ||
@@ -152,7 +207,10 @@ function connectToNative() {
                         "📥 CONTEXT_TO_PAGE received from Kotlin"
                     );
 
-                    sendToChatGPT(message)
+                    // IMPORTANT:
+                    // Do NOT search specifically for ChatGPT.
+                    // Use the currently active platform tab.
+                    sendToActivePlatform(message)
 
                         .then(function () {
 
@@ -229,6 +287,7 @@ function connectToNative() {
                         "REVERSE_TEST"
                 ) {
 
+                    // Keep the old test explicitly on ChatGPT.
                     findChatGPTTab()
 
                         .then(function (tab) {
