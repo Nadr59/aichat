@@ -160,12 +160,20 @@ fun GeckoTestScreen(
 
         if (p != null && vm != null && p.memoryEnabled) {
             app.onAiResponseCaptured = { domain, text ->
-                vm.onWebAiResponse(
-                    platformId   = p.id,
-                    platformName = p.name,
-                    text         = text
-                )
-                Log.d("GeckoTestScreen", "🧠 Auto: ${text.take(60)}")
+    Log.d(
+        "GeckoTestScreen",
+        "📨 Callback received: platform=${p.name}, len=${text.length}"
+    )
+
+    app.logDebug(
+        "📨 GeckoTestScreen received ASSISTANT_RESPONSE: len=${text.length}"
+    )
+
+    vm.onWebAiResponse(
+        platformId   = p.id,
+        platformName = p.name,
+        text         = text
+    )
             }
             app.onManualCaptureResult = { success, text, debug ->
                 timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
