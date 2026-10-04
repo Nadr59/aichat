@@ -393,6 +393,28 @@ class AichatApp : Application() {
         }
 
         when (type) {
+            "ASSISTANT_RESPONSE" -> {
+
+    val text = json.optString("text", "")
+    val source = json.optString("source", "web")
+
+    if (text.isBlank()) {
+        logDebug("⚠️ ASSISTANT_RESPONSE: empty")
+        return
+    }
+
+    logDebug(
+        "📨 ASSISTANT_RESPONSE received: " +
+            "source=$source, len=${text.length}"
+    )
+
+    mainHandler.post {
+        onAiResponseCaptured?.invoke(
+            source,
+            text
+        )
+    }
+            }
 
             "CONTEXT_WRITTEN" -> {
 
