@@ -490,13 +490,16 @@ fun updateEnhancedQuery(newText: String) {
 
     viewModelScope.launch {
         try {
+            val cleanText = text.trim()
+
             android.util.Log.d(
                 "ChatViewModel",
-                "🌐 Web AI response from $platformName: ${text.take(80)}..."
+                "🌐 Web AI response from $platformName: ${cleanText.take(80)}..."
             )
 
-            // استخدام المحادثة الحالية إن وجدت.
-            // إذا لم توجد، ننشئ محادثة جديدة فقط لتسجيل الرد.
+            // ========================================================
+            // 1. الحصول على المحادثة الحالية
+            // ========================================================
             val convId = _currentConversationId.value ?: run {
                 val id = conversationRepository.insertConversation(
                     Conversation(
@@ -511,14 +514,15 @@ fun updateEnhancedQuery(newText: String) {
                 id
             }
 
-            // تسجيل الرد كمجرد رسالة في سجل المحادثة.
-            // لا يتم حفظه في Shared Memory هنا.
+            // ========================================================
+            // 2. حفظ الرد في سجل المحادثة
+            // ========================================================
             val messageId =
                 conversationRepository.insertMessage(
                     Message(
                         conversationId = convId,
                         role = "assistant",
-                        content = text.trim(),
+                        content = cleanText,
                         messageType = "text"
                     )
                 )
@@ -536,14 +540,35 @@ fun updateEnhancedQuery(newText: String) {
 
             android.util.Log.d(
                 "ChatViewModel",
-                "✅ Web response saved as conversation message: " +
+                "✅ Web response saved to conversation: " +
                     "id=$messageId, conversation=$convId"
             )
 
-            android.util.Log.d(
-                "ChatViewModel",
-                "🛑 Memory save intentionally disabled for this test"
-            )
+            // ========================================================
+            // 3. حفظ الرد في الذاكرة المشتركة
+            // ========================================================
+            if (_memoryAccessEnabled.value) {
+
+                val memoryId = memoryRepository.addMemory(
+                    content = cleanText,
+                    sourceConversationId = convId,
+                    sourceMessageId = messageId,
+                    category = "KNOWLEDGE",
+                    isShared = true
+                )
+
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "🧠 Web response saved to SHARED MEMORY: " +
+                        "memoryId=$memoryId"
+                )
+
+            } else {
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "⚪ Memory access disabled — response not saved to shared memory"
+                )
+            }
 
         } catch (e: Exception) {
             android.util.Log.e(
@@ -554,6 +579,7 @@ fun updateEnhancedQuery(newText: String) {
         }
     }
     }
+    
 
     // ============================================================
     // الصور
