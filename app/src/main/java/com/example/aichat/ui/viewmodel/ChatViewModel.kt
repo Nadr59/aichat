@@ -482,40 +482,77 @@ fun updateEnhancedQuery(newText: String) {
          }
 
     fun onWebAiResponse(
-        platformId:   String,
-        platformName: String,
-        text:         String
-    ) {
-        if (text.isBlank()) return
+    platformId: String,
+    platformName: String,
+    text: String
+) {
+    if (text.isBlank()) return
 
-        viewModelScope.launch {
-            try {
-                android.util.Log.d(
-                    "ChatViewModel",
-                    "🌐 Web AI from $platformName: ${text.take(80)}..."
+    viewModelScope.launch {
+        try {
+            android.util.Log.d(
+                "ChatViewModel",
+                "🌐 Web AI response from $platformName: ${text.take(80)}..."
+            )
+
+            // استخدام المحادثة الحالية إن وجدت.
+            // إذا لم توجد، ننشئ محادثة جديدة فقط لتسجيل الرد.
+            val convId = _currentConversationId.value ?: run {
+                val id = conversationRepository.insertConversation(
+                    Conversation(
+                        title = "$platformName — Web",
+                        memoryAccessEnabled = _memoryAccessEnabled.value
+                    )
                 )
 
-                memoryRepository.addMemory(
-                    content              = text,
-                    sourceConversationId = null,
-                    sourceMessageId      = null,
-                    category             = "WEB",
-                    isShared             = true
-                )
+                _currentConversationId.value = id
+                startCollecting(id)
 
-                android.util.Log.d(
-                    "ChatViewModel",
-                    "✅ Saved to memory from: $platformName"
-                )
-
-            } catch (e: Exception) {
-                android.util.Log.e(
-                    "ChatViewModel",
-                    "❌ onWebAiResponse: ${e.message}",
-                    e
-                )
+                id
             }
+
+            // تسجيل الرد كمجرد رسالة في سجل المحادثة.
+            // لا يتم حفظه في Shared Memory هنا.
+            val messageId =
+                conversationRepository.insertMessage(
+                    Message(
+                        conversationId = convId,
+                        role = "assistant",
+                        content = text.trim(),
+                        messageType = "text"
+                    )
+                )
+
+            conversationRepository.updateTitleAndTimestamp(
+                id = convId,
+                title = conversationRepository
+                    .getMessagesOnce(convId)
+                    .firstOrNull { it.role == "user" }
+                    ?.content
+                    ?.take(50)
+                    ?: "$platformName — Web",
+                updatedAt = System.currentTimeMillis()
+            )
+
+            android.util.Log.d(
+                "ChatViewModel",
+                "✅ Web response saved as conversation message: " +
+                    "id=$messageId, conversation=$convId"
+            )
+
+            android.util.Log.d(
+                "ChatViewModel",
+                "🛑 Memory save intentionally disabled for this test"
+            )
+
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "ChatViewModel",
+                "❌ onWebAiResponse: ${e.message}",
+                e
+            )
         }
+    }
     }
 
     // ============================================================
