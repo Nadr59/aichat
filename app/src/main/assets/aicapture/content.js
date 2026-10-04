@@ -2,11 +2,11 @@
     "use strict";
 
     // ============================================================
-    // AiChat — REAL ASSISTANT RESPONSE EXTRACTION TEST
-    // Version 1.0.30
+    // AiChat — REAL ASSISTANT RESPONSE + CLEANING
+    // Version 1.0.31
     // ============================================================
 
-    var VERSION = "1.0.30";
+    var VERSION = "1.0.31";
 
     function log(message) {
         try {
@@ -22,7 +22,7 @@
     log("🧪 content.js loaded v=" + VERSION);
 
     // ============================================================
-    // INPUT FINDER
+    // INPUT
     // ============================================================
 
     var INPUT_SELECTORS = [
@@ -48,7 +48,9 @@
     function findInput() {
         for (var i = 0; i < INPUT_SELECTORS.length; i++) {
             try {
-                var element = document.querySelector(INPUT_SELECTORS[i]);
+                var element = document.querySelector(
+                    INPUT_SELECTORS[i]
+                );
 
                 if (element) {
                     return element;
@@ -84,7 +86,7 @@
     }
 
     // ============================================================
-    // TEXT INJECTION
+    // INJECTION
     // ============================================================
 
     function injectText(input, text) {
@@ -93,11 +95,14 @@
                 input.tagName === "TEXTAREA" ||
                 input.tagName === "INPUT"
             ) {
-                var prototype = Object.getPrototypeOf(input);
-                var descriptor = Object.getOwnPropertyDescriptor(
-                    prototype,
-                    "value"
-                );
+                var prototype =
+                    Object.getPrototypeOf(input);
+
+                var descriptor =
+                    Object.getOwnPropertyDescriptor(
+                        prototype,
+                        "value"
+                    );
 
                 if (descriptor && descriptor.set) {
                     descriptor.set.call(input, text);
@@ -162,7 +167,7 @@
         try {
             input.focus();
 
-            var eventOptions = {
+            var options = {
                 key: "Enter",
                 code: "Enter",
                 keyCode: 13,
@@ -175,21 +180,21 @@
             input.dispatchEvent(
                 new KeyboardEvent(
                     "keydown",
-                    eventOptions
+                    options
                 )
             );
 
             input.dispatchEvent(
                 new KeyboardEvent(
                     "keypress",
-                    eventOptions
+                    options
                 )
             );
 
             input.dispatchEvent(
                 new KeyboardEvent(
                     "keyup",
-                    eventOptions
+                    options
                 )
             );
 
@@ -203,7 +208,7 @@
     }
 
     // ============================================================
-    // REAL CHATGPT CONVERSATION CONTAINER
+    // CONVERSATION CONTAINER
     // ============================================================
 
     function getConversationContainers() {
@@ -236,7 +241,9 @@
 
     function getConversationText(element) {
         try {
-            return (element.innerText || element.textContent || "")
+            return (element.innerText ||
+                element.textContent ||
+                "")
                 .replace(/\u00a0/g, " ")
                 .replace(/\r/g, "")
                 .trim();
@@ -246,7 +253,83 @@
     }
 
     // ============================================================
-    // EXTRACT ONLY ASSISTANT PART
+    // CLEAN RESPONSE
+    // ============================================================
+
+    function cleanAssistantResponse(text) {
+        if (!text) {
+            return "";
+        }
+
+        var cleaned = text;
+
+        // Normalize line endings.
+        cleaned = cleaned
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n");
+
+        // Remove known ChatGPT footer.
+        var footer =
+            "ChatGPT هو نظام ذكاء اصطناعي وقد يخطئ.";
+
+        var footerIndex =
+            cleaned.indexOf(footer);
+
+        if (footerIndex !== -1) {
+            cleaned =
+                cleaned.substring(0, footerIndex);
+        }
+
+        // Remove the sources section.
+        var sourceMarkers = [
+            "\nF المصادر",
+            "\nالمصادر",
+            "F المصادر"
+        ];
+
+        var sourceIndex = -1;
+
+        for (var i = 0; i < sourceMarkers.length; i++) {
+            var index =
+                cleaned.indexOf(sourceMarkers[i]);
+
+            if (index !== -1) {
+                if (
+                    sourceIndex === -1 ||
+                    index < sourceIndex
+                ) {
+                    sourceIndex = index;
+                }
+            }
+        }
+
+        if (sourceIndex !== -1) {
+            cleaned =
+                cleaned.substring(0, sourceIndex);
+        }
+
+        // Remove empty lines at beginning/end.
+        cleaned = cleaned
+            .replace(/^\s+/, "")
+            .replace(/\s+$/, "");
+
+        // Collapse excessive blank lines.
+        cleaned = cleaned.replace(
+            /\n[ \t]*\n[ \t]*\n+/g,
+            "\n\n"
+        );
+
+        // Remove accidental spaces before newlines.
+        cleaned = cleaned.replace(
+            /[ \t]+\n/g,
+            "\n"
+        );
+
+        return cleaned.trim();
+    }
+
+    // ============================================================
+    // EXTRACT ASSISTANT
     // ============================================================
 
     function extractAssistantText(conversationText) {
@@ -266,7 +349,9 @@
 
         for (var i = 0; i < markers.length; i++) {
             var currentPosition =
-                conversationText.lastIndexOf(markers[i]);
+                conversationText.lastIndexOf(
+                    markers[i]
+                );
 
             if (currentPosition > position) {
                 position = currentPosition;
@@ -278,66 +363,39 @@
             return "";
         }
 
-        var answer = conversationText
-            .substring(position + markerLength)
-            .trim();
-
-        // Remove ChatGPT footer.
-        var footer = "ChatGPT هو نظام ذكاء اصطناعي وقد يخطئ.";
-
-        var footerPosition = answer.indexOf(footer);
-
-        if (footerPosition !== -1) {
-            answer = answer
-                .substring(0, footerPosition)
+        var answer =
+            conversationText
+                .substring(
+                    position + markerLength
+                )
                 .trim();
-        }
 
-        // Remove the sources section from the extracted answer.
-        var sourcesMarkers = [
-            "\nF المصادر",
-            "F المصادر"
-        ];
-
-        for (var j = 0; j < sourcesMarkers.length; j++) {
-            var sourcesPosition =
-                answer.indexOf(sourcesMarkers[j]);
-
-            if (sourcesPosition !== -1) {
-                answer = answer
-                    .substring(0, sourcesPosition)
-                    .trim();
-
-                break;
-            }
-        }
-
-        return answer;
+        return cleanAssistantResponse(answer);
     }
 
     // ============================================================
-    // RESPONSE STATE
+    // CAPTURE STATE
     // ============================================================
 
     var baselineAssistant = "";
-    var baselineConversation = "";
     var captureActive = false;
     var captureFinished = false;
     var lastCandidate = "";
     var stableSince = 0;
 
     function getCurrentAssistantText() {
-        var containers = getConversationContainers();
+        var containers =
+            getConversationContainers();
 
         if (containers.length === 0) {
             return "";
         }
 
-        // Use the last conversation container.
         var lastContainer =
             containers[containers.length - 1];
 
-        var text = getConversationText(lastContainer);
+        var text =
+            getConversationText(lastContainer);
 
         return extractAssistantText(text);
     }
@@ -348,34 +406,38 @@
         lastCandidate = "";
         stableSince = 0;
 
-        var containers = getConversationContainers();
+        var containers =
+            getConversationContainers();
 
         if (containers.length > 0) {
             var lastContainer =
                 containers[containers.length - 1];
 
-            baselineConversation =
-                getConversationText(lastContainer);
+            var baselineText =
+                getConversationText(
+                    lastContainer
+                );
 
             baselineAssistant =
                 extractAssistantText(
-                    baselineConversation
+                    baselineText
                 );
         } else {
-            baselineConversation = "";
             baselineAssistant = "";
         }
 
         log(
             "🧪 Response capture started " +
             "baselineAssistant=" +
-            baselineAssistant.length +
-            " baselineConversation=" +
-            baselineConversation.length
+            baselineAssistant.length
         );
 
         watchForResponse();
     }
+
+    // ============================================================
+    // FINAL RESPONSE
+    // ============================================================
 
     function finishCapture(answer) {
         if (captureFinished) {
@@ -385,20 +447,24 @@
         captureFinished = true;
         captureActive = false;
 
-        answer = (answer || "").trim();
+        answer = cleanAssistantResponse(
+            answer || ""
+        );
 
         if (!answer) {
-            log("⚠️ Assistant answer empty");
+            log(
+                "⚠️ Clean assistant response empty"
+            );
             return;
         }
 
         log(
-            "✅ REAL ASSISTANT RESPONSE extracted len=" +
+            "🧹 Response cleaned len=" +
             answer.length
         );
 
         log(
-            "📝 REAL RESPONSE: " +
+            "📝 CLEAN RESPONSE: " +
             answer.substring(0, 1200)
         );
 
@@ -410,7 +476,10 @@
                 timestamp: Date.now()
             });
 
-            log("📤 ASSISTANT_RESPONSE sent to background");
+            log(
+                "📤 CLEAN ASSISTANT_RESPONSE sent"
+            );
+
         } catch (e) {
             log(
                 "❌ ASSISTANT_RESPONSE send failed: " +
@@ -419,28 +488,39 @@
         }
     }
 
+    // ============================================================
+    // RESPONSE WATCHER
+    // ============================================================
+
     function watchForResponse() {
         if (!captureActive || captureFinished) {
             return;
         }
 
-        var current = getCurrentAssistantText();
+        var current =
+            getCurrentAssistantText();
 
         if (!current) {
-            setTimeout(watchForResponse, 1000);
+            setTimeout(
+                watchForResponse,
+                1000
+            );
             return;
         }
 
-        // Ignore the old assistant response.
+        // Ignore the old response.
         if (
             baselineAssistant &&
             current === baselineAssistant
         ) {
-            setTimeout(watchForResponse, 1000);
+            setTimeout(
+                watchForResponse,
+                1000
+            );
             return;
         }
 
-        // New response detected.
+        // Response is still changing.
         if (current !== lastCandidate) {
             lastCandidate = current;
             stableSince = Date.now();
@@ -450,25 +530,35 @@
                 current.length
             );
 
-            setTimeout(watchForResponse, 1200);
+            setTimeout(
+                watchForResponse,
+                1200
+            );
+
             return;
         }
 
-        // Wait until the response remains unchanged.
+        // Response has stopped changing.
         if (
             lastCandidate &&
             stableSince > 0 &&
             Date.now() - stableSince >= 1800
         ) {
-            finishCapture(lastCandidate);
+            finishCapture(
+                lastCandidate
+            );
+
             return;
         }
 
-        setTimeout(watchForResponse, 800);
+        setTimeout(
+            watchForResponse,
+            800
+        );
     }
 
     // ============================================================
-    // RECEIVE COMMAND FROM BACKGROUND
+    // MESSAGE FROM BACKGROUND
     // ============================================================
 
     browser.runtime.onMessage.addListener(
@@ -478,13 +568,13 @@
                 return;
             }
 
-            // ----------------------------------------------------
-            // CONTEXT_TO_PAGE
-            // ----------------------------------------------------
+            if (
+                message.type ===
+                "CONTEXT_TO_PAGE"
+            ) {
 
-            if (message.type === "CONTEXT_TO_PAGE") {
-
-                var text = message.text || "";
+                var text =
+                    message.text || "";
 
                 log(
                     "📥 CONTEXT_TO_PAGE received len=" +
@@ -492,11 +582,13 @@
                 );
 
                 if (!text) {
-                    log("⚠️ CONTEXT_TO_PAGE text empty");
+                    log(
+                        "⚠️ CONTEXT_TO_PAGE text empty"
+                    );
                     return;
                 }
 
-                // Start capture BEFORE sending the request.
+                // Capture starts BEFORE sending.
                 startResponseCapture();
 
                 findInputWithRetry(
@@ -506,16 +598,23 @@
 
                         var selectorInfo =
                             input.tagName +
-                            (input.id
-                                ? "#" + input.id
-                                : "") +
-                            (input.className
-                                ? "." +
-                                  String(input.className)
+                            (
+                                input.id
+                                    ? "#" +
+                                      input.id
+                                    : ""
+                            ) +
+                            (
+                                input.className
+                                    ? "." +
+                                      String(
+                                          input.className
+                                      )
                                       .split(/\s+/)
                                       .slice(0, 4)
                                       .join(".")
-                                : "");
+                                    : ""
+                            );
 
                         log(
                             "🔎 ChatGPT input found: " +
@@ -545,7 +644,7 @@
     );
 
     // ============================================================
-    // INITIAL PING
+    // READY
     // ============================================================
 
     try {
@@ -556,6 +655,7 @@
         });
 
         log("📡 CONTENT_READY sent");
+
     } catch (e) {
         log(
             "❌ CONTENT_READY failed: " +
