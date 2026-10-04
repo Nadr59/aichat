@@ -2,11 +2,30 @@
     "use strict";
 
     // ============================================================
-    // AiChat — REAL ASSISTANT RESPONSE + CLEANING
-    // Version 1.0.31
+    // AiChat — PLATFORM REGISTRY + ASSISTANT RESPONSE CAPTURE
+    // Version 1.0.32
+    //
+    // Architecture:
+    //   Content Script
+    //       ├── Platform Registry
+    //       ├── Input / Injection
+    //       └── Response Capture
+    //
+    // Current adapters:
+    //   - ChatGPT
+    //   - Gemini
+    //   - Generic fallback
+    //
+    // IMPORTANT:
+    //   Existing GeckoView / Manifest V2 / browser.* architecture
+    //   is preserved.
     // ============================================================
 
-    var VERSION = "1.0.31";
+    var VERSION = "1.0.32";
+
+    // ============================================================
+    // DEBUG LOG
+    // ============================================================
 
     function log(message) {
         try {
@@ -20,6 +39,165 @@
     }
 
     log("🧪 content.js loaded v=" + VERSION);
+
+    // ============================================================
+    // PLATFORM REGISTRY
+    // ============================================================
+
+    var PLATFORMS = {
+
+        chatgpt: {
+            id: "chatgpt",
+            name: "ChatGPT",
+
+            matches: function () {
+                return location.hostname === "chatgpt.com" ||
+                       location.hostname === "chat.openai.com";
+            },
+
+            responseSelectors: [
+                '[data-message-author-role="assistant"]',
+                '[data-role="assistant"]',
+                '[data-message-author="assistant"]',
+                ".agent-turn"
+            ],
+
+            extractResponse: function (element) {
+                if (!element) {
+                    return "";
+                }
+
+                // Prefer rendered markdown.
+                var markdown = null;
+
+                try {
+                    markdown =
+                        element.querySelector(".markdown");
+                } catch (e) {}
+
+                if (markdown) {
+                    return getElementText(markdown);
+                }
+
+                return getElementText(element);
+            },
+
+            legacyContainerMode: true
+        },
+
+        gemini: {
+            id: "gemini",
+            name: "Gemini",
+
+            matches: function () {
+                return location.hostname === "gemini.google.com";
+            },
+
+            responseSelectors: [
+                "model-response",
+                ".model-response",
+                ".model-response-container",
+                ".model-response-text",
+                '[data-test-id="model-response"]',
+                '[data-test-id*="model-response"]',
+                "message-content",
+                ".response-container",
+                ".presented-response-container",
+                '[aria-label="Gemini response"]',
+                '[data-message-author-role="assistant"]',
+                '[data-message-author-role="model"]'
+            ],
+
+            extractResponse: function (element) {
+                if (!element) {
+                    return "";
+                }
+
+                // Prefer the actual response content when available.
+                var contentSelectors = [
+                    ".model-response-text",
+                    ".markdown",
+                    "message-content",
+                    ".response-content",
+                    ".response-container"
+                ];
+
+                for (var i = 0; i < contentSelectors.length; i++) {
+                    try {
+                        var child =
+                            element.querySelector(
+                                contentSelectors[i]
+                            );
+
+                        if (child) {
+                            var childText =
+                                getElementText(child);
+
+                            if (childText) {
+                                return childText;
+                            }
+                        }
+                    } catch (e) {}
+                }
+
+                return getElementText(element);
+            },
+
+            legacyContainerMode: false
+        },
+
+        generic: {
+            id: "generic",
+            name: "Generic Web AI",
+
+            matches: function () {
+                return true;
+            },
+
+            responseSelectors: [
+                '[data-message-author-role="assistant"]',
+                '[data-role="assistant"]',
+                '[data-message-author="assistant"]',
+                ".assistant-message",
+                ".ai-message",
+                ".model-response",
+                ".response-container"
+            ],
+
+            extractResponse: function (element) {
+                return getElementText(element);
+            },
+
+            legacyContainerMode: false
+        }
+    };
+
+    // ============================================================
+    // PLATFORM DETECTION
+    // ============================================================
+
+    function detectPlatform() {
+
+        if (PLATFORMS.chatgpt.matches()) {
+            return PLATFORMS.chatgpt;
+        }
+
+        if (PLATFORMS.gemini.matches()) {
+            return PLATFORMS.gemini;
+        }
+
+        return PLATFORMS.generic;
+    }
+
+    var CURRENT_PLATFORM = detectPlatform();
+
+    log(
+        "🌐 Platform detected: " +
+        CURRENT_PLATFORM.name +
+        " (" +
+        CURRENT_PLATFORM.id +
+        ")"
+    );
 
     // ============================================================
     // INPUT
@@ -46,25 +224,36 @@
     ];
 
     function findInput() {
+
         for (var i = 0; i < INPUT_SELECTORS.length; i++) {
+
             try {
-                var element = document.querySelector(
-                    INPUT_SELECTORS[i]
-                );
+
+                var element =
+                    document.querySelector(
+                        INPUT_SELECTORS[i]
+                    );
 
                 if (element) {
                     return element;
                 }
+
             } catch (e) {}
         }
 
         return null;
     }
 
-    function findInputWithRetry(attempts, delay, callback) {
+    function findInputWithRetry(
+        attempts,
+        delay,
+        callback
+    ) {
+
         var count = 0;
 
         function attempt() {
+
             var input = findInput();
 
             if (input) {
@@ -75,11 +264,20 @@
             count++;
 
             if (count >= attempts) {
-                log("❌ ChatGPT input not found");
+
+                log(
+                    "❌ " +
+                    CURRENT_PLATFORM.name +
+                    " input not found"
+                );
+
                 return;
             }
 
-            setTimeout(attempt, delay);
+            setTimeout(
+                attempt,
+                delay
+            );
         }
 
         attempt();
@@ -90,11 +288,14 @@
     // ============================================================
 
     function injectText(input, text) {
+
         try {
+
             if (
                 input.tagName === "TEXTAREA" ||
                 input.tagName === "INPUT"
             ) {
+
                 var prototype =
                     Object.getPrototypeOf(input);
 
@@ -104,67 +305,106 @@
                         "value"
                     );
 
-                if (descriptor && descriptor.set) {
-                    descriptor.set.call(input, text);
+                if (
+                    descriptor &&
+                    descriptor.set
+                ) {
+
+                    descriptor.set.call(
+                        input,
+                        text
+                    );
+
                 } else {
+
                     input.value = text;
                 }
 
                 input.dispatchEvent(
-                    new Event("input", {
-                        bubbles: true,
-                        composed: true
-                    })
+                    new Event(
+                        "input",
+                        {
+                            bubbles: true,
+                            composed: true
+                        }
+                    )
                 );
 
                 input.dispatchEvent(
-                    new Event("change", {
-                        bubbles: true,
-                        composed: true
-                    })
+                    new Event(
+                        "change",
+                        {
+                            bubbles: true,
+                            composed: true
+                        }
+                    )
                 );
+
             } else {
+
                 input.focus();
 
                 try {
+
                     document.execCommand(
                         "selectAll",
                         false,
                         null
                     );
+
                 } catch (e) {}
 
                 try {
+
                     document.execCommand(
                         "insertText",
                         false,
                         text
                     );
+
                 } catch (e) {
+
                     input.textContent = text;
 
                     input.dispatchEvent(
-                        new InputEvent("input", {
-                            bubbles: true,
-                            composed: true,
-                            inputType: "insertText",
-                            data: text
-                        })
+                        new InputEvent(
+                            "input",
+                            {
+                                bubbles: true,
+                                composed: true,
+                                inputType: "insertText",
+                                data: text
+                            }
+                        )
                     );
                 }
             }
 
-            log("✅ Text injected successfully");
+            log(
+                "✅ Text injected successfully"
+            );
+
             return true;
 
         } catch (e) {
-            log("❌ Text injection failed: " + e);
+
+            log(
+                "❌ Text injection failed: " +
+                e
+            );
+
             return false;
         }
     }
 
+    // ============================================================
+    // ENTER
+    // ============================================================
+
     function sendEnter(input) {
+
         try {
+
             input.focus();
 
             var options = {
@@ -198,77 +438,182 @@
                 )
             );
 
-            log("✅ Enter sent to ChatGPT");
+            log(
+                "✅ Enter sent to " +
+                CURRENT_PLATFORM.name
+            );
+
             return true;
 
         } catch (e) {
-            log("❌ Enter failed: " + e);
+
+            log(
+                "❌ Enter failed: " +
+                e
+            );
+
             return false;
         }
     }
 
     // ============================================================
-    // CONVERSATION CONTAINER
+    // GENERIC DOM TEXT
     // ============================================================
 
-    function getConversationContainers() {
+    function getElementText(element) {
+
+        try {
+
+            return (
+                element.innerText ||
+                element.textContent ||
+                ""
+            )
+                .replace(/\u00a0/g, " ")
+                .replace(/\r/g, "")
+                .trim();
+
+        } catch (e) {
+
+            return "";
+        }
+    }
+
+    // ============================================================
+    // CHATGPT LEGACY CONTAINERS
+    //
+    // Kept intentionally because the existing ChatGPT capture
+    // path is already proven to work.
+    // ============================================================
+
+    function getChatGPTConversationContainers() {
+
         var result = [];
 
         try {
-            var sections = document.querySelectorAll(
-                'section[aria-label^="محادثة"]'
-            );
 
-            for (var i = 0; i < sections.length; i++) {
-                result.push(sections[i]);
+            var sections =
+                document.querySelectorAll(
+                    'section[aria-label^="محادثة"]'
+                );
+
+            for (
+                var i = 0;
+                i < sections.length;
+                i++
+            ) {
+
+                result.push(
+                    sections[i]
+                );
             }
+
         } catch (e) {}
 
         if (result.length === 0) {
-            try {
-                var regions = document.querySelectorAll(
-                    '[role="region"][aria-label="محادثة"]'
-                );
 
-                for (var j = 0; j < regions.length; j++) {
-                    result.push(regions[j]);
+            try {
+
+                var regions =
+                    document.querySelectorAll(
+                        '[role="region"][aria-label="محادثة"]'
+                    );
+
+                for (
+                    var j = 0;
+                    j < regions.length;
+                    j++
+                ) {
+
+                    result.push(
+                        regions[j]
+                    );
                 }
+
             } catch (e) {}
         }
 
         return result;
     }
 
-    function getConversationText(element) {
-        try {
-            return (element.innerText ||
-                element.textContent ||
-                "")
-                .replace(/\u00a0/g, " ")
-                .replace(/\r/g, "")
-                .trim();
-        } catch (e) {
-            return "";
+    // ============================================================
+    // PLATFORM RESPONSE ELEMENTS
+    // ============================================================
+
+    function getPlatformResponseElements() {
+
+        var result = [];
+
+        if (
+            CURRENT_PLATFORM.id ===
+            "chatgpt" &&
+            CURRENT_PLATFORM.legacyContainerMode
+        ) {
+
+            // Preserve the old proven ChatGPT route.
+            return getChatGPTConversationContainers();
         }
+
+        var selectors =
+            CURRENT_PLATFORM.responseSelectors;
+
+        for (
+            var i = 0;
+            i < selectors.length;
+            i++
+        ) {
+
+            try {
+
+                var elements =
+                    document.querySelectorAll(
+                        selectors[i]
+                    );
+
+                for (
+                    var j = 0;
+                    j < elements.length;
+                    j++
+                ) {
+
+                    if (
+                        result.indexOf(
+                            elements[j]
+                        ) === -1
+                    ) {
+
+                        result.push(
+                            elements[j]
+                        );
+                    }
+                }
+
+            } catch (e) {}
+        }
+
+        return result;
     }
 
     // ============================================================
-    // CLEAN RESPONSE
+    // RESPONSE CLEANING
     // ============================================================
 
     function cleanAssistantResponse(text) {
+
         if (!text) {
             return "";
         }
 
         var cleaned = text;
 
-        // Normalize line endings.
         cleaned = cleaned
             .replace(/\r\n/g, "\n")
             .replace(/\r/g, "\n");
 
-        // Remove known ChatGPT footer.
+        // --------------------------------------------------------
+        // ChatGPT footer
+        // --------------------------------------------------------
+
         var footer =
             "ChatGPT هو نظام ذكاء اصطناعي وقد يخطئ.";
 
@@ -276,11 +621,18 @@
             cleaned.indexOf(footer);
 
         if (footerIndex !== -1) {
+
             cleaned =
-                cleaned.substring(0, footerIndex);
+                cleaned.substring(
+                    0,
+                    footerIndex
+                );
         }
 
-        // Remove the sources section.
+        // --------------------------------------------------------
+        // Known sources markers
+        // --------------------------------------------------------
+
         var sourceMarkers = [
             "\nF المصادر",
             "\nالمصادر",
@@ -289,37 +641,81 @@
 
         var sourceIndex = -1;
 
-        for (var i = 0; i < sourceMarkers.length; i++) {
+        for (
+            var i = 0;
+            i < sourceMarkers.length;
+            i++
+        ) {
+
             var index =
-                cleaned.indexOf(sourceMarkers[i]);
+                cleaned.indexOf(
+                    sourceMarkers[i]
+                );
 
             if (index !== -1) {
+
                 if (
                     sourceIndex === -1 ||
                     index < sourceIndex
                 ) {
+
                     sourceIndex = index;
                 }
             }
         }
 
         if (sourceIndex !== -1) {
+
             cleaned =
-                cleaned.substring(0, sourceIndex);
+                cleaned.substring(
+                    0,
+                    sourceIndex
+                );
         }
 
-        // Remove empty lines at beginning/end.
+        // --------------------------------------------------------
+        // Gemini / generic obvious UI markers
+        // --------------------------------------------------------
+
+        var genericFooterMarkers = [
+            "\nWas this response helpful?",
+            "\nهل كانت هذه الإجابة مفيدة؟"
+        ];
+
+        for (
+            var g = 0;
+            g < genericFooterMarkers.length;
+            g++
+        ) {
+
+            var genericIndex =
+                cleaned.indexOf(
+                    genericFooterMarkers[g]
+                );
+
+            if (genericIndex !== -1) {
+
+                cleaned =
+                    cleaned.substring(
+                        0,
+                        genericIndex
+                    );
+            }
+        }
+
+        // --------------------------------------------------------
+        // Normalize whitespace
+        // --------------------------------------------------------
+
         cleaned = cleaned
             .replace(/^\s+/, "")
             .replace(/\s+$/, "");
 
-        // Collapse excessive blank lines.
         cleaned = cleaned.replace(
             /\n[ \t]*\n[ \t]*\n+/g,
             "\n\n"
         );
 
-        // Remove accidental spaces before newlines.
         cleaned = cleaned.replace(
             /[ \t]+\n/g,
             "\n"
@@ -329,10 +725,15 @@
     }
 
     // ============================================================
-    // EXTRACT ASSISTANT
+    // CHATGPT EXTRACTION
+    //
+    // EXACT existing logic preserved.
     // ============================================================
 
-    function extractAssistantText(conversationText) {
+    function extractChatGPTAssistantText(
+        conversationText
+    ) {
+
         if (!conversationText) {
             return "";
         }
@@ -347,15 +748,27 @@
         var position = -1;
         var markerLength = 0;
 
-        for (var i = 0; i < markers.length; i++) {
+        for (
+            var i = 0;
+            i < markers.length;
+            i++
+        ) {
+
             var currentPosition =
                 conversationText.lastIndexOf(
                     markers[i]
                 );
 
-            if (currentPosition > position) {
-                position = currentPosition;
-                markerLength = markers[i].length;
+            if (
+                currentPosition >
+                position
+            ) {
+
+                position =
+                    currentPosition;
+
+                markerLength =
+                    markers[i].length;
             }
         }
 
@@ -366,11 +779,107 @@
         var answer =
             conversationText
                 .substring(
-                    position + markerLength
+                    position +
+                    markerLength
                 )
                 .trim();
 
-        return cleanAssistantResponse(answer);
+        return cleanAssistantResponse(
+            answer
+        );
+    }
+
+    // ============================================================
+    // GENERIC / GEMINI EXTRACTION
+    // ============================================================
+
+    function extractLatestPlatformResponse() {
+
+        var elements =
+            getPlatformResponseElements();
+
+        if (elements.length === 0) {
+            return "";
+        }
+
+        // Always inspect the newest matching element first.
+        for (
+            var i = elements.length - 1;
+            i >= 0;
+            i--
+        ) {
+
+            var element =
+                elements[i];
+
+            var text = "";
+
+            try {
+
+                text =
+                    CURRENT_PLATFORM.extractResponse(
+                        element
+                    );
+
+            } catch (e) {
+
+                text =
+                    getElementText(
+                        element
+                    );
+            }
+
+            text =
+                cleanAssistantResponse(
+                    text
+                );
+
+            if (text) {
+
+                return text;
+            }
+        }
+
+        return "";
+    }
+
+    // ============================================================
+    // CURRENT RESPONSE
+    // ============================================================
+
+    function getCurrentAssistantText() {
+
+        if (
+            CURRENT_PLATFORM.id ===
+            "chatgpt"
+        ) {
+
+            var containers =
+                getChatGPTConversationContainers();
+
+            if (
+                containers.length === 0
+            ) {
+
+                return "";
+            }
+
+            var lastContainer =
+                containers[
+                    containers.length - 1
+                ];
+
+            var conversationText =
+                getElementText(
+                    lastContainer
+                );
+
+            return extractChatGPTAssistantText(
+                conversationText
+            );
+        }
+
+        return extractLatestPlatformResponse();
     }
 
     // ============================================================
@@ -378,83 +887,147 @@
     // ============================================================
 
     var baselineAssistant = "";
+
     var captureActive = false;
+
     var captureFinished = false;
+
     var lastCandidate = "";
+
     var stableSince = 0;
 
-    function getCurrentAssistantText() {
-        var containers =
-            getConversationContainers();
+    // ============================================================
+    // DEBUG RESPONSE ELEMENTS
+    // ============================================================
 
-        if (containers.length === 0) {
-            return "";
+    function logResponseElementDiagnostics() {
+
+        var elements =
+            getPlatformResponseElements();
+
+        log(
+            "🔬 " +
+            CURRENT_PLATFORM.name +
+            " response candidates=" +
+            elements.length
+        );
+
+        var limit =
+            Math.min(
+                elements.length,
+                5
+            );
+
+        for (
+            var i = 0;
+            i < limit;
+            i++
+        ) {
+
+            var element =
+                elements[
+                    elements.length -
+                    1 -
+                    i
+                ];
+
+            var text =
+                getElementText(
+                    element
+                );
+
+            var tag =
+                element.tagName ||
+                "?";
+
+            var cls =
+                typeof element.className ===
+                "string"
+                    ? element.className
+                    : "";
+
+            log(
+                "🔎 candidate[" +
+                i +
+                "] " +
+                tag +
+                (
+                    cls
+                        ? "." +
+                          cls
+                            .split(/\s+/)
+                            .slice(0, 3)
+                            .join(".")
+                        : ""
+                ) +
+                " len=" +
+                text.length
+            );
         }
-
-        var lastContainer =
-            containers[containers.length - 1];
-
-        var text =
-            getConversationText(lastContainer);
-
-        return extractAssistantText(text);
     }
 
+    // ============================================================
+    // START CAPTURE
+    // ============================================================
+
     function startResponseCapture() {
+
         captureActive = true;
+
         captureFinished = false;
+
         lastCandidate = "";
+
         stableSince = 0;
 
-        var containers =
-            getConversationContainers();
-
-        if (containers.length > 0) {
-            var lastContainer =
-                containers[containers.length - 1];
-
-            var baselineText =
-                getConversationText(
-                    lastContainer
-                );
-
-            baselineAssistant =
-                extractAssistantText(
-                    baselineText
-                );
-        } else {
-            baselineAssistant = "";
-        }
+        baselineAssistant =
+            getCurrentAssistantText();
 
         log(
             "🧪 Response capture started " +
-            "baselineAssistant=" +
+            "platform=" +
+            CURRENT_PLATFORM.id +
+            " baselineAssistant=" +
             baselineAssistant.length
         );
+
+        // For Gemini this is especially useful during the first test.
+        if (
+            CURRENT_PLATFORM.id ===
+            "gemini"
+        ) {
+
+            logResponseElementDiagnostics();
+        }
 
         watchForResponse();
     }
 
     // ============================================================
-    // FINAL RESPONSE
+    // FINISH CAPTURE
     // ============================================================
 
     function finishCapture(answer) {
+
         if (captureFinished) {
             return;
         }
 
         captureFinished = true;
+
         captureActive = false;
 
-        answer = cleanAssistantResponse(
-            answer || ""
-        );
+        answer =
+            cleanAssistantResponse(
+                answer || ""
+            );
 
         if (!answer) {
+
             log(
                 "⚠️ Clean assistant response empty"
             );
+
             return;
         }
 
@@ -465,22 +1038,28 @@
 
         log(
             "📝 CLEAN RESPONSE: " +
-            answer.substring(0, 1200)
+            answer.substring(
+                0,
+                1200
+            )
         );
 
         try {
+
             browser.runtime.sendMessage({
                 type: "ASSISTANT_RESPONSE",
                 text: answer,
-                source: "chatgpt",
+                source: CURRENT_PLATFORM.id,
                 timestamp: Date.now()
             });
 
             log(
-                "📤 CLEAN ASSISTANT_RESPONSE sent"
+                "📤 CLEAN ASSISTANT_RESPONSE sent source=" +
+                CURRENT_PLATFORM.id
             );
 
         } catch (e) {
+
             log(
                 "❌ ASSISTANT_RESPONSE send failed: " +
                 e
@@ -493,7 +1072,12 @@
     // ============================================================
 
     function watchForResponse() {
-        if (!captureActive || captureFinished) {
+
+        if (
+            !captureActive ||
+            captureFinished
+        ) {
+
             return;
         }
 
@@ -501,32 +1085,52 @@
             getCurrentAssistantText();
 
         if (!current) {
+
             setTimeout(
                 watchForResponse,
                 1000
             );
+
             return;
         }
 
+        // --------------------------------------------------------
         // Ignore the old response.
+        // --------------------------------------------------------
+
         if (
             baselineAssistant &&
-            current === baselineAssistant
+            current ===
+            baselineAssistant
         ) {
+
             setTimeout(
                 watchForResponse,
                 1000
             );
+
             return;
         }
 
-        // Response is still changing.
-        if (current !== lastCandidate) {
-            lastCandidate = current;
-            stableSince = Date.now();
+        // --------------------------------------------------------
+        // Response changed.
+        // --------------------------------------------------------
+
+        if (
+            current !==
+            lastCandidate
+        ) {
+
+            lastCandidate =
+                current;
+
+            stableSince =
+                Date.now();
 
             log(
-                "🔄 Assistant response changed len=" +
+                "🔄 " +
+                CURRENT_PLATFORM.name +
+                " assistant response changed len=" +
                 current.length
             );
 
@@ -538,12 +1142,18 @@
             return;
         }
 
-        // Response has stopped changing.
+        // --------------------------------------------------------
+        // Response stable.
+        // --------------------------------------------------------
+
         if (
             lastCandidate &&
             stableSince > 0 &&
-            Date.now() - stableSince >= 1800
+            Date.now() -
+                stableSince >=
+                1800
         ) {
+
             finishCapture(
                 lastCandidate
             );
@@ -578,17 +1188,25 @@
 
                 log(
                     "📥 CONTEXT_TO_PAGE received len=" +
-                    text.length
+                    text.length +
+                    " platform=" +
+                    CURRENT_PLATFORM.id
                 );
 
                 if (!text) {
+
                     log(
                         "⚠️ CONTEXT_TO_PAGE text empty"
                     );
+
                     return;
                 }
 
-                // Capture starts BEFORE sending.
+                // ------------------------------------------------
+                // IMPORTANT:
+                // Capture starts BEFORE sending the prompt.
+                // ------------------------------------------------
+
                 startResponseCapture();
 
                 findInputWithRetry(
@@ -610,14 +1228,19 @@
                                       String(
                                           input.className
                                       )
-                                      .split(/\s+/)
-                                      .slice(0, 4)
-                                      .join(".")
+                                        .split(/\s+/)
+                                        .slice(
+                                            0,
+                                            4
+                                        )
+                                        .join(".")
                                     : ""
                             );
 
                         log(
-                            "🔎 ChatGPT input found: " +
+                            "🔎 " +
+                            CURRENT_PLATFORM.name +
+                            " input found: " +
                             selectorInfo
                         );
 
@@ -633,7 +1256,11 @@
 
                         setTimeout(
                             function () {
-                                sendEnter(input);
+
+                                sendEnter(
+                                    input
+                                );
+
                             },
                             300
                         );
@@ -648,15 +1275,19 @@
     // ============================================================
 
     try {
+
         browser.runtime.sendMessage({
             type: "CONTENT_READY",
             version: VERSION,
             url: location.href
         });
 
-        log("📡 CONTENT_READY sent");
+        log(
+            "📡 CONTENT_READY sent"
+        );
 
     } catch (e) {
+
         log(
             "❌ CONTENT_READY failed: " +
             e
