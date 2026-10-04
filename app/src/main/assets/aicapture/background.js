@@ -3,6 +3,13 @@
 var NATIVE_APP = "browser";
 var nativePort = null;
 
+// ============================================================
+// Current platform tab
+// ============================================================
+
+var currentPlatformTabId = null;
+
+
 function logLocal(message) {
     var ts = new Date().toLocaleTimeString("en-US", {
         hour12: false
@@ -13,48 +20,54 @@ function logLocal(message) {
 
 
 // ============================================================
-// Find active/current platform tab
+// Find current platform tab
 // ============================================================
 
 function findActivePlatformTab() {
 
-    return browser.tabs.query({
-        active: true
-    }).then(function (tabs) {
+    if (currentPlatformTabId !== null) {
 
         logLocal(
-            "🔎 Active tabs found: " +
-            tabs.length
+            "🎯 Using current platform tab: " +
+            currentPlatformTabId
         );
 
-        if (!tabs || tabs.length === 0) {
-            throw new Error("NO_ACTIVE_TAB");
-        }
+        return browser.tabs.get(
+            currentPlatformTabId
+        ).then(function (tab) {
 
-        // Prefer the active tab.
-        for (var i = 0; i < tabs.length; i++) {
-
-            if (tabs[i].active) {
-
-                logLocal(
-                    "🎯 Using active platform tab: " +
-                    tabs[i].id +
-                    " url=" +
-                    (tabs[i].url || "")
-                );
-
-                return tabs[i];
+            if (!tab) {
+                throw new Error("NO_PLATFORM_TAB");
             }
-        }
 
-        // Safety fallback.
-        logLocal(
-            "🎯 Using first active-tab result: " +
-            tabs[0].id
-        );
+            logLocal(
+                "✅ Platform tab found: " +
+                tab.id +
+                " url=" +
+                (tab.url || "")
+            );
 
-        return tabs[0];
-    });
+            return tab;
+
+        }).catch(function (error) {
+
+            logLocal(
+                "⚠️ Saved platform tab unavailable: " +
+                (
+                    error &&
+                    error.message
+                        ? error.message
+                        : String(error)
+                )
+            );
+
+            currentPlatformTabId = null;
+
+            throw new Error("NO_PLATFORM_TAB");
+        });
+    }
+
+    throw new Error("NO_PLATFORM_TAB");
 }
 
 
@@ -106,7 +119,7 @@ function findChatGPTTab() {
 
 
 // ============================================================
-// Send message to active platform content.js
+// Send message to current platform content.js
 // ============================================================
 
 function sendToActivePlatform(message) {
@@ -207,9 +220,6 @@ function connectToNative() {
                         "📥 CONTEXT_TO_PAGE received from Kotlin"
                     );
 
-                    // IMPORTANT:
-                    // Do NOT search specifically for ChatGPT.
-                    // Use the currently active platform tab.
                     sendToActivePlatform(message)
 
                         .then(function () {
@@ -287,7 +297,7 @@ function connectToNative() {
                         "REVERSE_TEST"
                 ) {
 
-                    // Keep the old test explicitly on ChatGPT.
+                    // Keep old test explicitly on ChatGPT.
                     findChatGPTTab()
 
                         .then(function (tab) {
@@ -424,6 +434,43 @@ browser.runtime.onMessage.addListener(
             return Promise.resolve({
                 ok: false
             });
+        }
+
+
+        // ----------------------------------------------------
+        // CONTENT_READY
+        // ----------------------------------------------------
+
+        if (
+            message.type ===
+                "CONTENT_READY"
+        ) {
+
+            if (
+                sender &&
+                sender.tab &&
+                sender.tab.id !== undefined
+            ) {
+
+                currentPlatformTabId =
+                    sender.tab.id;
+
+                logLocal(
+                    "📌 CONTENT_READY: saved platform tab=" +
+                    currentPlatformTabId +
+                    " url=" +
+                    (
+                        sender.tab.url ||
+                        message.url ||
+                        ""
+                    )
+                );
+            } else {
+
+                logLocal(
+                    "⚠️ CONTENT_READY received without sender.tab.id"
+                );
+            }
         }
 
 
