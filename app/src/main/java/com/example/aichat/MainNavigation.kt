@@ -289,21 +289,17 @@ fun MainNavigation(
                 ) {
 
                     SettingsScreen(
-
-                        settings =
-                            settings,
-
-                        onBack = {
-                            navController.popBackStack()
-                        },
-
-                        onOpenMemory = {
-
-                            navController.navigate(
-                                "memory"
-                            )
-                        }
-                    )
+    settings = settings,
+    onBack = {
+        navController.popBackStack()
+    },
+    onOpenMemory = {
+        navController.navigate("memory")
+    },
+    onOpenWebPlatforms = {
+        navController.navigate("web_platforms")
+    }
+)
                 }
 
                 // ══════════════════════════════════════════════════════
