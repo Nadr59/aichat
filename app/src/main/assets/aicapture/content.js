@@ -901,70 +901,68 @@
     // ============================================================
 
     function logResponseElementDiagnostics() {
+    var elements = getPlatformResponseElements();
 
-        var elements =
-            getPlatformResponseElements();
+    log("🔬 " + CURRENT_PLATFORM.name +
+        " response candidates=" + elements.length);
+
+    elements.slice(-10).forEach(function (el, index) {
+        var text = (el.innerText || el.textContent || "").trim();
 
         log(
-            "🔬 " +
-            CURRENT_PLATFORM.name +
-            " response candidates=" +
-            elements.length
+            "🔎 candidate[" + index + "] " +
+            el.tagName +
+            " class=" + (el.className || "") +
+            " len=" + text.length
         );
+    });
+}
 
-        var limit =
-            Math.min(
-                elements.length,
-                5
-            );
+function logArenaDomDiagnostics() {
+    log("🔬 ===== ARENA DOM DIAGNOSTICS =====");
 
-        for (
-            var i = 0;
-            i < limit;
-            i++
-        ) {
+    var selectors = [
+        "main",
+        "article",
+        '[role="main"]',
+        '[role="article"]',
+        '[class*="message"]',
+        '[class*="response"]',
+        '[class*="assistant"]',
+        '[class*="markdown"]',
+        '[class*="prose"]',
+        '[class*="content"]'
+    ];
 
-            var element =
-                elements[
-                    elements.length -
-                    1 -
-                    i
-                ];
+    var seen = [];
+    var count = 0;
 
-            var text =
-                getElementText(
-                    element
-                );
+    selectors.forEach(function (selector) {
+        var elements = document.querySelectorAll(selector);
 
-            var tag =
-                element.tagName ||
-                "?";
+        for (var i = elements.length - 1; i >= 0 && count < 20; i--) {
+            var el = elements[i];
+            var text = (el.innerText || el.textContent || "").trim();
 
-            var cls =
-                typeof element.className ===
-                "string"
-                    ? element.className
-                    : "";
+            if (text.length < 20) continue;
+            if (seen.indexOf(el) !== -1) continue;
+
+            seen.push(el);
+            count++;
 
             log(
-                "🔎 candidate[" +
-                i +
-                "] " +
-                tag +
-                (
-                    cls
-                        ? "." +
-                          cls
-                            .split(/\s+/)
-                            .slice(0, 3)
-                            .join(".")
-                        : ""
-                ) +
-                " len=" +
-                text.length
+                "🧩 Arena[" + count + "] " +
+                el.tagName +
+                " class=" + (el.className || "") +
+                " len=" + text.length
             );
         }
-    }
+    });
+
+    log("🔬 Arena diagnostic candidates=" + count);
+    log("🔬 ===== END ARENA DOM DIAGNOSTICS =====");
+            }
+
 
     // ============================================================
     // START CAPTURE
@@ -992,13 +990,15 @@
         );
 
         // For Gemini this is especially useful during the first test.
-        if (
-            CURRENT_PLATFORM.id ===
-            "gemini"
-        ) {
+        if (CURRENT_PLATFORM.id === "gemini") {
+    logResponseElementDiagnostics();
+}
 
-            logResponseElementDiagnostics();
-        }
+if (location.hostname === "arena.ai") {
+    setTimeout(function () {
+        logArenaDomDiagnostics();
+    }, 1500);
+}
 
         watchForResponse();
     }
