@@ -145,6 +145,21 @@
 
             legacyContainerMode: false
         },
+        arena: {
+    id: "arena",
+    name: "Arena",
+    matches: function () {
+        return location.hostname === "arena.ai";
+    },
+
+    responseSelectors: [
+        "main .prose",
+        ".prose.prose-base",
+        "div.prose"
+    ],
+
+    legacyContainerMode: false
+},
 
         generic: {
             id: "generic",
