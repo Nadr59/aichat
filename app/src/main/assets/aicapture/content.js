@@ -191,18 +191,23 @@
     // PLATFORM DETECTION
     // ============================================================
 
-    function detectPlatform() {
+    
 
-        if (PLATFORMS.chatgpt.matches()) {
-            return PLATFORMS.chatgpt;
-        }
-
-        if (PLATFORMS.gemini.matches()) {
-            return PLATFORMS.gemini;
-        }
-
-        return PLATFORMS.generic;
+function detectPlatform() {
+    if (PLATFORMS.chatgpt.matches()) {
+        return PLATFORMS.chatgpt;
     }
+
+    if (PLATFORMS.gemini.matches()) {
+        return PLATFORMS.gemini;
+    }
+
+    if (PLATFORMS.arena.matches()) {
+        return PLATFORMS.arena;
+    }
+
+    return PLATFORMS.generic;
+}
 
     var CURRENT_PLATFORM = detectPlatform();
 
