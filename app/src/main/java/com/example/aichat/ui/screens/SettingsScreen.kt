@@ -3,51 +3,78 @@ package com.example.aichat.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Snackbar
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.Switch
+import androidx.compose.material3.TopAppBarDefaults
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.example.aichat.data.local.AiSettings
-import com.example.aichat.data.repository.ModelCatalogRepository
 
+import com.example.aichat.data.local.AiSettings
+import com.example.aichat.data.model.ModelInfo
+import com.example.aichat.repository.ModelCatalogRepository
+
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalLayoutApi::class
+)
 @Composable
 fun SettingsScreen(
     settings: AiSettings,
@@ -55,149 +82,96 @@ fun SettingsScreen(
     onOpenMemory: () -> Unit,
     onOpenWebPlatforms: () -> Unit
 ) {
-    // ============================================================
-    // التبويبات
-    // ============================================================
+    /*
+     * ============================================================
+     * AiChat — Settings
+     *
+     * مهم:
+     * هذه الشاشة تحافظ على آلية تحميل النماذج الديناميكية الأصلية.
+     * لا توجد قائمة نماذج ثابتة بديلة.
+     * ============================================================
+     */
 
-    val tabs = listOf(
-        "🤖 المحادثة",
-        "🧠 الذاكرة",
-        "🌐 الويب",
-        "🎯 الدقة",
-        "⚙️ عام"
-    )
+    var selectedTab by remember { mutableIntStateOf(0) }
 
-    var selectedTab by remember {
-        mutableStateOf(0)
-    }
-
-    // ============================================================
+    // ------------------------------------------------------------
     // Provider
-    // ============================================================
+    // ------------------------------------------------------------
 
     var provider by remember {
         mutableStateOf(settings.provider)
     }
 
-    // ============================================================
-    // Gemini
-    // ============================================================
+    // ------------------------------------------------------------
+    // Provider API keys / models
+    // ------------------------------------------------------------
 
     var geminiKey by remember {
         mutableStateOf(settings.geminiKey)
     }
-
     var geminiModel by remember {
         mutableStateOf(settings.geminiModel)
     }
 
-    // ============================================================
-    // OpenRouter
-    // ============================================================
-
     var openrouterKey by remember {
         mutableStateOf(settings.openrouterKey)
     }
-
     var openrouterModel by remember {
         mutableStateOf(settings.openrouterModel)
     }
 
-    // ============================================================
-    // OpenAI
-    // ============================================================
-
     var openaiKey by remember {
         mutableStateOf(settings.openaiKey)
     }
-
     var openaiModel by remember {
         mutableStateOf(settings.openaiModel)
     }
 
-    // ============================================================
-    // Mistral
-    // ============================================================
-
     var mistralKey by remember {
         mutableStateOf(settings.mistralKey)
     }
-
     var mistralModel by remember {
         mutableStateOf(settings.mistralModel)
     }
 
-    // ============================================================
-    // Groq
-    // ============================================================
-
     var groqKey by remember {
         mutableStateOf(settings.groqKey)
     }
-
     var groqModel by remember {
         mutableStateOf(settings.groqModel)
     }
 
-    // ============================================================
-    // NVIDIA
-    // ============================================================
-
     var nvidiaKey by remember {
         mutableStateOf(settings.nvidiaKey)
     }
-
     var nvidiaModel by remember {
         mutableStateOf(settings.nvidiaModel)
     }
 
-    // ============================================================
-    // Hugging Face
-    // ============================================================
-
     var huggingfaceKey by remember {
         mutableStateOf(settings.huggingfaceKey)
     }
-
     var huggingfaceModel by remember {
         mutableStateOf(settings.huggingfaceModel)
     }
-
-    // ============================================================
-    // Ollama
-    // ============================================================
 
     var ollamaModel by remember {
         mutableStateOf(settings.ollamaModel)
     }
 
-    // ============================================================
-    // Custom
-    // ============================================================
-
     var customUrl by remember {
         mutableStateOf(settings.customUrl)
     }
-
     var customKey by remember {
         mutableStateOf(settings.customKey)
     }
-
     var customModel by remember {
         mutableStateOf(settings.customModel)
     }
 
-    // ============================================================
-    // Memory
-    // ============================================================
-
-    var autoSave by remember {
-        mutableStateOf(settings.autoSave)
-    }
-
-    // ============================================================
+    // ------------------------------------------------------------
     // Memory Curator
-    // ============================================================
+    // ------------------------------------------------------------
 
     var memoryCuratorEnabled by remember {
         mutableStateOf(settings.memoryCuratorEnabled)
@@ -219,21 +193,29 @@ fun SettingsScreen(
         mutableStateOf(settings.mediatorIdentityText)
     }
 
-    // ============================================================
+    // ------------------------------------------------------------
     // Accuracy
-    // ============================================================
+    // ------------------------------------------------------------
 
-    var accuracyPromptEnabled by remember {
+    var accuracyEnabled by remember {
         mutableStateOf(settings.accuracyPromptEnabled)
     }
 
-    var customSystemInstruction by remember {
+    var customInstruction by remember {
         mutableStateOf(settings.customSystemInstruction)
     }
 
-    // ============================================================
-    // UI
-    // ============================================================
+    // ------------------------------------------------------------
+    // Auto Save
+    // ------------------------------------------------------------
+
+    var autoSave by remember {
+        mutableStateOf(settings.autoSave)
+    }
+
+    // ------------------------------------------------------------
+    // UI state
+    // ------------------------------------------------------------
 
     var showKeys by remember {
         mutableStateOf(false)
@@ -243,1534 +225,2319 @@ fun SettingsScreen(
         mutableStateOf(false)
     }
 
-    var refreshTrigger by remember {
-        mutableStateOf(0)
-    }
+    // ------------------------------------------------------------
+    // Dynamic model catalog
+    // ------------------------------------------------------------
 
-    val modelCatalogRepository = remember {
+    val catalog = remember {
         ModelCatalogRepository(settings)
     }
 
     var models by remember {
-        mutableStateOf<List<String>>(emptyList())
+        mutableStateOf<List<ModelInfo>>(emptyList())
     }
 
-    // ============================================================
-    // تحميل النماذج
-    // ============================================================
+    var loadingModels by remember {
+        mutableStateOf(false)
+    }
 
-    LaunchedEffect(
-        provider,
-        refreshTrigger
+    var modelsError by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var refreshTrigger by remember {
+        mutableIntStateOf(0)
+    }
+
+    var onlyFree by remember {
+        mutableStateOf(false)
+    }
+
+    var onlyRecommended by remember {
+        mutableStateOf(false)
+    }
+
+    var onlyVision by remember {
+        mutableStateOf(false)
+    }
+
+    // ------------------------------------------------------------
+    // Current model
+    // ------------------------------------------------------------
+
+    val currentModel = when (provider) {
+        "gemini" -> geminiModel
+        "openrouter" -> openrouterModel
+        "openai" -> openaiModel
+        "mistral" -> mistralModel
+        "groq" -> groqModel
+        "nvidia" -> nvidiaModel
+        "huggingface" -> huggingfaceModel
+        "ollama" -> ollamaModel
+        "custom" -> customModel
+        else -> ""
+    }
+
+    // ------------------------------------------------------------
+    // Dynamic model loading — ORIGINAL LOGIC
+    // ------------------------------------------------------------
+
+    LaunchedEffect(provider, refreshTrigger) {
+
+        if (provider == "custom" || provider == "ollama") {
+            models = emptyList()
+            loadingModels = false
+            modelsError = null
+            return@LaunchedEffect
+        }
+
+        loadingModels = true
+        modelsError = null
+        models = emptyList()
+
+        val keyToUse = when (provider) {
+            "gemini" -> geminiKey
+            "openrouter" -> openrouterKey
+            "openai" -> openaiKey
+            "mistral" -> mistralKey
+            "groq" -> groqKey
+            "nvidia" -> nvidiaKey
+            "huggingface" -> huggingfaceKey
+            else -> ""
+        }
+
+        val needsKey = provider != "huggingface"
+
+        if (needsKey && keyToUse.isBlank()) {
+            modelsError =
+                "أدخل API Key أولاً ثم اضغط تحديث 🔄"
+            loadingModels = false
+            return@LaunchedEffect
+        }
+
+        try {
+            models = catalog.getModels(
+                provider = provider,
+                apiKey = keyToUse
+            )
+        } catch (e: Exception) {
+            modelsError =
+                e.message ?: "تعذر تحميل النماذج"
+        } finally {
+            loadingModels = false
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Keep saved model visible even when catalog changes/fails
+    // ------------------------------------------------------------
+
+    val modelsWithSaved = remember(
+        models,
+        currentModel
     ) {
-        models = runCatching {
-            modelCatalogRepository.getModels(provider)
-        }.getOrDefault(emptyList())
+        if (
+            currentModel.isBlank() ||
+            models.any { it.id == currentModel }
+        ) {
+            models
+        } else {
+            listOf(
+                ModelInfo(
+                    id = currentModel,
+                    name = "$currentModel 💾",
+                    provider = provider,
+                    isFree = currentModel.contains(":free"),
+                    recommended = false
+                )
+            ) + models
+        }
     }
 
-    // ============================================================
-    // حفظ الإعدادات
-    // ============================================================
+    // ------------------------------------------------------------
+    // Filters
+    // ------------------------------------------------------------
 
-    fun saveSettings() {
+    val filteredModels = modelsWithSaved
+        .filter {
+            !onlyFree || it.isFree
+        }
+        .filter {
+            !onlyRecommended || it.recommended
+        }
+        .filter {
+            !onlyVision || it.supportsVision
+        }
 
-        settings.provider = provider
+    // ------------------------------------------------------------
+    // Providers
+    // ------------------------------------------------------------
 
-        settings.geminiKey = geminiKey
-        settings.geminiModel = geminiModel
+    val providers = listOf(
+        "gemini" to "Google Gemini ⭐",
+        "openrouter" to "OpenRouter",
+        "openai" to "OpenAI",
+        "mistral" to "Mistral AI",
+        "groq" to "Groq",
+        "nvidia" to "NVIDIA NIM",
+        "huggingface" to "Hugging Face 🤗",
+        "ollama" to "Ollama 🦙 (محلي)",
+        "custom" to "Custom API"
+    )
 
-        settings.openrouterKey = openrouterKey
-        settings.openrouterModel = openrouterModel
-
-        settings.openaiKey = openaiKey
-        settings.openaiModel = openaiModel
-
-        settings.mistralKey = mistralKey
-        settings.mistralModel = mistralModel
-
-        settings.groqKey = groqKey
-        settings.groqModel = groqModel
-
-        settings.nvidiaKey = nvidiaKey
-        settings.nvidiaModel = nvidiaModel
-
-        settings.huggingfaceKey = huggingfaceKey
-        settings.huggingfaceModel = huggingfaceModel
-
-        settings.ollamaModel = ollamaModel
-
-        settings.customUrl = customUrl
-        settings.customKey = customKey
-        settings.customModel = customModel
-
-        settings.autoSave = autoSave
-
-        settings.memoryCuratorEnabled =
-            memoryCuratorEnabled
-
-        settings.memoryCuratorModel =
-            memoryCuratorModel
-
-        settings.memoryCuratorProvider =
-            memoryCuratorProvider
-
-        settings.memoryCuratorOllamaModel =
-            memoryCuratorOllamaModel
-
-        settings.mediatorIdentityText =
-            mediatorIdentityText
-
-        settings.accuracyPromptEnabled =
-            accuracyPromptEnabled
-
-        settings.customSystemInstruction =
-            customSystemInstruction
-
-        saved = true
-    }
+    // ------------------------------------------------------------
+    // Scaffold
+    // ------------------------------------------------------------
 
     Scaffold(
-
         topBar = {
-
             TopAppBar(
-
                 title = {
                     Text("الإعدادات")
                 },
-
                 navigationIcon = {
-
                     IconButton(
                         onClick = onBack
                     ) {
-
                         Icon(
-                            imageVector =
-                                Icons.Filled.ArrowBack,
-                            contentDescription =
-                                "رجوع"
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = "رجوع"
                         )
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor =
+                        MaterialTheme.colorScheme.surface
+                )
             )
-        },
-
-        bottomBar = {
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(
-                        horizontal = 16.dp,
-                        vertical = 8.dp
-                    )
-            ) {
-
-                if (saved) {
-
-                    Text(
-                        text = "✓ تم حفظ الإعدادات",
-                        color =
-                            MaterialTheme.colorScheme.primary,
-                        modifier =
-                            Modifier.padding(
-                                bottom = 6.dp
-                            )
-                    )
-                }
-
-                Button(
-                    onClick = {
-                        saveSettings()
-                    },
-                    modifier =
-                        Modifier.fillMaxWidth()
-                ) {
-
-                    Icon(
-                        imageVector =
-                            Icons.Filled.Save,
-                        contentDescription =
-                            null
-                    )
-
-                    Spacer(
-                        modifier =
-                            Modifier.width(8.dp)
-                    )
-
-                    Text("حفظ الإعدادات")
-                }
-            }
         }
-
-    ) { padding ->
+    ) { innerPadding ->
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(innerPadding)
         ) {
 
-            // ========================================================
+            // ====================================================
             // Tabs
-            // ========================================================
+            // ====================================================
 
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 edgePadding = 8.dp
             ) {
 
-                tabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = {
+                        selectedTab = 0
+                    },
+                    text = {
+                        Text("🤖 المحادثة")
+                    }
+                )
 
-                    Tab(
-                        selected =
-                            selectedTab == index,
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = {
+                        selectedTab = 1
+                    },
+                    text = {
+                        Text("🧠 الذاكرة")
+                    }
+                )
 
-                        onClick = {
-                            selectedTab = index
-                            saved = false
-                        },
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = {
+                        selectedTab = 2
+                    },
+                    text = {
+                        Text("🌐 الويب")
+                    }
+                )
 
-                        text = {
-                            Text(title)
-                        }
-                    )
-                }
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = {
+                        selectedTab = 3
+                    },
+                    text = {
+                        Text("🎯 الدقة")
+                    }
+                )
+
+                Tab(
+                    selected = selectedTab == 4,
+                    onClick = {
+                        selectedTab = 4
+                    },
+                    text = {
+                        Text("⚙️ عام")
+                    }
+                )
             }
 
-            // ========================================================
-            // محتوى التبويب
-            // ========================================================
+            // ====================================================
+            // Tab content
+            // ====================================================
 
             when (selectedTab) {
 
-                // ====================================================
-                // 🤖 المحادثة
-                // ====================================================
+                // =================================================
+                // 0 — CHAT
+                // =================================================
 
                 0 -> {
 
-                    ConversationSettingsTab(
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
 
-                        provider = provider,
+                        SectionTitle(
+                            title = "🤖 مزود الذكاء الاصطناعي",
+                            subtitle =
+                                "اختر المزود والنموذج المستخدم للمحادثة."
+                        )
 
-                        onProviderChange = {
-                            provider = it
-                            saved = false
-                        },
+                        // -----------------------------------------
+                        // Provider selection
+                        // -----------------------------------------
 
-                        geminiKey = geminiKey,
-                        onGeminiKeyChange = {
-                            geminiKey = it
-                            saved = false
-                        },
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
 
-                        geminiModel = geminiModel,
-                        onGeminiModelChange = {
-                            geminiModel = it
-                            saved = false
-                        },
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement =
+                                    Arrangement.spacedBy(4.dp)
+                            ) {
 
-                        openrouterKey = openrouterKey,
-                        onOpenrouterKeyChange = {
-                            openrouterKey = it
-                            saved = false
-                        },
+                                providers.forEach { (key, label) ->
 
-                        openrouterModel = openrouterModel,
-                        onOpenrouterModelChange = {
-                            openrouterModel = it
-                            saved = false
-                        },
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
 
-                        openaiKey = openaiKey,
-                        onOpenaiKeyChange = {
-                            openaiKey = it
-                            saved = false
-                        },
+                                                if (provider != key) {
 
-                        openaiModel = openaiModel,
-                        onOpenaiModelChange = {
-                            openaiModel = it
-                            saved = false
-                        },
+                                                    provider = key
+                                                    saved = false
 
-                        mistralKey = mistralKey,
-                        onMistralKeyChange = {
-                            mistralKey = it
-                            saved = false
-                        },
+                                                    onlyFree = false
+                                                    onlyRecommended = false
+                                                    onlyVision = false
 
-                        mistralModel = mistralModel,
-                        onMistralModelChange = {
-                            mistralModel = it
-                            saved = false
-                        },
+                                                    models = emptyList()
+                                                    modelsError = null
+                                                }
+                                            }
+                                            .padding(
+                                                vertical = 4.dp
+                                            ),
+                                        verticalAlignment =
+                                            Alignment.CenterVertically
+                                    ) {
 
-                        groqKey = groqKey,
-                        onGroqKeyChange = {
-                            groqKey = it
-                            saved = false
-                        },
+                                        RadioButton(
+                                            selected =
+                                                provider == key,
+                                            onClick = {
 
-                        groqModel = groqModel,
-                        onGroqModelChange = {
-                            groqModel = it
-                            saved = false
-                        },
+                                                if (provider != key) {
 
-                        nvidiaKey = nvidiaKey,
-                        onNvidiaKeyChange = {
-                            nvidiaKey = it
-                            saved = false
-                        },
+                                                    provider = key
+                                                    saved = false
 
-                        nvidiaModel = nvidiaModel,
-                        onNvidiaModelChange = {
-                            nvidiaModel = it
-                            saved = false
-                        },
+                                                    onlyFree = false
+                                                    onlyRecommended = false
+                                                    onlyVision = false
 
-                        huggingfaceKey = huggingfaceKey,
-                        onHuggingfaceKeyChange = {
-                            huggingfaceKey = it
-                            saved = false
-                        },
+                                                    models = emptyList()
+                                                    modelsError = null
+                                                }
+                                            }
+                                        )
 
-                        huggingfaceModel = huggingfaceModel,
-                        onHuggingfaceModelChange = {
-                            huggingfaceModel = it
-                            saved = false
-                        },
-
-                        ollamaModel = ollamaModel,
-                        onOllamaModelChange = {
-                            ollamaModel = it
-                            saved = false
-                        },
-
-                        customUrl = customUrl,
-                        onCustomUrlChange = {
-                            customUrl = it
-                            saved = false
-                        },
-
-                        customKey = customKey,
-                        onCustomKeyChange = {
-                            customKey = it
-                            saved = false
-                        },
-
-                        customModel = customModel,
-                        onCustomModelChange = {
-                            customModel = it
-                            saved = false
-                        },
-
-                        models = models,
-
-                        onRefresh = {
-                            refreshTrigger++
-                        },
-
-                        showKeys = showKeys,
-
-                        onToggleKeys = {
-                            showKeys = !showKeys
+                                        Text(
+                                            text = label,
+                                            modifier =
+                                                Modifier.padding(
+                                                    start = 4.dp
+                                                )
+                                        )
+                                    }
+                                }
+                            }
                         }
-                    )
-                }
 
-                // ====================================================
-                // 🧠 الذاكرة
-                // ====================================================
+                        // -----------------------------------------
+                        // API key
+                        // -----------------------------------------
 
-                1 -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment =
+                                Alignment.CenterVertically
+                        ) {
 
-                    MemorySettingsTab(
+                            Text(
+                                text = "🔑 مفتاح API",
+                                style =
+                                    MaterialTheme.typography.titleMedium,
+                                fontWeight =
+                                    FontWeight.Bold,
+                                modifier =
+                                    Modifier.weight(1f)
+                            )
 
-                        autoSave = autoSave,
-
-                        onAutoSaveChange = {
-                            autoSave = it
-                            saved = false
-                        },
-
-                        onOpenMemory = onOpenMemory,
-
-                        memoryCuratorEnabled =
-                            memoryCuratorEnabled,
-
-                        onMemoryCuratorEnabledChange = {
-                            memoryCuratorEnabled = it
-                            saved = false
-                        },
-
-                        memoryCuratorProvider =
-                            memoryCuratorProvider,
-
-                        onMemoryCuratorProviderChange = {
-                            memoryCuratorProvider = it
-                            saved = false
-                        },
-
-                        memoryCuratorModel =
-                            memoryCuratorModel,
-
-                        onMemoryCuratorModelChange = {
-                            memoryCuratorModel = it
-                            saved = false
-                        },
-
-                        memoryCuratorOllamaModel =
-                            memoryCuratorOllamaModel,
-
-                        onMemoryCuratorOllamaModelChange = {
-                            memoryCuratorOllamaModel = it
-                            saved = false
-                        },
-
-                        mediatorIdentityText =
-                            mediatorIdentityText,
-
-                        onMediatorIdentityTextChange = {
-                            mediatorIdentityText = it
-                            saved = false
+                            IconButton(
+                                onClick = {
+                                    showKeys = !showKeys
+                                }
+                            ) {
+                                Icon(
+                                    imageVector =
+                                        if (showKeys)
+                                            Icons.Filled.VisibilityOff
+                                        else
+                                            Icons.Filled.Visibility,
+                                    contentDescription =
+                                        if (showKeys)
+                                            "إخفاء المفاتيح"
+                                        else
+                                            "إظهار المفاتيح"
+                                )
+                            }
                         }
-                    )
-                }
 
-                // ====================================================
-                // 🌐 الويب
-                // ====================================================
+                        // -----------------------------------------
+                        // Provider-specific settings
+                        // -----------------------------------------
 
-                2 -> {
+                        when (provider) {
 
-                    WebSettingsTab(
-                        onOpenWebPlatforms =
-                            onOpenWebPlatforms
-                    )
-                }
+                            // =====================================
+                            // GEMINI
+                            // =====================================
 
-                // ====================================================
-                // 🎯 الدقة
-                // ====================================================
+                            "gemini" -> {
 
-                3 -> {
+                                InfoCard(
+                                    "Google Gemini\n\n" +
+                                            "احصل على مفتاح API من Google AI Studio."
+                                )
 
-                    AccuracySettingsTab(
+                                KeyField(
+                                    label = "Gemini API Key",
+                                    value = geminiKey,
+                                    onValueChange = {
+                                        geminiKey = it
+                                        saved = false
+                                    },
+                                    showKey = showKeys,
+                                    placeholder = "أدخل مفتاح Gemini API"
+                                )
 
-                        accuracyPromptEnabled =
-                            accuracyPromptEnabled,
+                                DynamicModelSelector(
+                                    models = filteredModels,
+                                    selected = geminiModel,
+                                    loading = loadingModels,
+                                    error = modelsError,
+                                    onlyFree = onlyFree,
+                                    onlyRecommended =
+                                        onlyRecommended,
+                                    onlyVision = onlyVision,
+                                    onFreeChange = {
+                                        onlyFree = it
+                                    },
+                                    onRecommendedChange = {
+                                        onlyRecommended = it
+                                    },
+                                    onVisionChange = {
+                                        onlyVision = it
+                                    },
+                                    onSelect = {
+                                        geminiModel = it
+                                        saved = false
+                                    },
+                                    onRefresh = {
+                                        refreshTrigger++
+                                    }
+                                )
+                            }
 
-                        onAccuracyPromptEnabledChange = {
-                            accuracyPromptEnabled = it
-                            saved = false
-                        },
+                            // =====================================
+                            // OPENROUTER
+                            // =====================================
 
-                        customSystemInstruction =
-                            customSystemInstruction,
+                            "openrouter" -> {
 
-                        onCustomSystemInstructionChange = {
-                            customSystemInstruction = it
-                            saved = false
+                                InfoCard(
+                                    "OpenRouter\n\n" +
+                                            "يوفر الوصول إلى عدد كبير من النماذج من خلال API واحد."
+                                )
+
+                                KeyField(
+                                    label = "OpenRouter API Key",
+                                    value = openrouterKey,
+                                    onValueChange = {
+                                        openrouterKey = it
+                                        saved = false
+                                    },
+                                    showKey = showKeys,
+                                    placeholder =
+                                        "أدخل مفتاح OpenRouter API"
+                                )
+
+                                DynamicModelSelector(
+                                    models = filteredModels,
+                                    selected = openrouterModel,
+                                    loading = loadingModels,
+                                    error = modelsError,
+                                    onlyFree = onlyFree,
+                                    onlyRecommended =
+                                        onlyRecommended,
+                                    onlyVision = onlyVision,
+                                    onFreeChange = {
+                                        onlyFree = it
+                                    },
+                                    onRecommendedChange = {
+                                        onlyRecommended = it
+                                    },
+                                    onVisionChange = {
+                                        onlyVision = it
+                                    },
+                                    onSelect = {
+                                        openrouterModel = it
+                                        saved = false
+                                    },
+                                    onRefresh = {
+                                        refreshTrigger++
+                                    }
+                                )
+
+                                OutlinedTextField(
+                                    value = openrouterModel,
+                                    onValueChange = {
+                                        openrouterModel = it
+                                        saved = false
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    label = {
+                                        Text("النموذج يدويًا")
+                                    },
+                                    singleLine = true,
+                                    shape =
+                                        RoundedCornerShape(12.dp)
+                                )
+                            }
+
+                            // =====================================
+                            // OPENAI
+                            // =====================================
+
+                            "openai" -> {
+
+                                InfoCard(
+                                    "OpenAI\n\n" +
+                                            "أدخل مفتاح OpenAI API ثم حمّل النماذج المتاحة."
+                                )
+
+                                KeyField(
+                                    label = "OpenAI API Key",
+                                    value = openaiKey,
+                                    onValueChange = {
+                                        openaiKey = it
+                                        saved = false
+                                    },
+                                    showKey = showKeys,
+                                    placeholder =
+                                        "أدخل مفتاح OpenAI API"
+                                )
+
+                                DynamicModelSelector(
+                                    models = filteredModels,
+                                    selected = openaiModel,
+                                    loading = loadingModels,
+                                    error = modelsError,
+                                    onlyFree = onlyFree,
+                                    onlyRecommended =
+                                        onlyRecommended,
+                                    onlyVision = onlyVision,
+                                    onFreeChange = {
+                                        onlyFree = it
+                                    },
+                                    onRecommendedChange = {
+                                        onlyRecommended = it
+                                    },
+                                    onVisionChange = {
+                                        onlyVision = it
+                                    },
+                                    onSelect = {
+                                        openaiModel = it
+                                        saved = false
+                                    },
+                                    onRefresh = {
+                                        refreshTrigger++
+                                    }
+                                )
+                            }
+
+                            // =====================================
+                            // MISTRAL
+                            // =====================================
+
+                            "mistral" -> {
+
+                                InfoCard(
+                                    "Mistral AI\n\n" +
+                                            "يمكن الحصول على مفتاح API من console.mistral.ai.\n" +
+                                            "يدعم المشروع نماذج Mistral المتاحة من الكتالوج."
+                                )
+
+                                KeyField(
+                                    label = "Mistral API Key",
+                                    value = mistralKey,
+                                    onValueChange = {
+                                        mistralKey = it
+                                        saved = false
+                                    },
+                                    showKey = showKeys,
+                                    placeholder =
+                                        "أدخل مفتاح Mistral API"
+                                )
+
+                                DynamicModelSelector(
+                                    models = filteredModels,
+                                    selected = mistralModel,
+                                    loading = loadingModels,
+                                    error = modelsError,
+                                    onlyFree = onlyFree,
+                                    onlyRecommended =
+                                        onlyRecommended,
+                                    onlyVision = onlyVision,
+                                    onFreeChange = {
+                                        onlyFree = it
+                                    },
+                                    onRecommendedChange = {
+                                        onlyRecommended = it
+                                    },
+                                    onVisionChange = {
+                                        onlyVision = it
+                                    },
+                                    onSelect = {
+                                        mistralModel = it
+                                        saved = false
+                                    },
+                                    onRefresh = {
+                                        refreshTrigger++
+                                    }
+                                )
+                            }
+
+                            // =====================================
+                            // GROQ
+                            // =====================================
+
+                            "groq" -> {
+
+                                InfoCard(
+                                    "Groq\n\n" +
+                                            "يتميز بسرعة الاستجابة، ويمكن تحميل النماذج المتاحة مباشرة."
+                                )
+
+                                KeyField(
+                                    label = "Groq API Key",
+                                    value = groqKey,
+                                    onValueChange = {
+                                        groqKey = it
+                                        saved = false
+                                    },
+                                    showKey = showKeys,
+                                    placeholder =
+                                        "أدخل مفتاح Groq API"
+                                )
+
+                                DynamicModelSelector(
+                                    models = filteredModels,
+                                    selected = groqModel,
+                                    loading = loadingModels,
+                                    error = modelsError,
+                                    onlyFree = onlyFree,
+                                    onlyRecommended =
+                                        onlyRecommended,
+                                    onlyVision = onlyVision,
+                                    onFreeChange = {
+                                        onlyFree = it
+                                    },
+                                    onRecommendedChange = {
+                                        onlyRecommended = it
+                                    },
+                                    onVisionChange = {
+                                        onlyVision = it
+                                    },
+                                    onSelect = {
+                                        groqModel = it
+                                        saved = false
+                                    },
+                                    onRefresh = {
+                                        refreshTrigger++
+                                    }
+                                )
+
+                                OutlinedTextField(
+                                    value = groqModel,
+                                    onValueChange = {
+                                        groqModel = it
+                                        saved = false
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    label = {
+                                        Text("النموذج يدويًا")
+                                    },
+                                    singleLine = true,
+                                    shape =
+                                        RoundedCornerShape(12.dp)
+                                )
+                            }
+
+                            // =====================================
+                            // NVIDIA
+                            // =====================================
+
+                            "nvidia" -> {
+
+                                InfoCard(
+                                    "NVIDIA NIM\n\n" +
+                                            "يمكن تحميل النماذج المتاحة من NVIDIA NIM."
+                                )
+
+                                KeyField(
+                                    label = "NVIDIA API Key",
+                                    value = nvidiaKey,
+                                    onValueChange = {
+                                        nvidiaKey = it
+                                        saved = false
+                                    },
+                                    showKey = showKeys,
+                                    placeholder =
+                                        "أدخل مفتاح NVIDIA API"
+                                )
+
+                                DynamicModelSelector(
+                                    models = filteredModels,
+                                    selected = nvidiaModel,
+                                    loading = loadingModels,
+                                    error = modelsError,
+                                    onlyFree = onlyFree,
+                                    onlyRecommended =
+                                        onlyRecommended,
+                                    onlyVision = onlyVision,
+                                    onFreeChange = {
+                                        onlyFree = it
+                                    },
+                                    onRecommendedChange = {
+                                        onlyRecommended = it
+                                    },
+                                    onVisionChange = {
+                                        onlyVision = it
+                                    },
+                                    onSelect = {
+                                        nvidiaModel = it
+                                        saved = false
+                                    },
+                                    onRefresh = {
+                                        refreshTrigger++
+                                    }
+                                )
+
+                                OutlinedTextField(
+                                    value = nvidiaModel,
+                                    onValueChange = {
+                                        nvidiaModel = it
+                                        saved = false
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    label = {
+                                        Text("النموذج يدويًا")
+                                    },
+                                    singleLine = true,
+                                    shape =
+                                        RoundedCornerShape(12.dp)
+                                )
+                            }
+
+                            // =====================================
+                            // HUGGING FACE
+                            // =====================================
+
+                            "huggingface" -> {
+
+                                InfoCard(
+                                    "Hugging Face 🤗\n\n" +
+                                            "يمكن تحميل النماذج المتاحة من Hugging Face."
+                                )
+
+                                KeyField(
+                                    label = "Hugging Face API Key",
+                                    value = huggingfaceKey,
+                                    onValueChange = {
+                                        huggingfaceKey = it
+                                        saved = false
+                                    },
+                                    showKey = showKeys,
+                                    placeholder =
+                                        "أدخل مفتاح Hugging Face إن وجد"
+                                )
+
+                                DynamicModelSelector(
+                                    models = filteredModels,
+                                    selected = huggingfaceModel,
+                                    loading = loadingModels,
+                                    error = modelsError,
+                                    onlyFree = onlyFree,
+                                    onlyRecommended =
+                                        onlyRecommended,
+                                    onlyVision = onlyVision,
+                                    onFreeChange = {
+                                        onlyFree = it
+                                    },
+                                    onRecommendedChange = {
+                                        onlyRecommended = it
+                                    },
+                                    onVisionChange = {
+                                        onlyVision = it
+                                    },
+                                    onSelect = {
+                                        huggingfaceModel = it
+                                        saved = false
+                                    },
+                                    onRefresh = {
+                                        refreshTrigger++
+                                    }
+                                )
+
+                                OutlinedTextField(
+                                    value = huggingfaceModel,
+                                    onValueChange = {
+                                        huggingfaceModel = it
+                                        saved = false
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    label = {
+                                        Text("النموذج يدويًا")
+                                    },
+                                    singleLine = true,
+                                    shape =
+                                        RoundedCornerShape(12.dp)
+                                )
+                            }
+
+                            // =====================================
+                            // OLLAMA
+                            // =====================================
+
+                            "ollama" -> {
+
+                                InfoCard(
+                                    "Ollama 🦙 (محلي)\n\n" +
+                                            "يعمل النموذج محليًا على الجهاز أو الشبكة المحلية.\n\n" +
+                                            "العنوان الافتراضي:\n" +
+                                            "127.0.0.1:11434\n\n" +
+                                            "في Termux شغّل:\n" +
+                                            "ollama serve\n\n" +
+                                            "ثم حمّل نموذجًا مثل:\n" +
+                                            "ollama pull qwen2.5:1.5b\n\n" +
+                                            "لا يحتاج Ollama إلى API Key أو اتصال مباشر بالإنترنت أثناء الاستخدام."
+                                )
+
+                                OutlinedTextField(
+                                    value = ollamaModel,
+                                    onValueChange = {
+                                        ollamaModel = it
+                                        saved = false
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    label = {
+                                        Text("نموذج Ollama")
+                                    },
+                                    singleLine = true,
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector =
+                                                Icons.Filled.Computer,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    shape =
+                                        RoundedCornerShape(12.dp)
+                                )
+
+                                Text(
+                                    text = "نماذج مقترحة: qwen2.5:0.5b • qwen2.5:1.5b • qwen2.5:3b • gemma2:2b",
+                                    style =
+                                        MaterialTheme.typography.bodySmall,
+                                    color =
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            // =====================================
+                            // CUSTOM
+                            // =====================================
+
+                            "custom" -> {
+
+                                InfoCard(
+                                    "Custom API\n\n" +
+                                            "استخدم خادم API متوافقًا مع واجهة المشروع."
+                                )
+
+                                OutlinedTextField(
+                                    value = customUrl,
+                                    onValueChange = {
+                                        customUrl = it
+                                        saved = false
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    label = {
+                                        Text("Server URL")
+                                    },
+                                    singleLine = true,
+                                    placeholder = {
+                                        Text("https://example.com")
+                                    },
+                                    shape =
+                                        RoundedCornerShape(12.dp)
+                                )
+
+                                KeyField(
+                                    label = "API Key",
+                                    value = customKey,
+                                    onValueChange = {
+                                        customKey = it
+                                        saved = false
+                                    },
+                                    showKey = showKeys,
+                                    placeholder =
+                                        "مفتاح API"
+                                )
+
+                                OutlinedTextField(
+                                    value = customModel,
+                                    onValueChange = {
+                                        customModel = it
+                                        saved = false
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    label = {
+                                        Text("Model")
+                                    },
+                                    singleLine = true,
+                                    shape =
+                                        RoundedCornerShape(12.dp)
+                                )
+                            }
                         }
-                    )
-                }
 
-                // ====================================================
-                // ⚙️ عام
-                // ====================================================
+                        HorizontalDivider()
 
-                4 -> {
+                        // -----------------------------------------
+                        // Save
+                        // -----------------------------------------
 
-                    GeneralSettingsTab()
-                }
-            }
-        }
-    }
-}
+                        Button(
+                            onClick = {
 
-// ====================================================================
-// 🤖 المحادثة
-// ====================================================================
+                                settings.provider = provider
 
-@Composable
-private fun ConversationSettingsTab(
-    provider: String,
-    onProviderChange: (String) -> Unit,
+                                settings.geminiKey = geminiKey
+                                settings.geminiModel = geminiModel
 
-    geminiKey: String,
-    onGeminiKeyChange: (String) -> Unit,
-    geminiModel: String,
-    onGeminiModelChange: (String) -> Unit,
+                                settings.openrouterKey =
+                                    openrouterKey
+                                settings.openrouterModel =
+                                    openrouterModel
 
-    openrouterKey: String,
-    onOpenrouterKeyChange: (String) -> Unit,
-    openrouterModel: String,
-    onOpenrouterModelChange: (String) -> Unit,
+                                settings.openaiKey = openaiKey
+                                settings.openaiModel =
+                                    openaiModel
 
-    openaiKey: String,
-    onOpenaiKeyChange: (String) -> Unit,
-    openaiModel: String,
-    onOpenaiModelChange: (String) -> Unit,
+                                settings.mistralKey =
+                                    mistralKey
+                                settings.mistralModel =
+                                    mistralModel
 
-    mistralKey: String,
-    onMistralKeyChange: (String) -> Unit,
-    mistralModel: String,
-    onMistralModelChange: (String) -> Unit,
+                                settings.groqKey = groqKey
+                                settings.groqModel = groqModel
 
-    groqKey: String,
-    onGroqKeyChange: (String) -> Unit,
-    groqModel: String,
-    onGroqModelChange: (String) -> Unit,
+                                settings.nvidiaKey = nvidiaKey
+                                settings.nvidiaModel =
+                                    nvidiaModel
 
-    nvidiaKey: String,
-    onNvidiaKeyChange: (String) -> Unit,
-    nvidiaModel: String,
-    onNvidiaModelChange: (String) -> Unit,
+                                settings.huggingfaceKey =
+                                    huggingfaceKey
+                                settings.huggingfaceModel =
+                                    huggingfaceModel
 
-    huggingfaceKey: String,
-    onHuggingfaceKeyChange: (String) -> Unit,
-    huggingfaceModel: String,
-    onHuggingfaceModelChange: (String) -> Unit,
+                                settings.ollamaModel =
+                                    ollamaModel
 
-    ollamaModel: String,
-    onOllamaModelChange: (String) -> Unit,
+                                settings.customUrl = customUrl
+                                settings.customKey = customKey
+                                settings.customModel =
+                                    customModel
 
-    customUrl: String,
-    onCustomUrlChange: (String) -> Unit,
-    customKey: String,
-    onCustomKeyChange: (String) -> Unit,
-    customModel: String,
-    onCustomModelChange: (String) -> Unit,
+                                settings.accuracyPromptEnabled =
+                                    accuracyEnabled
+                                settings.customSystemInstruction =
+                                    customInstruction
 
-    models: List<String>,
-    onRefresh: () -> Unit,
+                                settings.memoryCuratorEnabled =
+                                    memoryCuratorEnabled
+                                settings.memoryCuratorModel =
+                                    memoryCuratorModel
+                                settings.memoryCuratorProvider =
+                                    memoryCuratorProvider
+                                settings.memoryCuratorOllamaModel =
+                                    memoryCuratorOllamaModel
+                                settings.mediatorIdentityText =
+                                    mediatorIdentityText
 
-    showKeys: Boolean,
-    onToggleKeys: () -> Unit
-) {
+                                settings.autoSave = autoSave
 
-    val scrollState = rememberScrollState()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp)
-    ) {
-
-        Text(
-            text = "🤖 إعدادات المحادثة",
-            style = MaterialTheme.typography.headlineSmall
-        )
-
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
-
-        SectionCard(
-            title = "مزود الذكاء الاصطناعي"
-        ) {
-
-            ProviderButton(
-                selected = provider == "gemini",
-                text = "Gemini",
-                onClick = {
-                    onProviderChange("gemini")
-                }
-            )
-
-            ProviderButton(
-                selected = provider == "openrouter",
-                text = "OpenRouter",
-                onClick = {
-                    onProviderChange("openrouter")
-                }
-            )
-
-            ProviderButton(
-                selected = provider == "openai",
-                text = "OpenAI",
-                onClick = {
-                    onProviderChange("openai")
-                }
-            )
-
-            ProviderButton(
-                selected = provider == "mistral",
-                text = "Mistral",
-                onClick = {
-                    onProviderChange("mistral")
-                }
-            )
-
-            ProviderButton(
-                selected = provider == "groq",
-                text = "Groq",
-                onClick = {
-                    onProviderChange("groq")
-                }
-            )
-
-            ProviderButton(
-                selected = provider == "nvidia",
-                text = "NVIDIA",
-                onClick = {
-                    onProviderChange("nvidia")
-                }
-            )
-
-            ProviderButton(
-                selected = provider == "huggingface",
-                text = "Hugging Face",
-                onClick = {
-                    onProviderChange("huggingface")
-                }
-            )
-
-            ProviderButton(
-                selected = provider == "ollama",
-                text = "Ollama",
-                onClick = {
-                    onProviderChange("ollama")
-                }
-            )
-
-            ProviderButton(
-                selected = provider == "custom",
-                text = "Custom",
-                onClick = {
-                    onProviderChange("custom")
-                }
-            )
-        }
-
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
-
-        when (provider) {
-
-            "gemini" -> {
-
-                ProviderFields(
-                    key = geminiKey,
-                    onKeyChange = onGeminiKeyChange,
-                    model = geminiModel,
-                    onModelChange = onGeminiModelChange,
-                    models = models,
-                    onRefresh = onRefresh,
-                    showKeys = showKeys,
-                    onToggleKeys = onToggleKeys
-                )
-            }
-
-            "openrouter" -> {
-
-                ProviderFields(
-                    key = openrouterKey,
-                    onKeyChange = onOpenrouterKeyChange,
-                    model = openrouterModel,
-                    onModelChange = onOpenrouterModelChange,
-                    models = models,
-                    onRefresh = onRefresh,
-                    showKeys = showKeys,
-                    onToggleKeys = onToggleKeys
-                )
-            }
-
-            "openai" -> {
-
-                ProviderFields(
-                    key = openaiKey,
-                    onKeyChange = onOpenaiKeyChange,
-                    model = openaiModel,
-                    onModelChange = onOpenaiModelChange,
-                    models = models,
-                    onRefresh = onRefresh,
-                    showKeys = showKeys,
-                    onToggleKeys = onToggleKeys
-                )
-            }
-
-            "mistral" -> {
-
-                ProviderFields(
-                    key = mistralKey,
-                    onKeyChange = onMistralKeyChange,
-                    model = mistralModel,
-                    onModelChange = onMistralModelChange,
-                    models = models,
-                    onRefresh = onRefresh,
-                    showKeys = showKeys,
-                    onToggleKeys = onToggleKeys
-                )
-            }
-
-            "groq" -> {
-
-                ProviderFields(
-                    key = groqKey,
-                    onKeyChange = onGroqKeyChange,
-                    model = groqModel,
-                    onModelChange = onGroqModelChange,
-                    models = models,
-                    onRefresh = onRefresh,
-                    showKeys = showKeys,
-                    onToggleKeys = onToggleKeys
-                )
-            }
-
-            "nvidia" -> {
-
-                ProviderFields(
-                    key = nvidiaKey,
-                    onKeyChange = onNvidiaKeyChange,
-                    model = nvidiaModel,
-                    onModelChange = onNvidiaModelChange,
-                    models = models,
-                    onRefresh = onRefresh,
-                    showKeys = showKeys,
-                    onToggleKeys = onToggleKeys
-                )
-            }
-
-            "huggingface" -> {
-
-                ProviderFields(
-                    key = huggingfaceKey,
-                    onKeyChange = onHuggingfaceKeyChange,
-                    model = huggingfaceModel,
-                    onModelChange = onHuggingfaceModelChange,
-                    models = models,
-                    onRefresh = onRefresh,
-                    showKeys = showKeys,
-                    onToggleKeys = onToggleKeys
-                )
-            }
-
-            "ollama" -> {
-
-                OutlinedTextField(
-                    value = ollamaModel,
-                    onValueChange = onOllamaModelChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = {
-                        Text("نموذج Ollama")
-                    },
-                    singleLine = true
-                )
-            }
-
-            "custom" -> {
-
-                OutlinedTextField(
-                    value = customUrl,
-                    onValueChange = onCustomUrlChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = {
-                        Text("رابط API")
-                    },
-                    singleLine = true
-                )
-
-                Spacer(
-                    modifier = Modifier.height(12.dp)
-                )
-
-                OutlinedTextField(
-                    value = customKey,
-                    onValueChange = onCustomKeyChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = {
-                        Text("API Key")
-                    },
-                    singleLine = true,
-                    visualTransformation =
-                        if (showKeys) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                    trailingIcon = {
-
-                        IconButton(
-                            onClick = onToggleKeys
+                                saved = true
+                            },
+                            modifier =
+                                Modifier.fillMaxWidth()
                         ) {
 
                             Icon(
                                 imageVector =
-                                    if (showKeys) {
-                                        Icons.Filled.VisibilityOff
-                                    } else {
-                                        Icons.Filled.Visibility
-                                    },
-                                contentDescription =
-                                    null
+                                    Icons.Filled.Save,
+                                contentDescription = null
                             )
+
+                            Spacer(
+                                Modifier.width(8.dp)
+                            )
+
+                            Text("حفظ الإعدادات")
+                        }
+
+                        if (saved) {
+
+                            SavedCard()
                         }
                     }
-                )
+                }
 
-                Spacer(
-                    modifier = Modifier.height(12.dp)
-                )
+                // =================================================
+                // 1 — MEMORY
+                // =================================================
 
-                OutlinedTextField(
-                    value = customModel,
-                    onValueChange = onCustomModelChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = {
-                        Text("النموذج")
-                    },
-                    singleLine = true
-                )
+                1 -> {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+
+                        SectionTitle(
+                            title = "🧠 الذاكرة",
+                            subtitle =
+                                "إدارة الذكريات والحفظ التلقائي ووسيط الذاكرة."
+                        )
+
+                        // -----------------------------------------
+                        // Memory management
+                        // -----------------------------------------
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onOpenMemory()
+                                },
+                            shape =
+                                RoundedCornerShape(12.dp),
+                            colors =
+                                CardDefaults.cardColors(
+                                    containerColor =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .secondaryContainer
+                                )
+                        ) {
+
+                            Row(
+                                modifier =
+                                    Modifier.padding(16.dp),
+                                verticalAlignment =
+                                    Alignment.CenterVertically
+                            ) {
+
+                                Icon(
+                                    imageVector =
+                                        Icons.Filled.Memory,
+                                    contentDescription = null,
+                                    modifier =
+                                        Modifier.size(32.dp)
+                                )
+
+                                Spacer(
+                                    Modifier.width(12.dp)
+                                )
+
+                                Column(
+                                    modifier =
+                                        Modifier.weight(1f)
+                                ) {
+
+                                    Text(
+                                        text = "الذكريات",
+                                        fontWeight =
+                                            FontWeight.Bold
+                                    )
+
+                                    Text(
+                                        text =
+                                            "عرض وتعديل وحذف الذكريات المحفوظة.",
+                                        style =
+                                            MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
+
+                        // -----------------------------------------
+                        // Auto Save
+                        // -----------------------------------------
+
+                        Card(
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            shape =
+                                RoundedCornerShape(12.dp)
+                        ) {
+
+                            Row(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                verticalAlignment =
+                                    Alignment.CenterVertically
+                            ) {
+
+                                Column(
+                                    modifier =
+                                        Modifier.weight(1f)
+                                ) {
+
+                                    Text(
+                                        text =
+                                            "💾 الحفظ التلقائي للردود",
+                                        fontWeight =
+                                            FontWeight.Bold
+                                    )
+
+                                    Spacer(
+                                        Modifier.height(4.dp)
+                                    )
+
+                                    Text(
+                                        text =
+                                            "عند التفعيل، يمكن لـ AiChat حفظ الردود المهمة تلقائيًا في الذاكرة بدل الضغط على زر الحفظ كل مرة.",
+                                        style =
+                                            MaterialTheme.typography.bodySmall,
+                                        color =
+                                            MaterialTheme.colorScheme
+                                                .onSurfaceVariant
+                                    )
+                                }
+
+                                Switch(
+                                    checked = autoSave,
+                                    onCheckedChange = {
+                                        autoSave = it
+                                        saved = false
+                                    }
+                                )
+                            }
+                        }
+
+                        // -----------------------------------------
+                        // Memory Curator
+                        // -----------------------------------------
+
+                        Card(
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            shape =
+                                RoundedCornerShape(12.dp)
+                        ) {
+
+                            Column(
+                                modifier =
+                                    Modifier.padding(16.dp),
+                                verticalArrangement =
+                                    Arrangement.spacedBy(12.dp)
+                            ) {
+
+                                Row(
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    verticalAlignment =
+                                        Alignment.CenterVertically
+                                ) {
+
+                                    Column(
+                                        modifier =
+                                            Modifier.weight(1f)
+                                    ) {
+
+                                        Text(
+                                            text =
+                                                "🧠 وسيط الذاكرة الذكي",
+                                            fontWeight =
+                                                FontWeight.Bold,
+                                            style =
+                                                MaterialTheme.typography
+                                                    .titleMedium
+                                        )
+
+                                        Text(
+                                            text =
+                                                "يحلل الذاكرة قبل إرسالها إلى النموذج الرئيسي.",
+                                            style =
+                                                MaterialTheme.typography
+                                                    .bodySmall
+                                        )
+                                    }
+
+                                    Switch(
+                                        checked =
+                                            memoryCuratorEnabled,
+                                        onCheckedChange = {
+                                            memoryCuratorEnabled = it
+                                            saved = false
+                                        }
+                                    )
+                                }
+
+                                Text(
+                                    text =
+                                        "يمكن للوسيط اقتراح النقاط المهمة من الذاكرة. ويمكن كتابة هوية الوسيط إذا أردت تحديد دوره وطريقة تحليله.",
+                                    style =
+                                        MaterialTheme.typography.bodySmall,
+                                    color =
+                                        MaterialTheme.colorScheme
+                                            .onSurfaceVariant
+                                )
+
+                                if (memoryCuratorEnabled) {
+
+                                    Text(
+                                        text =
+                                            "مزود الوسيط",
+                                        fontWeight =
+                                            FontWeight.Bold
+                                    )
+
+                                    Row(
+                                        modifier =
+                                            Modifier.fillMaxWidth(),
+                                        verticalAlignment =
+                                            Alignment.CenterVertically
+                                    ) {
+
+                                        RadioButton(
+                                            selected =
+                                                memoryCuratorProvider ==
+                                                        "gemini",
+                                            onClick = {
+                                                memoryCuratorProvider =
+                                                    "gemini"
+                                                saved = false
+                                            }
+                                        )
+
+                                        Text("Gemini")
+
+                                        Spacer(
+                                            Modifier.width(12.dp)
+                                        )
+
+                                        RadioButton(
+                                            selected =
+                                                memoryCuratorProvider ==
+                                                        "ollama",
+                                            onClick = {
+                                                memoryCuratorProvider =
+                                                    "ollama"
+                                                saved = false
+                                            }
+                                        )
+
+                                        Text("Ollama")
+
+                                        Spacer(
+                                            Modifier.width(12.dp)
+                                        )
+
+                                        RadioButton(
+                                            selected =
+                                                memoryCuratorProvider ==
+                                                        "custom",
+                                            onClick = {
+                                                memoryCuratorProvider =
+                                                    "custom"
+                                                saved = false
+                                            }
+                                        )
+
+                                        Text("Custom")
+                                    }
+
+                                    when (memoryCuratorProvider) {
+
+                                        // =========================
+                                        // Curator Gemini
+                                        // =========================
+
+                                        "gemini" -> {
+
+                                            OutlinedTextField(
+                                                value =
+                                                    memoryCuratorModel,
+                                                onValueChange = {
+                                                    memoryCuratorModel =
+                                                        it
+                                                    saved = false
+                                                },
+                                                modifier =
+                                                    Modifier.fillMaxWidth(),
+                                                label = {
+                                                    Text(
+                                                        "نموذج Gemini للوسيط"
+                                                    )
+                                                },
+                                                singleLine = true,
+                                                shape =
+                                                    RoundedCornerShape(
+                                                        12.dp
+                                                    )
+                                            )
+
+                                            InfoCard(
+                                                "سيستخدم الوسيط مفتاح Gemini الموجود في إعدادات المحادثة أعلاه."
+                                            )
+                                        }
+
+                                        // =========================
+                                        // Curator Ollama
+                                        // =========================
+
+                                        "ollama" -> {
+
+                                            OutlinedTextField(
+                                                value =
+                                                    memoryCuratorOllamaModel,
+                                                onValueChange = {
+                                                    memoryCuratorOllamaModel =
+                                                        it
+                                                    saved = false
+                                                },
+                                                modifier =
+                                                    Modifier.fillMaxWidth(),
+                                                label = {
+                                                    Text(
+                                                        "نموذج Ollama للوسيط"
+                                                    )
+                                                },
+                                                singleLine = true,
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector =
+                                                            Icons.Filled.Computer,
+                                                        contentDescription =
+                                                            null
+                                                    )
+                                                },
+                                                shape =
+                                                    RoundedCornerShape(
+                                                        12.dp
+                                                    )
+                                            )
+
+                                            InfoCard(
+                                                "متطلبات Ollama:\n\n" +
+                                                        "127.0.0.1:11434\n\n" +
+                                                        "في Termux:\n" +
+                                                        "ollama serve\n\n" +
+                                                        "ثم:\n" +
+                                                        "ollama pull qwen2.5:1.5b\n\n" +
+                                                        "لا يحتاج API Key ولا اتصالًا بالإنترنت أثناء الاستخدام."
+                                            )
+
+                                            Text(
+                                                text =
+                                                    "نماذج مقترحة: qwen2.5:0.5b • qwen2.5:1.5b • qwen2.5:3b • gemma2:2b",
+                                                style =
+                                                    MaterialTheme.typography
+                                                        .bodySmall
+                                            )
+                                        }
+
+                                        // =========================
+                                        // Curator Custom
+                                        // =========================
+
+                                        "custom" -> {
+
+                                            InfoCard(
+                                                "سيستخدم الوسيط إعدادات Custom الموجودة في تبويب المحادثة."
+                                            )
+
+                                            if (
+                                                customUrl.isBlank() ||
+                                                customModel.isBlank()
+                                            ) {
+
+                                                Card(
+                                                    modifier =
+                                                        Modifier.fillMaxWidth(),
+                                                    colors =
+                                                        CardDefaults
+                                                            .cardColors(
+                                                                containerColor =
+                                                                    MaterialTheme
+                                                                        .colorScheme
+                                                                        .errorContainer
+                                                            ),
+                                                    shape =
+                                                        RoundedCornerShape(
+                                                            8.dp
+                                                        )
+                                                ) {
+
+                                                    Text(
+                                                        text =
+                                                            "⚠️ يجب تحديد Server URL والنموذج في إعدادات Custom.",
+                                                        modifier =
+                                                            Modifier.padding(
+                                                                12.dp
+                                                            ),
+                                                        style =
+                                                            MaterialTheme
+                                                                .typography
+                                                                .bodySmall,
+                                                        color =
+                                                            MaterialTheme
+                                                                .colorScheme
+                                                                .onErrorContainer
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    OutlinedTextField(
+                                        value =
+                                            mediatorIdentityText,
+                                        onValueChange = {
+                                            mediatorIdentityText =
+                                                it
+                                            saved = false
+                                        },
+                                        modifier =
+                                            Modifier.fillMaxWidth(),
+                                        label = {
+                                            Text(
+                                                "هوية وسيط الذاكرة — اختياري"
+                                            )
+                                        },
+                                        placeholder = {
+                                            Text(
+                                                "مثلاً: أنت وسيط متخصص في تحليل الذاكرة..."
+                                            )
+                                        },
+                                        minLines = 3,
+                                        shape =
+                                            RoundedCornerShape(
+                                                12.dp
+                                            )
+                                    )
+                                }
+                            }
+                        }
+
+                        // -----------------------------------------
+                        // Save
+                        // -----------------------------------------
+
+                        Button(
+                            onClick = {
+
+                                settings.provider = provider
+
+                                settings.geminiKey = geminiKey
+                                settings.geminiModel = geminiModel
+
+                                settings.openrouterKey =
+                                    openrouterKey
+                                settings.openrouterModel =
+                                    openrouterModel
+
+                                settings.openaiKey = openaiKey
+                                settings.openaiModel =
+                                    openaiModel
+
+                                settings.mistralKey =
+                                    mistralKey
+                                settings.mistralModel =
+                                    mistralModel
+
+                                settings.groqKey = groqKey
+                                settings.groqModel = groqModel
+
+                                settings.nvidiaKey = nvidiaKey
+                                settings.nvidiaModel =
+                                    nvidiaModel
+
+                                settings.huggingfaceKey =
+                                    huggingfaceKey
+                                settings.huggingfaceModel =
+                                    huggingfaceModel
+
+                                settings.ollamaModel =
+                                    ollamaModel
+
+                                settings.customUrl = customUrl
+                                settings.customKey = customKey
+                                settings.customModel =
+                                    customModel
+
+                                settings.accuracyPromptEnabled =
+                                    accuracyEnabled
+                                settings.customSystemInstruction =
+                                    customInstruction
+
+                                settings.memoryCuratorEnabled =
+                                    memoryCuratorEnabled
+                                settings.memoryCuratorModel =
+                                    memoryCuratorModel
+                                settings.memoryCuratorProvider =
+                                    memoryCuratorProvider
+                                settings.memoryCuratorOllamaModel =
+                                    memoryCuratorOllamaModel
+                                settings.mediatorIdentityText =
+                                    mediatorIdentityText
+
+                                settings.autoSave = autoSave
+
+                                saved = true
+                            },
+                            modifier =
+                                Modifier.fillMaxWidth()
+                        ) {
+
+                            Icon(
+                                imageVector =
+                                    Icons.Filled.Save,
+                                contentDescription = null
+                            )
+
+                            Spacer(
+                                Modifier.width(8.dp)
+                            )
+
+                            Text("حفظ الإعدادات")
+                        }
+
+                        if (saved) {
+                            SavedCard()
+                        }
+                    }
+                }
+
+                // =================================================
+                // 2 — WEB
+                // =================================================
+
+                2 -> {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+
+                        SectionTitle(
+                            title = "🌐 الويب",
+                            subtitle =
+                                "إدارة منصات الويب التي يتعامل معها AiChat."
+                        )
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onOpenWebPlatforms()
+                                },
+                            shape =
+                                RoundedCornerShape(12.dp),
+                            colors =
+                                CardDefaults.cardColors(
+                                    containerColor =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .secondaryContainer
+                                )
+                        ) {
+
+                            Row(
+                                modifier =
+                                    Modifier.padding(16.dp),
+                                verticalAlignment =
+                                    Alignment.CenterVertically
+                            ) {
+
+                                Text(
+                                    text = "🌐",
+                                    style =
+                                        MaterialTheme.typography
+                                            .headlineMedium
+                                )
+
+                                Spacer(
+                                    Modifier.width(12.dp)
+                                )
+
+                                Column(
+                                    modifier =
+                                        Modifier.weight(1f)
+                                ) {
+
+                                    Text(
+                                        text =
+                                            "منصات الويب",
+                                        fontWeight =
+                                            FontWeight.Bold,
+                                        style =
+                                            MaterialTheme.typography
+                                                .titleMedium
+                                    )
+
+                                    Text(
+                                        text =
+                                            "إدارة منصات الويب وإعداداتها.",
+                                        style =
+                                            MaterialTheme.typography
+                                                .bodySmall
+                                    )
+                                }
+                            }
+                        }
+
+                        InfoCard(
+                            "هذه الصفحة تفتح شاشة إدارة المنصات الموجودة في المشروع. لن يتم تكرار قائمة المنصات هنا."
+                        )
+                    }
+                }
+
+                // =================================================
+                // 3 — ACCURACY
+                // =================================================
+
+                3 -> {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+
+                        SectionTitle(
+                            title = "🎯 الدقة",
+                            subtitle =
+                                "قواعد إضافية لتحسين دقة وموثوقية الإجابات."
+                        )
+
+                        Card(
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            shape =
+                                RoundedCornerShape(12.dp)
+                        ) {
+
+                            Column(
+                                modifier =
+                                    Modifier.padding(16.dp),
+                                verticalArrangement =
+                                    Arrangement.spacedBy(12.dp)
+                            ) {
+
+                                Row(
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    verticalAlignment =
+                                        Alignment.CenterVertically
+                                ) {
+
+                                    Column(
+                                        modifier =
+                                            Modifier.weight(1f)
+                                    ) {
+
+                                        Text(
+                                            text =
+                                                "🎯 تفعيل وثيقة الدقة",
+                                            fontWeight =
+                                                FontWeight.Bold,
+                                            style =
+                                                MaterialTheme.typography
+                                                    .titleMedium
+                                        )
+
+                                        Text(
+                                            text =
+                                                "إضافة قواعد الدقة والموثوقية إلى تعليمات النموذج.",
+                                            style =
+                                                MaterialTheme.typography
+                                                    .bodySmall
+                                        )
+                                    }
+
+                                    Switch(
+                                        checked =
+                                            accuracyEnabled,
+                                        onCheckedChange = {
+
+                                            accuracyEnabled = it
+
+                                            settings
+                                                .accuracyPromptEnabled =
+                                                it
+
+                                            saved = false
+                                        }
+                                    )
+                                }
+
+                                OutlinedTextField(
+                                    value =
+                                        customInstruction,
+                                    onValueChange = {
+                                        customInstruction = it
+                                        saved = false
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    label = {
+                                        Text(
+                                            "تعليمات إضافية مخصصة"
+                                        )
+                                    },
+                                    placeholder = {
+                                        Text(
+                                            "أضف تعليمات خاصة تريد تطبيقها على الإجابات..."
+                                        )
+                                    },
+                                    minLines = 5,
+                                    shape =
+                                        RoundedCornerShape(12.dp)
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+
+                                settings.accuracyPromptEnabled =
+                                    accuracyEnabled
+
+                                settings.customSystemInstruction =
+                                    customInstruction
+
+                                settings.autoSave = autoSave
+
+                                saved = true
+                            },
+                            modifier =
+                                Modifier.fillMaxWidth()
+                        ) {
+
+                            Icon(
+                                imageVector =
+                                    Icons.Filled.Save,
+                                contentDescription = null
+                            )
+
+                            Spacer(
+                                Modifier.width(8.dp)
+                            )
+
+                            Text("حفظ الإعدادات")
+                        }
+
+                        if (saved) {
+                            SavedCard()
+                        }
+                    }
+                }
+
+                // =================================================
+                // 4 — GENERAL
+                // =================================================
+
+                4 -> {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+
+                        SectionTitle(
+                            title = "⚙️ عام",
+                            subtitle =
+                                "إعدادات عامة ستتم إضافتها هنا مستقبلًا."
+                        )
+
+                        InfoCard(
+                            "لا توجد إعدادات عامة إضافية حاليًا.\n\n" +
+                                    "تم ترك هذا التبويب جاهزًا للتوسعة دون تغيير بنية المشروع."
+                        )
+                    }
+                }
             }
         }
-
-        Spacer(
-            modifier = Modifier.height(24.dp)
-        )
     }
 }
 
-// ====================================================================
-// 🧠 الذاكرة
-// ====================================================================
-
-@Composable
-private fun MemorySettingsTab(
-    autoSave: Boolean,
-    onAutoSaveChange: (Boolean) -> Unit,
-    onOpenMemory: () -> Unit,
-
-    memoryCuratorEnabled: Boolean,
-    onMemoryCuratorEnabledChange: (Boolean) -> Unit,
-
-    memoryCuratorProvider: String,
-    onMemoryCuratorProviderChange: (String) -> Unit,
-
-    memoryCuratorModel: String,
-    onMemoryCuratorModelChange: (String) -> Unit,
-
-    memoryCuratorOllamaModel: String,
-    onMemoryCuratorOllamaModelChange: (String) -> Unit,
-
-    mediatorIdentityText: String,
-    onMediatorIdentityTextChange: (String) -> Unit
-) {
-
-    val scrollState = rememberScrollState()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp)
-    ) {
-
-        Text(
-            text = "🧠 الذاكرة المشتركة",
-            style = MaterialTheme.typography.headlineSmall
-        )
-
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
-
-        // ============================================================
-        // الحفظ التلقائي
-        // ============================================================
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-
-                verticalAlignment =
-                    Alignment.CenterVertically
-            ) {
-
-                Column(
-                    modifier =
-                        Modifier.weight(1f)
-                ) {
-
-                    Text(
-                        text =
-                            "💾 الحفظ التلقائي للردود",
-
-                        style =
-                            MaterialTheme.typography.titleMedium
-                    )
-
-                    Spacer(
-                        modifier =
-                            Modifier.height(4.dp)
-                    )
-
-                    Text(
-                        text =
-                            "حفظ ردود المساعد تلقائيًا في الذاكرة المشتركة",
-
-                        style =
-                            MaterialTheme.typography.bodyMedium
-                    )
-                }
-
-                Switch(
-                    checked = autoSave,
-
-                    onCheckedChange =
-                        onAutoSaveChange
-                )
-            }
-        }
-
-        Spacer(
-            modifier = Modifier.height(12.dp)
-        )
-
-        // ============================================================
-        // فتح شاشة الذاكرة
-        // ============================================================
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable {
-                    onOpenMemory()
-                }
-        ) {
-
-            Column(
-                modifier = Modifier.padding(20.dp)
-            ) {
-
-                Text(
-                    text = "🧠 إدارة الذاكرة",
-                    style =
-                        MaterialTheme.typography.titleLarge
-                )
-
-                Spacer(
-                    modifier = Modifier.height(6.dp)
-                )
-
-                Text(
-                    text =
-                        "عرض وإدارة الذكريات المشتركة المحفوظة",
-                    style =
-                        MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
-
-        // ============================================================
-        // Memory Curator
-        // ============================================================
-
-        SectionCard(
-            title = "🧠 وسيط الذاكرة الذكي"
-        ) {
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment =
-                    Alignment.CenterVertically
-            ) {
-
-                Column(
-                    modifier =
-                        Modifier.weight(1f)
-                ) {
-
-                    Text(
-                        text = "تفعيل الوسيط الذكي",
-                        style =
-                            MaterialTheme.typography.titleMedium
-                    )
-
-                    Text(
-                        text =
-                            "تحليل الذاكرة قبل تمريرها إلى النموذج الرئيسي",
-                        style =
-                            MaterialTheme.typography.bodyMedium
-                    )
-                }
-
-                Switch(
-                    checked =
-                        memoryCuratorEnabled,
-
-                    onCheckedChange =
-                        onMemoryCuratorEnabledChange
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.height(16.dp)
-            )
-
-            Text(
-                text = "مزود الوسيط",
-                style =
-                    MaterialTheme.typography.titleMedium
-            )
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            ProviderButton(
-                selected =
-                    memoryCuratorProvider == "gemini",
-                text = "Gemini",
-                onClick = {
-                    onMemoryCuratorProviderChange(
-                        "gemini"
-                    )
-                }
-            )
-
-            ProviderButton(
-                selected =
-                    memoryCuratorProvider == "ollama",
-                text = "Ollama",
-                onClick = {
-                    onMemoryCuratorProviderChange(
-                        "ollama"
-                    )
-                }
-            )
-
-            ProviderButton(
-                selected =
-                    memoryCuratorProvider == "custom",
-                text = "Custom",
-                onClick = {
-                    onMemoryCuratorProviderChange(
-                        "custom"
-                    )
-                }
-            )
-
-            Spacer(
-                modifier = Modifier.height(12.dp)
-            )
-
-            if (memoryCuratorProvider == "gemini") {
-
-                OutlinedTextField(
-                    value =
-                        memoryCuratorModel,
-
-                    onValueChange =
-                        onMemoryCuratorModelChange,
-
-                    modifier =
-                        Modifier.fillMaxWidth(),
-
-                    label = {
-                        Text("نموذج Gemini للوسيط")
-                    },
-
-                    singleLine = true
-                )
-            }
-
-            if (memoryCuratorProvider == "ollama") {
-
-                OutlinedTextField(
-                    value =
-                        memoryCuratorOllamaModel,
-
-                    onValueChange =
-                        onMemoryCuratorOllamaModelChange,
-
-                    modifier =
-                        Modifier.fillMaxWidth(),
-
-                    label = {
-                        Text("نموذج Ollama للوسيط")
-                    },
-
-                    singleLine = true
-                )
-            }
-
-            if (memoryCuratorProvider == "custom") {
-
-                Text(
-                    text =
-                        "سيستخدم الوسيط إعدادات Custom الموجودة في تبويب المحادثة.",
-                    style =
-                        MaterialTheme.typography.bodyMedium
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.height(16.dp)
-            )
-
-            OutlinedTextField(
-                value =
-                    mediatorIdentityText,
-
-                onValueChange =
-                    onMediatorIdentityTextChange,
-
-                modifier =
-                    Modifier.fillMaxWidth(),
-
-                label = {
-                    Text("هوية / أسلوب الوسيط")
-                },
-
-                minLines = 3
-            )
-        }
-
-        Spacer(
-            modifier = Modifier.height(24.dp)
-        )
-    }
-}
-
-// ====================================================================
-// 🌐 الويب
-// ====================================================================
-
-@Composable
-private fun WebSettingsTab(
-    onOpenWebPlatforms: () -> Unit
-) {
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(
-                rememberScrollState()
-            )
-            .padding(16.dp)
-    ) {
-
-        Text(
-            text = "🌐 الويب",
-            style =
-                MaterialTheme.typography.headlineSmall
-        )
-
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable {
-                    onOpenWebPlatforms()
-                }
-        ) {
-
-            Column(
-                modifier = Modifier.padding(20.dp)
-            ) {
-
-                Text(
-                    text = "🌐 منصات الويب",
-                    style =
-                        MaterialTheme.typography.titleLarge
-                )
-
-                Spacer(
-                    modifier = Modifier.height(6.dp)
-                )
-
-                Text(
-                    text =
-                        "إدارة منصات الويب وإضافة أو تعطيل أو حذف المنصات",
-                    style =
-                        MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-    }
-}
-
-// ====================================================================
-// 🎯 الدقة
-// ====================================================================
-
-@Composable
-private fun AccuracySettingsTab(
-    accuracyPromptEnabled: Boolean,
-    onAccuracyPromptEnabledChange: (Boolean) -> Unit,
-
-    customSystemInstruction: String,
-    onCustomSystemInstructionChange: (String) -> Unit
-) {
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(
-                rememberScrollState()
-            )
-            .padding(16.dp)
-    ) {
-
-        Text(
-            text = "🎯 الدقة",
-            style =
-                MaterialTheme.typography.headlineSmall
-        )
-
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-
-                verticalAlignment =
-                    Alignment.CenterVertically
-            ) {
-
-                Column(
-                    modifier =
-                        Modifier.weight(1f)
-                ) {
-
-                    Text(
-                        text =
-                            "تفعيل وثيقة الدقة",
-
-                        style =
-                            MaterialTheme.typography.titleMedium
-                    )
-
-                    Text(
-                        text =
-                            "استخدام قواعد الدقة مع المحادثة",
-
-                        style =
-                            MaterialTheme.typography.bodyMedium
-                    )
-                }
-
-                Switch(
-                    checked =
-                        accuracyPromptEnabled,
-
-                    onCheckedChange =
-                        onAccuracyPromptEnabledChange
-                )
-            }
-        }
-
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
-
-        OutlinedTextField(
-            value =
-                customSystemInstruction,
-
-            onValueChange =
-                onCustomSystemInstructionChange,
-
-            modifier =
-                Modifier.fillMaxWidth(),
-
-            label = {
-                Text("تعليمات النظام المخصصة")
-            },
-
-            minLines = 6
-        )
-
-        Spacer(
-            modifier = Modifier.height(24.dp)
-        )
-    }
-}
-
-// ====================================================================
-// ⚙️ عام
-// ====================================================================
-
-@Composable
-private fun GeneralSettingsTab() {
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(
-                rememberScrollState()
-            )
-            .padding(16.dp)
-    ) {
-
-        Text(
-            text = "⚙️ عام",
-            style =
-                MaterialTheme.typography.headlineSmall
-        )
-
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-
-            Column(
-                modifier = Modifier.padding(20.dp)
-            ) {
-
-                Text(
-                    text = "إعدادات عامة",
-                    style =
-                        MaterialTheme.typography.titleLarge
-                )
-
-                Spacer(
-                    modifier = Modifier.height(8.dp)
-                )
-
-                Text(
-                    text =
-                        "سيتم إضافة الإعدادات العامة هنا لاحقًا دون التأثير على إعدادات المحادثة أو الذاكرة.",
-                    style =
-                        MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-    }
-}
-
-// ====================================================================
-// عناصر مساعدة
-// ====================================================================
-
-@Composable
-private fun SectionCard(
-    title: String,
-    content: @Composable Column.() -> Unit
-) {
-
-    Card(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-
-            Text(
-                text = title,
-                style =
-                    MaterialTheme.typography.titleLarge
-            )
-
-            Spacer(
-                modifier = Modifier.height(12.dp)
-            )
-
-            content()
-        }
-    }
-}
-
-@Composable
-private fun ProviderButton(
-    selected: Boolean,
-    text: String,
-    onClick: () -> Unit
-) {
-
-    OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-
-        Text(
-            text =
-                if (selected) {
-                    "✓ $text"
-                } else {
-                    text
-                }
-        )
-    }
-
-    Spacer(
-        modifier = Modifier.height(6.dp)
-    )
-}
-
-@Composable
-private fun ProviderFields(
-    key: String,
-    onKeyChange: (String) -> Unit,
-
-    model: String,
-    onModelChange: (String) -> Unit,
-
-    models: List<String>,
-    onRefresh: () -> Unit,
-
-    showKeys: Boolean,
-    onToggleKeys: () -> Unit
-) {
-
-    OutlinedTextField(
-        value = key,
-        onValueChange = onKeyChange,
-        modifier = Modifier.fillMaxWidth(),
-        label = {
-            Text("API Key")
-        },
-        singleLine = true,
-        visualTransformation =
-            if (showKeys) {
-                VisualTransformation.None
-            } else {
-                PasswordVisualTransformation()
-            },
-        trailingIcon = {
-
-            IconButton(
-                onClick = onToggleKeys
-            ) {
-
-                Icon(
-                    imageVector =
-                        if (showKeys) {
-                            Icons.Filled.VisibilityOff
-                        } else {
-                            Icons.Filled.Visibility
-                        },
-                    contentDescription = null
-                )
-            }
-        }
-    )
-
-    Spacer(
-        modifier = Modifier.height(12.dp)
-    )
-
-    DynamicModelSelector(
-        currentModel = model,
-        onModelChange = onModelChange,
-        models = models,
-        onRefresh = onRefresh
-    )
-}
-
+// =================================================================
+// Dynamic Model Selector
+// =================================================================
+
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalLayoutApi::class
+)
 @Composable
 private fun DynamicModelSelector(
-    currentModel: String,
-    onModelChange: (String) -> Unit,
-    models: List<String>,
+    models: List<ModelInfo>,
+    selected: String,
+    loading: Boolean,
+    error: String?,
+    onlyFree: Boolean,
+    onlyRecommended: Boolean,
+    onlyVision: Boolean,
+    onFreeChange: (Boolean) -> Unit,
+    onRecommendedChange: (Boolean) -> Unit,
+    onVisionChange: (Boolean) -> Unit,
+    onSelect: (String) -> Unit,
     onRefresh: () -> Unit
 ) {
 
-    Column {
+    var expanded by remember {
+        mutableStateOf(false)
+    }
+
+    val selectedInfo =
+        models.firstOrNull {
+            it.id == selected
+        }
+
+    Column(
+        verticalArrangement =
+            Arrangement.spacedBy(8.dp)
+    ) {
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier =
+                Modifier.fillMaxWidth(),
             verticalAlignment =
                 Alignment.CenterVertically
         ) {
 
-            OutlinedTextField(
-                value = currentModel,
-                onValueChange = onModelChange,
+            Text(
+                text = "النموذج",
+                fontWeight =
+                    FontWeight.Bold,
                 modifier =
-                    Modifier.weight(1f),
-                label = {
-                    Text("النموذج")
-                },
-                singleLine = true
+                    Modifier.weight(1f)
             )
 
-            Spacer(
-                modifier = Modifier.width(8.dp)
-            )
+            if (loading) {
 
-            IconButton(
-                onClick = onRefresh
-            ) {
+                CircularProgressIndicator(
+                    modifier =
+                        Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
 
-                Icon(
-                    imageVector =
-                        Icons.Filled.Refresh,
-                    contentDescription =
-                        "تحديث النماذج"
+                Spacer(
+                    Modifier.width(8.dp)
+                )
+
+                Text(
+                    text = "جاري التحميل...",
+                    style =
+                        MaterialTheme.typography.bodySmall,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant
+                )
+
+            } else {
+
+                IconButton(
+                    onClick = onRefresh
+                ) {
+
+                    Icon(
+                        imageVector =
+                            Icons.Filled.Refresh,
+                        contentDescription =
+                            "تحديث النماذج"
+                    )
+                }
+
+                Text(
+                    text =
+                        "${models.size} نموذج",
+                    style =
+                        MaterialTheme.typography.bodySmall,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant
                 )
             }
         }
 
-        if (models.isNotEmpty()) {
+        FlowRow(
+            horizontalArrangement =
+                Arrangement.spacedBy(6.dp)
+        ) {
+
+            FilterChip(
+                selected = onlyFree,
+                onClick = {
+                    onFreeChange(!onlyFree)
+                },
+                label = {
+                    Text("🟢 مجاني")
+                }
+            )
+
+            FilterChip(
+                selected =
+                    onlyRecommended,
+                onClick = {
+                    onRecommendedChange(
+                        !onlyRecommended
+                    )
+                },
+                label = {
+                    Text("⭐ موصى به")
+                }
+            )
+
+            FilterChip(
+                selected = onlyVision,
+                onClick = {
+                    onVisionChange(!onlyVision)
+                },
+                label = {
+                    Text("🖼️ يدعم الصور")
+                }
+            )
+        }
+
+        if (!error.isNullOrBlank()) {
+
+            Card(
+                modifier =
+                    Modifier.fillMaxWidth(),
+                colors =
+                    CardDefaults.cardColors(
+                        containerColor =
+                            MaterialTheme.colorScheme
+                                .errorContainer
+                    ),
+                shape =
+                    RoundedCornerShape(8.dp)
+            ) {
+
+                Text(
+                    text =
+                        "⚠️ $error\nسيتم الاحتفاظ بالنموذج المحفوظ.",
+                    modifier =
+                        Modifier.padding(12.dp),
+                    style =
+                        MaterialTheme.typography
+                            .bodySmall,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onErrorContainer
+                )
+            }
+        }
+
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = {
+                expanded = !expanded
+            }
+        ) {
+
+            OutlinedTextField(
+                value =
+                    selectedInfo?.let {
+                        modelLabel(it)
+                    } ?: selected.ifBlank {
+                        "اختر نموذجاً"
+                    },
+                onValueChange = {},
+                readOnly = true,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(),
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults
+                        .TrailingIcon(
+                            expanded = expanded
+                        )
+                },
+                shape =
+                    RoundedCornerShape(12.dp),
+                label = {
+                    Text("النموذج المختار")
+                }
+            )
+
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = {
+                    expanded = false
+                }
+            ) {
+
+                if (models.isEmpty()) {
+
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (loading)
+                                    "جاري التحميل..."
+                                else
+                                    "اضغط 🔄 لتحميل النماذج"
+                            )
+                        },
+                        onClick = {
+                            expanded = false
+                        }
+                    )
+
+                } else {
+
+                    models.forEach { model ->
+
+                        DropdownMenuItem(
+                            text = {
+
+                                Column {
+
+                                    Text(
+                                        text =
+                                            modelLabel(model),
+                                        fontWeight =
+                                            if (
+                                                model.recommended
+                                            ) {
+                                                FontWeight.Bold
+                                            } else {
+                                                FontWeight.Normal
+                                            }
+                                    )
+
+                                    if (
+                                        model.contextLength > 0
+                                    ) {
+
+                                        Text(
+                                            text =
+                                                formatContextLength(
+                                                    model.contextLength
+                                                ),
+                                            style =
+                                                MaterialTheme.typography
+                                                    .labelSmall,
+                                            color =
+                                                MaterialTheme.colorScheme
+                                                    .onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+
+                                onSelect(model.id)
+
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =================================================================
+// Section title
+// =================================================================
+
+@Composable
+private fun SectionTitle(
+    title: String,
+    subtitle: String
+) {
+
+    Column(
+        verticalArrangement =
+            Arrangement.spacedBy(4.dp)
+    ) {
+
+        Text(
+            text = title,
+            style =
+                MaterialTheme.typography
+                    .headlineSmall,
+            fontWeight =
+                FontWeight.Bold
+        )
+
+        Text(
+            text = subtitle,
+            style =
+                MaterialTheme.typography
+                    .bodyMedium,
+            color =
+                MaterialTheme.colorScheme
+                    .onSurfaceVariant
+        )
+    }
+}
+
+// =================================================================
+// Saved card
+// =================================================================
+
+@Composable
+private fun SavedCard() {
+
+    Card(
+        modifier =
+            Modifier.fillMaxWidth(),
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    MaterialTheme.colorScheme
+                        .secondaryContainer
+            ),
+        shape =
+            RoundedCornerShape(12.dp)
+    ) {
+
+        Row(
+            modifier =
+                Modifier.padding(12.dp),
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+
+            Icon(
+                imageVector =
+                    Icons.Filled.CheckCircle,
+                contentDescription = null
+            )
 
             Spacer(
-                modifier = Modifier.height(8.dp)
+                Modifier.width(8.dp)
             )
 
             Text(
                 text =
-                    "النماذج المتاحة: ${models.size}",
-
-                style =
-                    MaterialTheme.typography.bodySmall
+                    "تم حفظ الإعدادات بنجاح."
             )
-
-            Spacer(
-                modifier = Modifier.height(4.dp)
-            )
-
-            models.take(10).forEach { model ->
-
-                Text(
-                    text = model,
-
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onModelChange(model)
-                        }
-                        .padding(
-                            vertical = 8.dp,
-                            horizontal = 4.dp
-                        ),
-
-                    style =
-                        MaterialTheme.typography.bodyMedium
-                )
-            }
         }
     }
+}
+
+// =================================================================
+// Model label
+// =================================================================
+
+private fun modelLabel(
+    model: ModelInfo
+): String = buildString {
+
+    if (model.name.contains("💾")) {
+
+        append(model.name)
+
+        return@buildString
+    }
+
+    if (model.isFree) {
+        append("🟢 ")
+    }
+
+    if (model.recommended) {
+        append("⭐ ")
+    }
+
+    append(model.name)
+
+    if (model.supportsVision) {
+        append(" 🖼️")
+    }
+}
+
+// =================================================================
+// Context length
+// =================================================================
+
+private fun formatContextLength(
+    contextLength: Long
+): String {
+
+    return when {
+
+        contextLength >= 1_000_000 ->
+            "${contextLength / 1_000_000}M context"
+
+        contextLength >= 1_000 ->
+            "${contextLength / 1_000}K context"
+
+        else ->
+            "$contextLength context"
+    }
+}
+
+// =================================================================
+// Info card
+// =================================================================
+
+@Composable
+private fun InfoCard(
+    text: String
+) {
+
+    Card(
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    MaterialTheme.colorScheme
+                        .secondaryContainer
+                        .copy(alpha = 0.5f)
+            ),
+        shape =
+            RoundedCornerShape(12.dp),
+        modifier =
+            Modifier.fillMaxWidth()
+    ) {
+
+        Text(
+            text = text,
+            modifier =
+                Modifier.padding(12.dp),
+            style =
+                MaterialTheme.typography
+                    .bodySmall,
+            color =
+                MaterialTheme.colorScheme
+                    .onSecondaryContainer
+        )
+    }
+}
+
+// =================================================================
+// API key field
+// =================================================================
+
+@Composable
+private fun KeyField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    showKey: Boolean,
+    placeholder: String
+) {
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier =
+            Modifier.fillMaxWidth(),
+        label = {
+            Text(label)
+        },
+        placeholder = {
+            Text(placeholder)
+        },
+        singleLine = true,
+        visualTransformation =
+            if (showKey) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+        shape =
+            RoundedCornerShape(12.dp)
+    )
 }
