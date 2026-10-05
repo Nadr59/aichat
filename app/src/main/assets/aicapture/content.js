@@ -145,21 +145,23 @@
 
             legacyContainerMode: false
         },
+
         arena: {
-    id: "arena",
-    name: "Arena",
-    matches: function () {
-        return location.hostname === "arena.ai";
-    },
+            id: "arena",
+            name: "Arena",
 
-    responseSelectors: [
-        "main .prose",
-        ".prose.prose-base",
-        "div.prose"
-    ],
+            matches: function () {
+                return location.hostname === "arena.ai";
+            },
 
-    legacyContainerMode: false
-},
+            responseSelectors: [
+                "main .prose",
+                ".prose.prose-base",
+                "div.prose"
+            ],
+
+            legacyContainerMode: false
+        },
 
         generic: {
             id: "generic",
@@ -191,23 +193,21 @@
     // PLATFORM DETECTION
     // ============================================================
 
-    
+    function detectPlatform() {
+        if (PLATFORMS.chatgpt.matches()) {
+            return PLATFORMS.chatgpt;
+        }
 
-function detectPlatform() {
-    if (PLATFORMS.chatgpt.matches()) {
-        return PLATFORMS.chatgpt;
+        if (PLATFORMS.gemini.matches()) {
+            return PLATFORMS.gemini;
+        }
+
+        if (PLATFORMS.arena.matches()) {
+            return PLATFORMS.arena;
+        }
+
+        return PLATFORMS.generic;
     }
-
-    if (PLATFORMS.gemini.matches()) {
-        return PLATFORMS.gemini;
-    }
-
-    if (PLATFORMS.arena.matches()) {
-        return PLATFORMS.arena;
-    }
-
-    return PLATFORMS.generic;
-}
 
     var CURRENT_PLATFORM = detectPlatform();
 
@@ -921,150 +921,22 @@ function detectPlatform() {
     // ============================================================
 
     function logResponseElementDiagnostics() {
-    var elements = getPlatformResponseElements();
+        var elements = getPlatformResponseElements();
 
-    log("🔬 " + CURRENT_PLATFORM.name +
-        " response candidates=" + elements.length);
+        log("🔬 " + CURRENT_PLATFORM.name +
+            " response candidates=" + elements.length);
 
-    elements.slice(-10).forEach(function (el, index) {
-        var text = (el.innerText || el.textContent || "").trim();
-
-        log(
-            "🔎 candidate[" + index + "] " +
-            el.tagName +
-            " class=" + (el.className || "") +
-            " len=" + text.length
-        );
-    });
-}
-    function logArenaMutationDiagnostics() {
-    if (location.hostname !== "arena.ai") return;
-
-    log("🔬 ===== ARENA MUTATION DIAGNOSTICS START =====");
-
-    var logged = [];
-    var observer = new MutationObserver(function (mutations) {
-        mutations.forEach(function (mutation) {
-
-            var target = mutation.target;
-
-            if (!target || target.nodeType !== 1) return;
-
-            var tag = target.tagName;
-
-            // نستبعد العناصر العامة التي لا تفيدنا
-            if (
-                tag !== "DIV" &&
-                tag !== "P" &&
-                tag !== "ARTICLE" &&
-                tag !== "LI" &&
-                tag !== "SPAN"
-            ) {
-                return;
-            }
-
-            if (
-                target.matches("textarea, input, button, nav, header, footer")
-            ) {
-                return;
-            }
-
-            var text = (target.innerText || target.textContent || "").trim();
-
-            if (text.length < 30) return;
-
-            // منع تكرار نفس العنصر
-            if (logged.indexOf(target) !== -1) return;
-            logged.push(target);
-
-            var className = "";
-
-            try {
-                className = typeof target.className === "string"
-                    ? target.className
-                    : "";
-            } catch (e) {}
-
-            log(
-                "🧬 Arena changed: " +
-                tag +
-                " class=" + className +
-                " len=" + text.length
-            );
-
-            // نكتفي بعدد محدود حتى لا يمتلئ سجل التشخيص
-            if (logged.length >= 15) {
-                observer.disconnect();
-                log("🔬 Arena mutation limit reached");
-                log("🔬 ===== ARENA MUTATION DIAGNOSTICS END =====");
-            }
-        });
-    });
-
-    observer.observe(document.body, {
-        subtree: true,
-        childList: true,
-        characterData: true
-    });
-
-    // إيقاف المراقبة تلقائيًا بعد 10 ثوانٍ
-    setTimeout(function () {
-        observer.disconnect();
-
-        log(
-            "🔬 Arena mutation diagnostics stopped, candidates=" +
-            logged.length
-        );
-
-        log("🔬 ===== ARENA MUTATION DIAGNOSTICS END =====");
-    }, 10000);
- }
-
-function logArenaDomDiagnostics() {
-    log("🔬 ===== ARENA DOM DIAGNOSTICS =====");
-
-    var selectors = [
-        "main",
-        "article",
-        '[role="main"]',
-        '[role="article"]',
-        '[class*="message"]',
-        '[class*="response"]',
-        '[class*="assistant"]',
-        '[class*="markdown"]',
-        '[class*="prose"]',
-        '[class*="content"]'
-    ];
-
-    var seen = [];
-    var count = 0;
-
-    selectors.forEach(function (selector) {
-        var elements = document.querySelectorAll(selector);
-
-        for (var i = elements.length - 1; i >= 0 && count < 20; i--) {
-            var el = elements[i];
+        elements.slice(-10).forEach(function (el, index) {
             var text = (el.innerText || el.textContent || "").trim();
 
-            if (text.length < 20) continue;
-            if (seen.indexOf(el) !== -1) continue;
-
-            seen.push(el);
-            count++;
-
             log(
-                "🧩 Arena[" + count + "] " +
+                "🔎 candidate[" + index + "] " +
                 el.tagName +
                 " class=" + (el.className || "") +
                 " len=" + text.length
             );
-        }
-    });
-
-    log("🔬 Arena diagnostic candidates=" + count);
-    log("🔬 ===== END ARENA DOM DIAGNOSTICS =====");
-            }
-
+        });
+    }
 
     // ============================================================
     // START CAPTURE
@@ -1093,16 +965,8 @@ function logArenaDomDiagnostics() {
 
         // For Gemini this is especially useful during the first test.
         if (CURRENT_PLATFORM.id === "gemini") {
-    logResponseElementDiagnostics();
-}
-
-if (location.hostname === "arena.ai") {
-    setTimeout(function () {
-        logArenaDomDiagnostics();
-    }, 1500);
-
-    logArenaMutationDiagnostics();
-}
+            logResponseElementDiagnostics();
+        }
 
         watchForResponse();
     }
