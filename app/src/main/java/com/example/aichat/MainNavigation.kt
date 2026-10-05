@@ -32,17 +32,32 @@ import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 @Composable
 fun MainNavigation(app: AichatApp) {
 
-    val navController                                = rememberNavController()
-    val settings                                     = remember { AiSettings(app) }
-    val chatViewModel: ChatViewModel                 = viewModel()
+    val navController = rememberNavController()
+
+    val settings = remember {
+        AiSettings(app)
+    }
+
+    val chatViewModel: ChatViewModel = viewModel()
+
     val webPlatformsViewModel: WebPlatformsViewModel = viewModel(
-        factory = WebPlatformsViewModel.Factory(app.webPlatformRepository)
+        factory = WebPlatformsViewModel.Factory(
+            app.webPlatformRepository
+        )
     )
 
-    val snackbarHostState = remember { SnackbarHostState() }
+    /*
+     * قائمة المنصات نفسها تستخدم أيضًا داخل شاشة Gecko
+     * لإنشاء شريط التبويبات وتمييز المنصة الحالية.
+     */
+    val platforms by webPlatformsViewModel.platforms.collectAsState()
+
+    val snackbarHostState = remember {
+        SnackbarHostState()
+    }
 
     val successMessage by chatViewModel.successMessage.collectAsState()
-    val error          by chatViewModel.error.collectAsState()
+    val error by chatViewModel.error.collectAsState()
 
     LaunchedEffect(successMessage) {
         successMessage?.let {
@@ -61,7 +76,9 @@ fun MainNavigation(app: AichatApp) {
     Scaffold(
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState) { data ->
-                Snackbar(snackbarData = data)
+                Snackbar(
+                    snackbarData = data
+                )
             }
         }
     ) { padding ->
@@ -71,135 +88,331 @@ fun MainNavigation(app: AichatApp) {
                 .fillMaxSize()
                 .padding(padding)
         ) {
+
             NavHost(
-                navController    = navController,
+                navController = navController,
                 startDestination = "conversations"
             ) {
 
-                // ── المحادثات ─────────────────────────────────────────────
+                // ─────────────────────────────────────────────────────
+                // المحادثات
+                // ─────────────────────────────────────────────────────
                 composable("conversations") {
+
                     ConversationsScreen(
-                        viewModel             = chatViewModel,
-                        settings              = settings,
-                        onBack                = { },
-                        onOpenChat            = { id ->
+                        viewModel = chatViewModel,
+                        settings = settings,
+                        onBack = { },
+
+                        onOpenChat = { id ->
                             navController.navigate("chat/$id")
                         },
-                        onNewChat             = {
+
+                        onNewChat = {
                             chatViewModel.newConversation()
                             navController.navigate("chat/new")
                         },
-                        onOpenSettings        = { navController.navigate("settings") },
-                        onOpenMemory          = { navController.navigate("memory") },
-                        webPlatformsViewModel = webPlatformsViewModel,
-                        onOpenPlatform        = { platform ->
-                            navController.navigate("web/${platform.id}")
+
+                        onOpenSettings = {
+                            navController.navigate("settings")
                         },
-                        onManagePlatforms     = { navController.navigate("web_platforms") }
+
+                        onOpenMemory = {
+                            navController.navigate("memory")
+                        },
+
+                        webPlatformsViewModel = webPlatformsViewModel,
+
+                        onOpenPlatform = { platform ->
+
+                            navController.navigate(
+                                "web/${platform.id}"
+                            ) {
+                                /*
+                                 * لا نسمح بتراكم:
+                                 *
+                                 * conversations
+                                 * -> web/A
+                                 * -> web/B
+                                 * -> web/C
+                                 *
+                                 * كل منصة لها GeckoSession محفوظة خارجيًا،
+                                 * لذلك يكفي وجود شاشة web واحدة في الـ back stack.
+                                 */
+                                popUpTo("conversations") {
+                                    inclusive = false
+                                }
+
+                                launchSingleTop = true
+                            }
+                        },
+
+                        onManagePlatforms = {
+                            navController.navigate("web_platforms")
+                        }
                     )
                 }
 
-                // ── المحادثة ──────────────────────────────────────────────
+                // ─────────────────────────────────────────────────────
+                // المحادثة
+                // ─────────────────────────────────────────────────────
                 composable(
-                    route     = "chat/{conversationId}",
+                    route = "chat/{conversationId}",
                     arguments = listOf(
-                        navArgument("conversationId") { type = NavType.StringType }
+                        navArgument("conversationId") {
+                            type = NavType.StringType
+                        }
                     )
                 ) { back ->
-                    val conversationId = back.arguments
-                        ?.getString("conversationId") ?: "new"
+
+                    val conversationId =
+                        back.arguments
+                            ?.getString("conversationId")
+                            ?: "new"
 
                     LaunchedEffect(conversationId) {
+
                         if (conversationId == "new") {
+
                             chatViewModel.newConversation()
+
                         } else {
-                            conversationId.toLongOrNull()
-                                ?.let { chatViewModel.openConversation(it) }
+
+                            conversationId
+                                .toLongOrNull()
+                                ?.let {
+                                    chatViewModel.openConversation(it)
+                                }
                         }
                     }
 
                     ChatScreen(
                         viewModel = chatViewModel,
-                        settings  = settings,
-                        onBack    = { navController.popBackStack() }
+                        settings = settings,
+                        onBack = {
+                            navController.popBackStack()
+                        }
                     )
                 }
 
-                // ── الإعدادات ─────────────────────────────────────────────
+                // ─────────────────────────────────────────────────────
+                // الإعدادات
+                // ─────────────────────────────────────────────────────
                 composable("settings") {
+
                     SettingsScreen(
-                        settings     = settings,
-                        onBack       = { navController.popBackStack() },
-                        onOpenMemory = { navController.navigate("memory") }
+                        settings = settings,
+
+                        onBack = {
+                            navController.popBackStack()
+                        },
+
+                        onOpenMemory = {
+                            navController.navigate("memory")
+                        }
                     )
                 }
 
-                // ── الذاكرة ───────────────────────────────────────────────
+                // ─────────────────────────────────────────────────────
+                // الذاكرة
+                // ─────────────────────────────────────────────────────
                 composable("memory") {
+
                     MemoryScreen(
                         viewModel = chatViewModel,
-                        onBack    = { navController.popBackStack() }
+
+                        onBack = {
+                            navController.popBackStack()
+                        }
                     )
                 }
 
-                // ── إدارة المنصات ─────────────────────────────────────────
+                // ─────────────────────────────────────────────────────
+                // إدارة المنصات
+                // ─────────────────────────────────────────────────────
                 composable("web_platforms") {
+
                     WebPlatformsScreen(
-                        viewModel      = webPlatformsViewModel,
+                        viewModel = webPlatformsViewModel,
+
                         onOpenPlatform = { platform ->
-                            navController.navigate("web/${platform.id}")
+
+                            navController.navigate(
+                                "web/${platform.id}"
+                            ) {
+                                popUpTo("conversations") {
+                                    inclusive = false
+                                }
+
+                                launchSingleTop = true
+                            }
                         },
-                        onNavigateUp   = { navController.popBackStack() }
+
+                        onNavigateUp = {
+                            navController.popBackStack()
+                        }
                     )
                 }
 
-                // ── المتصفح ───────────────────────────────────────────────
+                // ─────────────────────────────────────────────────────
+                // متصفح Gecko
+                // ─────────────────────────────────────────────────────
                 composable(
-                    route     = "web/{platformId}",
+                    route = "web/{platformId}",
                     arguments = listOf(
-                        navArgument("platformId") { type = NavType.StringType }
+                        navArgument("platformId") {
+                            type = NavType.StringType
+                        }
                     )
                 ) { back ->
-                    val platformId = back.arguments?.getString("platformId")
-                        ?: return@composable
 
-                    var platform by remember { mutableStateOf<WebPlatform?>(null) }
+                    val platformId =
+                        back.arguments
+                            ?.getString("platformId")
+                            ?: return@composable
+
+                    var platform by remember {
+                        mutableStateOf<WebPlatform?>(null)
+                    }
 
                     LaunchedEffect(platformId) {
-                        platform = app.webPlatformRepository.getById(platformId)
+
+                        platform =
+                            app.webPlatformRepository
+                                .getById(platformId)
                     }
 
                     platform?.let { p ->
 
-                        val engine = remember(p.preferredEngine) {
-                            runCatching { WebEngine.valueOf(p.preferredEngine) }
-                                .getOrDefault(WebEngine.GECKO) // ✅ آمن — لا crash إذا قيمة غريبة
-                        }
+                        val engine =
+                            remember(p.preferredEngine) {
+
+                                runCatching {
+                                    WebEngine.valueOf(
+                                        p.preferredEngine
+                                    )
+                                }.getOrDefault(
+                                    WebEngine.GECKO
+                                )
+                            }
 
                         when (engine) {
 
-                            WebEngine.GECKO -> GeckoTestScreen(
-                                url           = p.url,
-                                title         = p.name,
-                                onBack        = { navController.popBackStack() },
-                                platform      = p,            // ✅ CSS selector + memoryEnabled
-                                chatViewModel = chatViewModel // ✅ يحفظ الردود في الذاكرة
-                            )
+                            // ─────────────────────────────────────
+                            // Gecko
+                            // ─────────────────────────────────────
+                            WebEngine.GECKO -> {
 
-                            // ✅ WEBVIEW و EXTERNAL → GeckoTestScreen كـ fallback
-                            // (احذف هذا إذا كان WebScreen موجوداً في مشروعك)
+                                GeckoTestScreen(
+                                    url = p.url,
+                                    title = p.name,
+
+                                    /*
+                                     * هذا الرجوع يستخدمه السهم
+                                     * عندما لا توجد صفحة سابقة داخل
+                                     * المنصة.
+                                     */
+                                    onBack = {
+                                        navController.popBackStack()
+                                    },
+
+                                    platform = p,
+
+                                    chatViewModel = chatViewModel,
+
+                                    /*
+                                     * جميع المنصات المتاحة للتبويبات.
+                                     */
+                                    availablePlatforms = platforms,
+
+                                    /*
+                                     * الضغط على تبويب منصة:
+                                     * - لا يغلق GeckoSession.
+                                     * - ينتقل إلى شاشة المنصة الجديدة.
+                                     * - الجلسة القديمة محفوظة في
+                                     *   GeckoSessionManager.
+                                     */
+                                    onSwitchPlatform = { target ->
+
+                                        if (target.id != p.id) {
+
+                                            navController.navigate(
+                                                "web/${target.id}"
+                                            ) {
+
+                                                popUpTo("conversations") {
+                                                    inclusive = false
+                                                }
+
+                                                launchSingleTop = true
+                                            }
+                                        }
+                                    },
+
+                                    /*
+                                     * زر الرئيسية:
+                                     * يعود مباشرة إلى الشاشة الرئيسية.
+                                     * لا يستخدم session.goBack().
+                                     */
+                                    onHome = {
+
+                                        navController.popBackStack(
+                                            "conversations",
+                                            false
+                                        )
+                                    }
+                                )
+                            }
+
+                            // ─────────────────────────────────────
+                            // WEBVIEW / EXTERNAL fallback
+                            // ─────────────────────────────────────
                             WebEngine.WEBVIEW,
-                            WebEngine.EXTERNAL -> GeckoTestScreen(
-                                url           = p.url,
-                                title         = p.name,
-                                onBack        = { navController.popBackStack() },
-                                platform      = null, // لا نحفظ للذاكرة
-                                chatViewModel = null
-                            )
+                            WebEngine.EXTERNAL -> {
+
+                                GeckoTestScreen(
+                                    url = p.url,
+                                    title = p.name,
+
+                                    onBack = {
+                                        navController.popBackStack()
+                                    },
+
+                                    platform = null,
+                                    chatViewModel = null,
+
+                                    availablePlatforms = platforms,
+
+                                    onSwitchPlatform = { target ->
+
+                                        if (target.id != p.id) {
+
+                                            navController.navigate(
+                                                "web/${target.id}"
+                                            ) {
+
+                                                popUpTo("conversations") {
+                                                    inclusive = false
+                                                }
+
+                                                launchSingleTop = true
+                                            }
+                                        }
+                                    },
+
+                                    onHome = {
+
+                                        navController.popBackStack(
+                                            "conversations",
+                                            false
+                                        )
+                                    }
+                                )
+                            }
                         }
 
                     } ?: Box(
-                        modifier         = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator()
