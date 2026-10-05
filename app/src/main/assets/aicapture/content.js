@@ -917,6 +917,88 @@
         );
     });
 }
+    function logArenaMutationDiagnostics() {
+    if (location.hostname !== "arena.ai") return;
+
+    log("🔬 ===== ARENA MUTATION DIAGNOSTICS START =====");
+
+    var logged = [];
+    var observer = new MutationObserver(function (mutations) {
+        mutations.forEach(function (mutation) {
+
+            var target = mutation.target;
+
+            if (!target || target.nodeType !== 1) return;
+
+            var tag = target.tagName;
+
+            // نستبعد العناصر العامة التي لا تفيدنا
+            if (
+                tag !== "DIV" &&
+                tag !== "P" &&
+                tag !== "ARTICLE" &&
+                tag !== "LI" &&
+                tag !== "SPAN"
+            ) {
+                return;
+            }
+
+            if (
+                target.matches("textarea, input, button, nav, header, footer")
+            ) {
+                return;
+            }
+
+            var text = (target.innerText || target.textContent || "").trim();
+
+            if (text.length < 30) return;
+
+            // منع تكرار نفس العنصر
+            if (logged.indexOf(target) !== -1) return;
+            logged.push(target);
+
+            var className = "";
+
+            try {
+                className = typeof target.className === "string"
+                    ? target.className
+                    : "";
+            } catch (e) {}
+
+            log(
+                "🧬 Arena changed: " +
+                tag +
+                " class=" + className +
+                " len=" + text.length
+            );
+
+            // نكتفي بعدد محدود حتى لا يمتلئ سجل التشخيص
+            if (logged.length >= 15) {
+                observer.disconnect();
+                log("🔬 Arena mutation limit reached");
+                log("🔬 ===== ARENA MUTATION DIAGNOSTICS END =====");
+            }
+        });
+    });
+
+    observer.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true
+    });
+
+    // إيقاف المراقبة تلقائيًا بعد 10 ثوانٍ
+    setTimeout(function () {
+        observer.disconnect();
+
+        log(
+            "🔬 Arena mutation diagnostics stopped, candidates=" +
+            logged.length
+        );
+
+        log("🔬 ===== ARENA MUTATION DIAGNOSTICS END =====");
+    }, 10000);
+ }
 
 function logArenaDomDiagnostics() {
     log("🔬 ===== ARENA DOM DIAGNOSTICS =====");
@@ -998,6 +1080,8 @@ if (location.hostname === "arena.ai") {
     setTimeout(function () {
         logArenaDomDiagnostics();
     }, 1500);
+
+    logArenaMutationDiagnostics();
 }
 
         watchForResponse();
