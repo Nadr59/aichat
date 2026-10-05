@@ -9,6 +9,10 @@ class AiSettings(context: Context) {
         Context.MODE_PRIVATE
     )
 
+    // ============================================================
+    // Provider
+    // ============================================================
+
     var provider: String
         get() = prefs.getString("provider", "gemini")
             ?.trim()
@@ -18,7 +22,9 @@ class AiSettings(context: Context) {
             .putString("provider", value.trim().lowercase())
             .apply()
 
+    // ============================================================
     // Gemini
+    // ============================================================
 
     var geminiKey: String
         get() = prefs.getString("gemini_key", "") ?: ""
@@ -35,7 +41,9 @@ class AiSettings(context: Context) {
             .putString("gemini_model", value.trim())
             .apply()
 
+    // ============================================================
     // OpenRouter
+    // ============================================================
 
     var openrouterKey: String
         get() = prefs.getString("openrouter_key", "") ?: ""
@@ -52,7 +60,9 @@ class AiSettings(context: Context) {
             .putString("openrouter_model", value.trim())
             .apply()
 
+    // ============================================================
     // OpenAI
+    // ============================================================
 
     var openaiKey: String
         get() = prefs.getString("openai_key", "") ?: ""
@@ -69,7 +79,9 @@ class AiSettings(context: Context) {
             .putString("openai_model", value.trim())
             .apply()
 
+    // ============================================================
     // Mistral
+    // ============================================================
 
     var mistralKey: String
         get() = prefs.getString("mistral_key", "") ?: ""
@@ -86,7 +98,9 @@ class AiSettings(context: Context) {
             .putString("mistral_model", value.trim())
             .apply()
 
+    // ============================================================
     // Groq
+    // ============================================================
 
     var groqKey: String
         get() = prefs.getString("groq_key", "") ?: ""
@@ -103,7 +117,9 @@ class AiSettings(context: Context) {
             .putString("groq_model", value.trim())
             .apply()
 
+    // ============================================================
     // NVIDIA NIM
+    // ============================================================
 
     var nvidiaKey: String
         get() = prefs.getString("nvidia_key", "") ?: ""
@@ -141,7 +157,9 @@ class AiSettings(context: Context) {
             .putString("nvidia_model", value.trim())
             .apply()
 
+    // ============================================================
     // Hugging Face
+    // ============================================================
 
     var huggingfaceKey: String
         get() = prefs.getString("hf_key", "") ?: ""
@@ -158,7 +176,9 @@ class AiSettings(context: Context) {
             .putString("hf_model", value.trim())
             .apply()
 
+    // ============================================================
     // Ollama
+    // ============================================================
 
     var ollamaModel: String
         get() = prefs.getString(
@@ -169,7 +189,9 @@ class AiSettings(context: Context) {
             .putString("ollama_model", value.trim())
             .apply()
 
+    // ============================================================
     // Custom
+    // ============================================================
 
     var customUrl: String
         get() = prefs.getString("custom_url", "") ?: ""
@@ -184,100 +206,173 @@ class AiSettings(context: Context) {
             .apply()
 
     var customModel: String
-        get() = prefs.getString("custom_model", "")
-            ?.trim()
-            ?: ""
+        get() = prefs.getString(
+            "custom_model",
+            ""
+        )?.trim() ?: ""
         set(value) = prefs.edit()
             .putString("custom_model", value.trim())
             .apply()
 
-    // تفعيل وثيقة الدقة
+    // ============================================================
+    // Accuracy / الدقة
+    // ============================================================
+
     var accuracyPromptEnabled: Boolean
-        get() = prefs.getBoolean("accuracy_prompt_enabled", true)
-        set(value) = prefs.edit().putBoolean("accuracy_prompt_enabled", value).apply()
-
-    // تعليمات مخصصة إضافية
-    var customSystemInstruction: String
-        get() = prefs.getString("custom_system_instruction", "") ?: ""
-        set(value) = prefs.edit().putString("custom_system_instruction", value).apply()
-
-    // ── Memory Curator (وسيط الذاكرة الذكي) ──────────────────────────
-
-
-var memoryCuratorEnabled: Boolean
-    get() = prefs.getBoolean("memory_curator_enabled", true)
-    set(value) = prefs.edit()
-        .putBoolean("memory_curator_enabled", value)
-        .apply()
-
-var memoryCuratorModel: String
-    get() = prefs.getString(
-        "memory_curator_model",
-        "gemini-3.6-flash"
-    )?.trim() ?: "gemini-3.6-flash"
-    set(value) = prefs.edit()
-        .putString("memory_curator_model", value.trim())
-        .apply()
-
-/**
- * مزوّد الوسيط الذكي — مستقل تماماً عن [provider] الرئيسي المستخدَم
- * في المحادثة. يسمح للمستخدم بتبديل الوسيط إلى مزوّد آخر (مثل "custom")
- * دون التأثير على مزوّد المحادثة الأساسي، ودون أي تعديل كود مستقبلي —
- * فقط تبديل هذه القيمة من واجهة الإعدادات.
- *
- * القيم المدعومة حالياً: 
- * - "gemini" (افتراضي، يحافظ على السلوك القديم)
- * - "custom" (يعيد استخدام customUrl/customKey/customModel الموجودة)
- * - "ollama" (محلي على 127.0.0.1:11434، بدون API key)
- */
-var memoryCuratorProvider: String
-    get() = prefs.getString("memory_curator_provider", "gemini")
-        ?.trim()
-        ?.lowercase()
-        ?: "gemini"
-    set(value) = prefs.edit()
-        .putString("memory_curator_provider", value.trim().lowercase())
-        .apply()
-
-/**
- * 🆕 نموذج Ollama المحلي المستخدم للوسيط الذكي
- * (يُستخدَم فقط عند memoryCuratorProvider = "ollama")
- */
-var memoryCuratorOllamaModel: String
-    get() = prefs.getString(
-        "memory_curator_ollama_model",
-        "qwen2.5:1.5b"
-    )?.trim() ?: "qwen2.5:1.5b"
-    set(value) = prefs.edit()
-        .putString("memory_curator_ollama_model", value.trim())
-        .apply()
-
-/**
- * نص هوية/أسلوب الوسيط — حقل حر اختياري.
- * ... باقي التعليق كما هو
- */
-var mediatorIdentityText: String
-    get() = prefs.getString("mediator_identity_text", "") ?: ""
-    set(value) = prefs.edit()
-        .putString("mediator_identity_text", value.trim())
-        .apply()
-    // Web
-
-    var webPlatform: String
-        get() = prefs.getString("web_platform", "venice") ?: "venice"
+        get() = prefs.getBoolean(
+            "accuracy_prompt_enabled",
+            true
+        )
         set(value) = prefs.edit()
-            .putString("web_platform", value.trim())
+            .putBoolean("accuracy_prompt_enabled", value)
             .apply()
 
+    var customSystemInstruction: String
+        get() = prefs.getString(
+            "custom_system_instruction",
+            ""
+        ) ?: ""
+        set(value) = prefs.edit()
+            .putString(
+                "custom_system_instruction",
+                value
+            )
+            .apply()
+
+    // ============================================================
+    // Memory / الذاكرة
+    // ============================================================
+
+    /**
+     * 🧠 الحفظ التلقائي للردود في الذاكرة.
+     *
+     * الافتراضي false حتى لا تتغير تجربة المستخدم الحالية.
+     */
+    var autoSave: Boolean
+        get() = prefs.getBoolean(
+            "auto_save",
+            false
+        )
+        set(value) = prefs.edit()
+            .putBoolean(
+                "auto_save",
+                value
+            )
+            .apply()
+
+    // ============================================================
+    // Memory Curator / وسيط الذاكرة الذكي
+    // ============================================================
+
+    var memoryCuratorEnabled: Boolean
+        get() = prefs.getBoolean(
+            "memory_curator_enabled",
+            true
+        )
+        set(value) = prefs.edit()
+            .putBoolean(
+                "memory_curator_enabled",
+                value
+            )
+            .apply()
+
+    var memoryCuratorModel: String
+        get() = prefs.getString(
+            "memory_curator_model",
+            "gemini-3.6-flash"
+        )?.trim() ?: "gemini-3.6-flash"
+        set(value) = prefs.edit()
+            .putString(
+                "memory_curator_model",
+                value.trim()
+            )
+            .apply()
+
+    /**
+     * مزوّد الوسيط الذكي مستقل عن مزوّد المحادثة الرئيسي.
+     *
+     * القيم المدعومة حاليًا:
+     * - gemini
+     * - custom
+     * - ollama
+     */
+    var memoryCuratorProvider: String
+        get() = prefs.getString(
+            "memory_curator_provider",
+            "gemini"
+        )
+            ?.trim()
+            ?.lowercase()
+            ?: "gemini"
+        set(value) = prefs.edit()
+            .putString(
+                "memory_curator_provider",
+                value.trim().lowercase()
+            )
+            .apply()
+
+    /**
+     * نموذج Ollama المحلي المستخدم للوسيط الذكي.
+     */
+    var memoryCuratorOllamaModel: String
+        get() = prefs.getString(
+            "memory_curator_ollama_model",
+            "qwen2.5:1.5b"
+        )?.trim() ?: "qwen2.5:1.5b"
+        set(value) = prefs.edit()
+            .putString(
+                "memory_curator_ollama_model",
+                value.trim()
+            )
+            .apply()
+
+    /**
+     * نص هوية/أسلوب الوسيط — حقل حر اختياري.
+     */
+    var mediatorIdentityText: String
+        get() = prefs.getString(
+            "mediator_identity_text",
+            ""
+        ) ?: ""
+        set(value) = prefs.edit()
+            .putString(
+                "mediator_identity_text",
+                value.trim()
+            )
+            .apply()
+
+    // ============================================================
+    // Web / الويب
+    // ============================================================
+
+    var webPlatform: String
+        get() = prefs.getString(
+            "web_platform",
+            "venice"
+        ) ?: "venice"
+        set(value) = prefs.edit()
+            .putString(
+                "web_platform",
+                value.trim()
+            )
+            .apply()
+
+    // ============================================================
     // Helpers
+    // ============================================================
 
     fun getActiveKey(): String {
         return when (provider) {
             "gemini" -> geminiKey
+
             "openrouter" -> openrouterKey
+
             "openai" -> openaiKey
+
             "mistral" -> mistralKey
+
             "groq" -> groqKey
+
             "nvidia" -> nvidiaKey
 
             "huggingface",
@@ -295,10 +390,15 @@ var mediatorIdentityText: String
     fun getActiveModel(): String {
         return when (provider) {
             "gemini" -> geminiModel
+
             "openrouter" -> openrouterModel
+
             "openai" -> openaiModel
+
             "mistral" -> mistralModel
+
             "groq" -> groqModel
+
             "nvidia" -> nvidiaModel
 
             "huggingface",
@@ -316,7 +416,9 @@ var mediatorIdentityText: String
     fun isConfigured(): Boolean {
         return when (provider) {
             "ollama" -> ollamaModel.isNotBlank()
+
             "custom" -> customUrl.isNotBlank()
+
             else -> getActiveKey().isNotBlank()
         }
     }
