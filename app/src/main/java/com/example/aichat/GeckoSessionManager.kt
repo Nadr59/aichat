@@ -1,62 +1,63 @@
 package com.example.aichat
 
 import org.mozilla.geckoview.GeckoSession
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * يحتفظ بجلسة GeckoSession مستقلة لكل منصة.
+ * يحتفظ بجلسات GeckoSession خارج دورة حياة Compose.
  *
- * مهم:
- * - لا يتم إغلاق الجلسة عند مغادرة شاشة المنصة.
- * - GeckoView يتم فصله فقط بواسطة releaseSession().
- * - عند العودة للمنصة يتم إرفاق نفس الجلسة مرة أخرى.
- *
- * النتيجة:
- * نفس الصفحة + سجل التصفح + حالة تسجيل الدخول + موضع الصفحة
- * تبقى محفوظة أثناء التنقل داخل التطبيق.
+ * الهدف:
+ * - كل منصة لها GeckoSession مستقلة.
+ * - مغادرة شاشة المنصة لا تغلق الجلسة.
+ * - العودة إلى المنصة تعيد استخدام نفس الجلسة.
+ * - لا يتم تحميل url من جديد إذا كانت الجلسة مفتوحة.
  */
 object GeckoSessionManager {
 
-    private val sessions = mutableMapOf<String, GeckoSession>()
+    private val sessions =
+        ConcurrentHashMap<String, GeckoSession>()
 
     @Synchronized
-    fun getOrCreate(platformId: String): GeckoSession {
-        return sessions.getOrPut(platformId) {
-            GeckoSession()
-        }
+    fun getOrCreate(key: String): GeckoSession {
+        return sessions[key]
+            ?: GeckoSession().also {
+                sessions[key] = it
+            }
     }
 
-    @Synchronized
-    fun hasSession(platformId: String): Boolean {
-        return sessions.containsKey(platformId)
+    fun get(key: String): GeckoSession? {
+        return sessions[key]
     }
 
     /**
-     * يستخدم فقط إذا أردنا حذف منصة نهائيًا.
-     * لا تستدعَ عند مجرد مغادرة الشاشة.
+     * إغلاق جلسة منصة محددة عند الحاجة الصريحة فقط.
      */
     @Synchronized
-    fun close(platformId: String) {
-        sessions.remove(platformId)?.let { session ->
+    fun close(key: String) {
+        sessions.remove(key)?.let { session ->
             runCatching {
-                if (session.isOpen) {
-                    session.close()
-                }
+                session.close()
             }
         }
     }
 
     /**
-     * يستخدم عند إغلاق التطبيق/تنظيف جميع الجلسات إذا احتجنا ذلك لاحقًا.
+     * إغلاق جميع الجلسات.
+     *
+     * لا يتم استدعاؤها عند مغادرة GeckoTestScreen.
      */
     @Synchronized
     fun closeAll() {
         sessions.values.forEach { session ->
             runCatching {
-                if (session.isOpen) {
-                    session.close()
-                }
+                session.close()
             }
         }
+
         sessions.clear()
+    }
+
+    fun activeCount(): Int {
+        return sessions.size
     }
 }
