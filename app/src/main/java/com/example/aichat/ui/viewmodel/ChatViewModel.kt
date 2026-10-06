@@ -98,19 +98,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _memoryAccessEnabled = MutableStateFlow(true)
     val memoryAccessEnabled: StateFlow<Boolean> = _memoryAccessEnabled.asStateFlow()
-        // 🆕 تتبع حالة تحسين السؤال
+
     private val _enhancedQuery = MutableStateFlow<String?>(null)
     val enhancedQuery: StateFlow<String?> = _enhancedQuery.asStateFlow()
 
     private val _isEnhancing = MutableStateFlow(false)
     val isEnhancing: StateFlow<Boolean> = _isEnhancing.asStateFlow()
 
-    // 🆕 تتبع حالة وجود ذاكرة حقيقية لتمريرها مع memoryContext
-    // (منفصلة عن memoryContext نفسه، لأن الأخير قد يحوي نقاط هوية
-    // أسلوبية فقط دون ذاكرة، ويجب التمييز بينهما للصياغة الصحيحة
-    // في SystemPrompt.build())
     private val _hasMemorySource = MutableStateFlow(false)
-    
 
     // ============================================================
     // الذاكرة
@@ -172,9 +167,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * يفحص أولاً memoryAccessEnabled — إذا محجوبة: لا بحث، لا وسيط،
      * لا نداء شبكة إطلاقاً.
      *
-     * 🆕 يُحدّث أيضاً _hasMemorySource بناءً على وجود نتائج بحث فعلية
-     * من عدمه، لتمريرها لاحقاً إلى SystemPrompt.build() كي يُصاغ
-     * النص بدقة (تجنّب الادعاء بوجود "محادثات سابقة" غير موجودة فعلياً).
+     * يُحدّث أيضاً _hasMemorySource بناءً على وجود نتائج بحث فعلية.
      */
     private suspend fun prepareMemoryContext(userText: String) {
         if (userText.isBlank()) {
@@ -184,49 +177,58 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (!_memoryAccessEnabled.value) {
-            android.util.Log.d("ChatViewModel", "⚪ Memory access disabled for this conversation")
+            android.util.Log.d(
+                "ChatViewModel",
+                "⚪ Memory access disabled for this conversation"
+            )
             _memoryContext.value = ""
             _hasMemorySource.value = false
             return
         }
 
         try {
-            android.util.Log.d("ChatViewModel", "🔍 Memory context for: ${userText.take(50)}")
+            android.util.Log.d(
+                "ChatViewModel",
+                "🔍 Memory context for: ${userText.take(50)}"
+            )
 
-            val memories = memoryRepository.searchSharedMemories(userText)
+            val memories =
+                memoryRepository.searchSharedMemories(userText)
 
-            // 🆕 احفظ حالة الوجود الفعلي للذاكرة قبل استدعاء الوسيط
-            // (لأن الوسيط قد يُضيف نقاط هوية حتى لو كانت memories فارغة)
             _hasMemorySource.value = memories.isNotEmpty()
 
-            android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
+            android.util.Log.d(
+                "ChatViewModel",
+                "📚 Found ${memories.size} memories"
+            )
 
-            // DEBUG-TEMP: تتبع حالة الوسيط الذكي قبل الاستدعاء
             android.util.Log.d(
                 "ChatViewModel",
                 "DEBUG-TEMP: curatorEnabled=${aiSettings.memoryCuratorEnabled}, " +
-                "hasGeminiKey=${aiSettings.geminiKey.isNotBlank()}, " +
-                "candidatesCount=${memories.size}"
+                    "hasGeminiKey=${aiSettings.geminiKey.isNotBlank()}, " +
+                    "candidatesCount=${memories.size}"
             )
 
-            // 🆕 تمرير mediatorIdentityText صراحة (اختيارياً — له قيمة افتراضية
-            // في curate() تقرأ من settings.mediatorIdentityText، لكن التمرير
-            // الصريح هنا أوضح للقارئ وأكثر قابلية للاختبار/الـ mocking لاحقاً)
-            _memoryContext.value = memoryCuratorService.curate(
-                userQuery = userText,
-                candidates = memories,
-                mediatorIdentityText = aiSettings.mediatorIdentityText
-            )
+            _memoryContext.value =
+                memoryCuratorService.curate(
+                    userQuery = userText,
+                    candidates = memories,
+                    mediatorIdentityText =
+                        aiSettings.mediatorIdentityText
+                )
 
-            // DEBUG-TEMP: عرض السياق النهائي كرسالة خطأ مرئية على الشاشة
-            // (طريقة فحص بصرية سريعة بلا حاجة لـ logcat خارجي)
-            // ⚠️ احذف هذا السطر بعد انتهاء الاختبار
             if (memories.isNotEmpty()) {
-                _error.value = "DEBUG-TEMP CONTEXT:\n${_memoryContext.value.take(400)}"
+                _error.value =
+                    "DEBUG-TEMP CONTEXT:\n" +
+                    _memoryContext.value.take(400)
             }
 
         } catch (e: Exception) {
-            android.util.Log.e("ChatViewModel", "❌ prepareMemoryContext: ${e.message}", e)
+            android.util.Log.e(
+                "ChatViewModel",
+                "❌ prepareMemoryContext: ${e.message}",
+                e
+            )
             _memoryContext.value = ""
             _hasMemorySource.value = false
         }
@@ -243,137 +245,159 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         startCollecting(conversationId)
 
         viewModelScope.launch {
-            val conv = conversationRepository.getConversationById(conversationId)
-            _memoryAccessEnabled.value = conv?.memoryAccessEnabled ?: true
+            val conv =
+                conversationRepository.getConversationById(
+                    conversationId
+                )
+
+            _memoryAccessEnabled.value =
+                conv?.memoryAccessEnabled ?: true
         }
     }
 
-        fun newConversation() {
+    fun newConversation() {
         messagesCollectJob?.cancel()
-        messagesCollectJob           = null
+        messagesCollectJob = null
         _currentConversationId.value = null
-        _messages.value              = emptyList()
-        _selectedImageBase64.value   = null
-        _memoryContext.value         = ""
-        _hasMemorySource.value       = false
-        _error.value                 = null
-        _successMessage.value        = null
-        _memoryAccessEnabled.value   = true
-        _enhancedQuery.value         = null       // 🆕 تصفير السؤال المُحسّن
-        _isEnhancing.value           = false      // 🆕
-        }
+        _messages.value = emptyList()
+        _selectedImageBase64.value = null
+        _memoryContext.value = ""
+        _hasMemorySource.value = false
+        _error.value = null
+        _successMessage.value = null
+        _memoryAccessEnabled.value = true
+        _enhancedQuery.value = null
+        _isEnhancing.value = false
+    }
 
     fun toggleMemoryAccess(enabled: Boolean) {
         _memoryAccessEnabled.value = enabled
 
         val convId = _currentConversationId.value ?: return
+
         viewModelScope.launch {
-            conversationRepository.updateMemoryAccess(convId, enabled)
+            conversationRepository.updateMemoryAccess(
+                convId,
+                enabled
+            )
         }
     }
 
     private fun startCollecting(conversationId: Long) {
         messagesCollectJob?.cancel()
-        messagesCollectJob = viewModelScope.launch {
-            conversationRepository
-                .getMessages(conversationId)
-                .collect { _messages.value = it }
+
+        messagesCollectJob =
+            viewModelScope.launch {
+                conversationRepository
+                    .getMessages(conversationId)
+                    .collect {
+                        _messages.value = it
+                    }
+            }
+    }
+
+    // ============================================================
+    // تحسين السؤال
+    // ============================================================
+
+    fun enhanceUserQuery(userText: String) {
+        if (userText.isBlank()) return
+
+        if (aiSettings.mediatorIdentityText.isBlank()) {
+            _error.value =
+                "⚠️ لم يتم تعيين هوية/أسلوب في الإعدادات"
+            return
+        }
+
+        _isEnhancing.value = true
+
+        viewModelScope.launch {
+            try {
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "🔄 Requesting query enhancement (identity-only)..."
+                )
+
+                val enhanced =
+                    memoryCuratorService.enhanceQuery(
+                        userQuery = userText,
+                        mediatorIdentityText =
+                            aiSettings.mediatorIdentityText
+                    )
+
+                _enhancedQuery.value = enhanced
+
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "✅ Enhancement result: " +
+                        "${enhanced.take(80)}..."
+                )
+
+            } catch (e: Exception) {
+                android.util.Log.e(
+                    "ChatViewModel",
+                    "❌ enhanceQuery: ${e.message}",
+                    e
+                )
+
+                _error.value =
+                    "فشل تحسين السؤال: ${e.message}"
+
+            } finally {
+                _isEnhancing.value = false
+            }
         }
     }
-        /**
-     * 🆕 يطلب تحسين السؤال بناءً على الهوية المفعّلة في الإعدادات.
-     * يُستدعى عند ضغط المستخدم على زر "تحسين" في الواجهة.
-     * 
-     * النتيجة تُخزَّن في _enhancedQuery، والواجهة تعرضها بدل النص الأصلي.
-     */
-    /**
- * ✅ يطلب تحسين السؤال بناءً على الهوية المفعّلة في الإعدادات فقط.
- * يُستدعى عند ضغط المستخدم على زر "تحسين" في الواجهة.
- * 
- * ⚠️ التغيير: حذف البحث في الذاكرة - التحسين يعتمد فقط على السؤال + الهوية
- * 
- * النتيجة تُخزَّن في _enhancedQuery، والواجهة تعرضها في حقل الإدخال.
- */
-fun enhanceUserQuery(userText: String) {
-    if (userText.isBlank()) return
-    if (aiSettings.mediatorIdentityText.isBlank()) {
-        _error.value = "⚠️ لم يتم تعيين هوية/أسلوب في الإعدادات"
-        return
-    }
 
-    _isEnhancing.value = true
-    viewModelScope.launch {
-        try {
-            android.util.Log.d("ChatViewModel", "🔄 Requesting query enhancement (identity-only)...")
+    fun refineQueryStyle(
+        userText: String,
+        style: QueryStyle
+    ) {
+        if (userText.isBlank()) return
 
-            // ✅ حذف هذا الكود بالكامل:
-            // val memories = if (_memoryAccessEnabled.value) {
-            //     memoryRepository.searchSharedMemories(userText)
-            // } else {
-            //     emptyList()
-            // }
+        _isEnhancing.value = true
 
-            // ✅ التحسين يعتمد فقط على السؤال + الهوية
-            val enhanced = memoryCuratorService.enhanceQuery(
-                userQuery            = userText,
-                mediatorIdentityText = aiSettings.mediatorIdentityText
-                // ✅ بدون memoryCandidates
-            )
+        viewModelScope.launch {
+            try {
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "🎨 Refining style: ${style.displayName}"
+                )
 
-            _enhancedQuery.value = enhanced
-            android.util.Log.d("ChatViewModel", "✅ Enhancement result: ${enhanced.take(80)}...")
+                val refined =
+                    memoryCuratorService.refineQueryStyle(
+                        userQuery = userText,
+                        style = style
+                    )
 
-        } catch (e: Exception) {
-            android.util.Log.e("ChatViewModel", "❌ enhanceQuery: ${e.message}", e)
-            _error.value = "فشل تحسين السؤال: ${e.message}"
-        } finally {
-            _isEnhancing.value = false
+                _enhancedQuery.value = refined
+
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "✅ Refined (${style.displayName}): " +
+                        "${refined.take(80)}..."
+                )
+
+            } catch (e: Exception) {
+                android.util.Log.e(
+                    "ChatViewModel",
+                    "❌ refineStyle: ${e.message}",
+                    e
+                )
+
+                _error.value =
+                    "فشل تحسين الصياغة: ${e.message}"
+
+            } finally {
+                _isEnhancing.value = false
+            }
         }
     }
-}
-/**
- * 🆕 تحسين صياغة السؤال (بدون إضافة محتوى)
- * 
- * الفرق عن enhanceUserQuery():
- * - هذه: نفس المحتوى، لغة أفضل حسب النمط المختار
- * - تلك: توسيع السؤال بناءً على الهوية
- */
-fun refineQueryStyle(userText: String, style: QueryStyle) {
-    if (userText.isBlank()) return
-    
-    _isEnhancing.value = true
-    viewModelScope.launch {
-        try {
-            android.util.Log.d("ChatViewModel", "🎨 Refining style: ${style.displayName}")
-            
-            val refined = memoryCuratorService.refineQueryStyle(
-                userQuery = userText,
-                style = style
-            )
-            
-            _enhancedQuery.value = refined
-            android.util.Log.d("ChatViewModel", "✅ Refined (${style.displayName}): ${refined.take(80)}...")
-            
-        } catch (e: Exception) {
-            android.util.Log.e("ChatViewModel", "❌ refineStyle: ${e.message}", e)
-            _error.value = "فشل تحسين الصياغة: ${e.message}"
-        } finally {
-            _isEnhancing.value = false
-        }
-    }
-}
-/**
- * 🆕 تحديث السؤال المُحسّن عندما يقوم المستخدم بتعديله يدوياً.
- * يُستدعى من الواجهة عند الكتابة في حقل الإدخال أثناء عرض سؤال محسّن.
- */
-fun updateEnhancedQuery(newText: String) {
-    _enhancedQuery.value = newText
-}
-        
 
-    /**
-     * 🆕 إلغاء التحسين والعودة للسؤال الأصلي
-     */
+    fun updateEnhancedQuery(newText: String) {
+        _enhancedQuery.value = newText
+    }
+
     fun clearEnhancedQuery() {
         _enhancedQuery.value = null
     }
@@ -382,204 +406,262 @@ fun updateEnhancedQuery(newText: String) {
     // إرسال الرسائل
     // ============================================================
 
-         fun sendChatMessage(userText: String) {
+    fun sendChatMessage(userText: String) {
         if (_isLoading.value) return
+
         _isLoading.value = true
 
         viewModelScope.launch {
             _error.value = null
+
             try {
-                val imageBase64 = _selectedImageBase64.value
+                val imageBase64 =
+                    _selectedImageBase64.value
 
-                val convId = _currentConversationId.value ?: run {
-                    val id = conversationRepository.insertConversation(
-                        Conversation(
-                            title = userText.take(50).ifBlank { "محادثة جديدة" },
-                            memoryAccessEnabled = _memoryAccessEnabled.value
-                        )
-                    )
-                    _currentConversationId.value = id
-                    startCollecting(id)
-                    id
-                }
+                val convId =
+                    _currentConversationId.value ?: run {
+                        val id =
+                            conversationRepository.insertConversation(
+                                Conversation(
+                                    title = userText
+                                        .take(50)
+                                        .ifBlank {
+                                            "محادثة جديدة"
+                                        },
+                                    memoryAccessEnabled =
+                                        _memoryAccessEnabled.value
+                                )
+                            )
 
-                val historySnapshot = conversationRepository.getMessagesOnce(convId)
+                        _currentConversationId.value = id
+                        startCollecting(id)
+
+                        id
+                    }
+
+                val historySnapshot =
+                    conversationRepository
+                        .getMessagesOnce(convId)
 
                 conversationRepository.insertMessage(
                     Message(
                         conversationId = convId,
-                        role           = "user",
-                        content        = userText,
-                        imageBase64    = imageBase64,
-                        messageType    = "text"
+                        role = "user",
+                        content = userText,
+                        imageBase64 = imageBase64,
+                        messageType = "text"
                     )
                 )
 
                 _selectedImageBase64.value = null
 
-                // ── بناء سياق الذاكرة (يحدث دائماً، سواء كان السؤال محسّناً أم لا) ──
                 var memoryContextText = ""
                 var hasMemorySource = false
 
                 if (_memoryAccessEnabled.value) {
                     try {
-                        android.util.Log.d("ChatViewModel", "🔍 Searching memory for: ${userText.take(50)}")
-
-                        val memories = memoryRepository.searchSharedMemories(userText)
-                        hasMemorySource = memories.isNotEmpty()
-
-                        android.util.Log.d("ChatViewModel", "📚 Found ${memories.size} memories")
-
-                        // تنقية الذاكرة عبر الوسيط (الوظيفة الأصلية — تبقى كما هي)
-                        memoryContextText = memoryCuratorService.curate(
-                            userQuery = userText,
-                            candidates = memories,
-                            mediatorIdentityText = ""  // لا نُمرّر الهوية هنا — فقط التنقية
+                        android.util.Log.d(
+                            "ChatViewModel",
+                            "🔍 Searching memory for: " +
+                                userText.take(50)
                         )
 
-                        android.util.Log.d("ChatViewModel", "✅ Curated context: ${memoryContextText.take(80)}...")
+                        val memories =
+                            memoryRepository
+                                .searchSharedMemories(userText)
+
+                        hasMemorySource =
+                            memories.isNotEmpty()
+
+                        android.util.Log.d(
+                            "ChatViewModel",
+                            "📚 Found ${memories.size} memories"
+                        )
+
+                        memoryContextText =
+                            memoryCuratorService.curate(
+                                userQuery = userText,
+                                candidates = memories,
+                                mediatorIdentityText = ""
+                            )
+
+                        android.util.Log.d(
+                            "ChatViewModel",
+                            "✅ Curated context: " +
+                                "${memoryContextText.take(80)}..."
+                        )
 
                     } catch (e: Exception) {
-                        android.util.Log.e("ChatViewModel", "❌ Memory context prep failed: ${e.message}", e)
+                        android.util.Log.e(
+                            "ChatViewModel",
+                            "❌ Memory context prep failed: " +
+                                e.message,
+                            e
+                        )
+
                         memoryContextText = ""
                         hasMemorySource = false
                     }
                 }
 
-                // ── الإرسال للنموذج المُجيب ──
-                val response = repository.sendMessage(
-                    history         = historySnapshot,
-                    userMessage     = userText,
-                    imageBase64     = imageBase64,
-                    memoryContext   = memoryContextText,
-                    hasMemorySource = hasMemorySource
+                val response =
+                    repository.sendMessage(
+                        history = historySnapshot,
+                        userMessage = userText,
+                        imageBase64 = imageBase64,
+                        memoryContext = memoryContextText,
+                        hasMemorySource = hasMemorySource
+                    )
+
+                val assistantMessage =
+                    Message(
+                        conversationId = convId,
+                        role = "assistant",
+                        content = response,
+                        messageType = "text"
+                    )
+
+                conversationRepository.insertMessage(
+                    assistantMessage
                 )
 
-                val assistantMessage = Message(
-                    conversationId = convId,
-                    role           = "assistant",
-                    content        = response,
-                    messageType    = "text"
-                )
-                conversationRepository.insertMessage(assistantMessage)
-
-                val title = historySnapshot
-                    .firstOrNull { it.role == "user" }?.content
-                    ?: userText
+                val title =
+                    historySnapshot
+                        .firstOrNull {
+                            it.role == "user"
+                        }
+                        ?.content
+                        ?: userText
 
                 conversationRepository.updateTitleAndTimestamp(
-                    id        = convId,
-                    title     = title.take(50),
+                    id = convId,
+                    title = title.take(50),
                     updatedAt = System.currentTimeMillis()
                 )
 
             } catch (e: Exception) {
-                _error.value = e.message ?: "حدث خطأ غير معروف"
+                _error.value =
+                    e.message
+                        ?: "حدث خطأ غير معروف"
             } finally {
                 _isLoading.value = false
             }
         }
-         }
+    }
+
+    // ============================================================
+    // Web AI response
+    // ============================================================
 
     fun onWebAiResponse(
-    platformId: String,
-    platformName: String,
-    text: String
-) {
-    if (text.isBlank()) return
+        platformId: String,
+        platformName: String,
+        text: String
+    ) {
+        if (text.isBlank()) return
 
-    viewModelScope.launch {
-        try {
-            val cleanText = text.trim()
+        viewModelScope.launch {
+            try {
+                val cleanText = text.trim()
 
-            android.util.Log.d(
-                "ChatViewModel",
-                "🌐 Web AI response from $platformName: ${cleanText.take(80)}..."
-            )
-
-            // ========================================================
-            // 1. الحصول على المحادثة الحالية
-            // ========================================================
-            val convId = _currentConversationId.value ?: run {
-                val id = conversationRepository.insertConversation(
-                    Conversation(
-                        title = "$platformName — Web",
-                        memoryAccessEnabled = _memoryAccessEnabled.value
-                    )
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "🌐 Web AI response from $platformName: " +
+                        "${cleanText.take(80)}..."
                 )
 
-                _currentConversationId.value = id
-                startCollecting(id)
+                // ====================================================
+                // 1. الحصول على المحادثة الحالية
+                // ====================================================
 
-                id
-            }
+                val convId =
+                    _currentConversationId.value ?: run {
+                        val id =
+                            conversationRepository.insertConversation(
+                                Conversation(
+                                    title = "$platformName — Web",
+                                    memoryAccessEnabled =
+                                        _memoryAccessEnabled.value
+                                )
+                            )
 
-            // ========================================================
-            // 2. حفظ الرد في سجل المحادثة
-            // ========================================================
-            val messageId =
-                conversationRepository.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role = "assistant",
-                        content = cleanText,
-                        messageType = "text"
+                        _currentConversationId.value = id
+                        startCollecting(id)
+
+                        id
+                    }
+
+                // ====================================================
+                // 2. حفظ الرد في سجل المحادثة
+                // ====================================================
+
+                val messageId =
+                    conversationRepository.insertMessage(
+                        Message(
+                            conversationId = convId,
+                            role = "assistant",
+                            content = cleanText,
+                            messageType = "text"
+                        )
                     )
-                )
 
-            conversationRepository.updateTitleAndTimestamp(
-                id = convId,
-                title = conversationRepository
-                    .getMessagesOnce(convId)
-                    .firstOrNull { it.role == "user" }
-                    ?.content
-                    ?.take(50)
-                    ?: "$platformName — Web",
-                updatedAt = System.currentTimeMillis()
-            )
-
-            android.util.Log.d(
-                "ChatViewModel",
-                "✅ Web response saved to conversation: " +
-                    "id=$messageId, conversation=$convId"
-            )
-
-            // ========================================================
-            // 3. حفظ الرد في الذاكرة المشتركة
-            // ========================================================
-            if (_memoryAccessEnabled.value) {
-
-                val memoryId = memoryRepository.addMemory(
-                    content = cleanText,
-                    sourceConversationId = convId,
-                    sourceMessageId = messageId,
-                    category = "KNOWLEDGE",
-                    isShared = true
+                conversationRepository.updateTitleAndTimestamp(
+                    id = convId,
+                    title = conversationRepository
+                        .getMessagesOnce(convId)
+                        .firstOrNull {
+                            it.role == "user"
+                        }
+                        ?.content
+                        ?.take(50)
+                        ?: "$platformName — Web",
+                    updatedAt = System.currentTimeMillis()
                 )
 
                 android.util.Log.d(
                     "ChatViewModel",
-                    "🧠 Web response saved to SHARED MEMORY: " +
-                        "memoryId=$memoryId"
+                    "✅ Web response saved to conversation: " +
+                        "id=$messageId, conversation=$convId"
                 )
 
-            } else {
-                android.util.Log.d(
+                // ====================================================
+                // 3. الحفظ التلقائي في الذاكرة المشتركة
+                // ====================================================
+
+                if (aiSettings.autoSave) {
+
+                    val memoryId =
+                        memoryRepository.addMemory(
+                            content = cleanText,
+                            sourceConversationId = convId,
+                            sourceMessageId = messageId,
+                            category = "KNOWLEDGE",
+                            isShared = true
+                        )
+
+                    android.util.Log.d(
+                        "ChatViewModel",
+                        "🧠 Web response saved to SHARED MEMORY: " +
+                            "memoryId=$memoryId"
+                    )
+
+                } else {
+
+                    android.util.Log.d(
+                        "ChatViewModel",
+                        "⚪ Auto-save disabled — response not saved to shared memory"
+                    )
+                }
+
+            } catch (e: Exception) {
+                android.util.Log.e(
                     "ChatViewModel",
-                    "⚪ Memory access disabled — response not saved to shared memory"
+                    "❌ onWebAiResponse: ${e.message}",
+                    e
                 )
             }
-
-        } catch (e: Exception) {
-            android.util.Log.e(
-                "ChatViewModel",
-                "❌ onWebAiResponse: ${e.message}",
-                e
-            )
         }
     }
-    }
-    
 
     // ============================================================
     // الصور
@@ -588,14 +670,20 @@ fun updateEnhancedQuery(newText: String) {
     fun selectImage(uri: Uri) {
         viewModelScope.launch {
             try {
-                val base64 = imageProcessor.uriToBase64(uri)
+                val base64 =
+                    imageProcessor.uriToBase64(uri)
+
                 if (base64 == null) {
-                    _error.value = "تعذر قراءة الصورة"
+                    _error.value =
+                        "تعذر قراءة الصورة"
                     return@launch
                 }
+
                 _selectedImageBase64.value = base64
+
             } catch (e: Exception) {
-                _error.value = "فشل تحميل الصورة: ${e.message}"
+                _error.value =
+                    "فشل تحميل الصورة: ${e.message}"
             }
         }
     }
@@ -603,9 +691,12 @@ fun updateEnhancedQuery(newText: String) {
     fun selectBitmap(bitmap: Bitmap) {
         viewModelScope.launch {
             try {
-                _selectedImageBase64.value = imageProcessor.bitmapToBase64(bitmap)
+                _selectedImageBase64.value =
+                    imageProcessor.bitmapToBase64(bitmap)
+
             } catch (e: Exception) {
-                _error.value = "فشل تحميل الصورة: ${e.message}"
+                _error.value =
+                    "فشل تحميل الصورة: ${e.message}"
             }
         }
     }
@@ -613,16 +704,24 @@ fun updateEnhancedQuery(newText: String) {
     fun selectFile(uri: Uri) {
         viewModelScope.launch {
             try {
-                val context  = getApplication<Application>()
-                val mimeType = context.contentResolver.getType(uri) ?: ""
+                val context =
+                    getApplication<Application>()
+
+                val mimeType =
+                    context.contentResolver
+                        .getType(uri) ?: ""
+
                 if (mimeType.startsWith("image/")) {
                     selectImage(uri)
                 } else {
                     _error.value =
-                        "⚠️ الملفات غير الصورة غير مدعومة: ${getDisplayName(uri)}"
+                        "⚠️ الملفات غير الصورة غير مدعومة: " +
+                            getDisplayName(uri)
                 }
+
             } catch (e: Exception) {
-                _error.value = "فشل تحميل الملف: ${e.message}"
+                _error.value =
+                    "فشل تحميل الملف: ${e.message}"
             }
         }
     }
@@ -633,37 +732,55 @@ fun updateEnhancedQuery(newText: String) {
 
     fun processAndSaveFile(uri: Uri) {
         viewModelScope.launch {
-            _isLoading.value      = true
-            _error.value          = null
+            _isLoading.value = true
+            _error.value = null
             _successMessage.value = null
 
             try {
-                android.util.Log.d("ChatViewModel", "📄 Processing file: $uri")
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "📄 Processing file: $uri"
+                )
 
-                val content = fileProcessor.readFile(uri)
+                val content =
+                    fileProcessor.readFile(uri)
+
                 if (content.isBlank()) {
-                    _error.value = "⚠️ الملف فارغ أو لا يحتوي على نص قابل للقراءة"
+                    _error.value =
+                        "⚠️ الملف فارغ أو لا يحتوي على نص قابل للقراءة"
                     return@launch
                 }
 
-                android.util.Log.d("ChatViewModel", "✅ File read: ${content.length} chars")
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "✅ File read: ${content.length} chars"
+                )
 
-                val chunks = if (content.length > 1000)
-                    fileProcessor.chunkText(
-                        text         = content,
-                        maxChunkSize = 800,
-                        overlap      = 100
-                    )
-                else listOf(content)
+                val chunks =
+                    if (content.length > 1000)
+                        fileProcessor.chunkText(
+                            text = content,
+                            maxChunkSize = 800,
+                            overlap = 100
+                        )
+                    else
+                        listOf(content)
 
-                val totalChunks   = chunks.size
+                val totalChunks = chunks.size
                 val limitedChunks = chunks.take(20)
 
-                val newChunks    = mutableListOf<String>()
+                val newChunks =
+                    mutableListOf<String>()
+
                 var skippedCount = 0
 
                 limitedChunks.forEach { chunk ->
-                    if (memoryRepository.existsByHash(calculateHash(chunk))) {
+
+                    if (
+                        memoryRepository.existsByHash(
+                            calculateHash(chunk)
+                        )
+                    ) {
                         skippedCount++
                     } else {
                         newChunks.add(chunk)
@@ -672,37 +789,60 @@ fun updateEnhancedQuery(newText: String) {
 
                 android.util.Log.d(
                     "ChatViewModel",
-                    "🆕 New: ${newChunks.size}, Skipped: $skippedCount"
+                    "🆕 New: ${newChunks.size}, " +
+                        "Skipped: $skippedCount"
                 )
 
                 var savedCount = 0
 
                 if (newChunks.isNotEmpty()) {
-                    val embeddings = try {
-                        embeddingService.getBatchEmbeddings(newChunks).also {
-                            android.util.Log.d(
+
+                    val embeddings =
+                        try {
+                            embeddingService
+                                .getBatchEmbeddings(
+                                    newChunks
+                                )
+                                .also {
+                                    android.util.Log.d(
+                                        "ChatViewModel",
+                                        "🚀 Batch: " +
+                                            "${newChunks.size} chunks → 1 API call"
+                                    )
+                                }
+
+                        } catch (e: Exception) {
+
+                            android.util.Log.w(
                                 "ChatViewModel",
-                                "🚀 Batch: ${newChunks.size} chunks → 1 API call"
+                                "⚠️ Batch failed, saving without embeddings: " +
+                                    e.message
                             )
+
+                            newChunks.map {
+                                emptyList()
+                            }
                         }
-                    } catch (e: Exception) {
-                        android.util.Log.w(
-                            "ChatViewModel",
-                            "⚠️ Batch failed, saving without embeddings: ${e.message}"
-                        )
-                        newChunks.map { emptyList() }
-                    }
 
                     newChunks.forEachIndexed { i, chunk ->
-                        val embeddingList = embeddings.getOrElse(i) { emptyList() }
-                        val id = memoryRepository.addMemoryWithEmbedding(
-                            content   = chunk,
-                            embedding = embeddingList,
-                            category  = "KNOWLEDGE",
-                            isShared  = true
-                        )
+
+                        val embeddingList =
+                            embeddings.getOrElse(i) {
+                                emptyList()
+                            }
+
+                        val id =
+                            memoryRepository
+                                .addMemoryWithEmbedding(
+                                    content = chunk,
+                                    embedding = embeddingList,
+                                    category = "KNOWLEDGE",
+                                    isShared = true
+                                )
+
                         if (id > 0) {
                             savedCount++
+
                             android.util.Log.d(
                                 "ChatViewModel",
                                 "💾 Chunk ${i + 1}: saved (id=$id)"
@@ -711,19 +851,42 @@ fun updateEnhancedQuery(newText: String) {
                     }
                 }
 
-                _successMessage.value = buildString {
-                    append("✅ تم حفظ $savedCount جزء في الذاكرة")
-                    if (skippedCount > 0)
-                        append("\n⚠️ تم تخطي $skippedCount (موجودة مسبقاً)")
-                    if (totalChunks > 20)
-                        append("\n📌 من أصل $totalChunks (الحد الأقصى 20)")
-                    if (newChunks.isNotEmpty())
-                        append("\n🚀 Batch: طلب API واحد")
-                }
+                _successMessage.value =
+                    buildString {
+                        append(
+                            "✅ تم حفظ $savedCount جزء في الذاكرة"
+                        )
+
+                        if (skippedCount > 0) {
+                            append(
+                                "\n⚠️ تم تخطي $skippedCount (موجودة مسبقاً)"
+                            )
+                        }
+
+                        if (totalChunks > 20) {
+                            append(
+                                "\n📌 من أصل $totalChunks (الحد الأقصى 20)"
+                            )
+                        }
+
+                        if (newChunks.isNotEmpty()) {
+                            append(
+                                "\n🚀 Batch: طلب API واحد"
+                            )
+                        }
+                    }
 
             } catch (e: Exception) {
-                android.util.Log.e("ChatViewModel", "❌ File processing: ${e.message}", e)
-                _error.value = "❌ ${e.message}"
+
+                android.util.Log.e(
+                    "ChatViewModel",
+                    "❌ File processing: ${e.message}",
+                    e
+                )
+
+                _error.value =
+                    "❌ ${e.message}"
+
             } finally {
                 _isLoading.value = false
             }
@@ -736,38 +899,54 @@ fun updateEnhancedQuery(newText: String) {
 
     fun saveWebPage(url: String) {
         viewModelScope.launch {
-            _isLoading.value      = true
-            _error.value          = null
+            _isLoading.value = true
+            _error.value = null
             _successMessage.value = null
 
             try {
-                android.util.Log.d("ChatViewModel", "🌐 Fetching: $url")
-
-                val result = webPageFetcher.fetchAndClean(url)
                 android.util.Log.d(
                     "ChatViewModel",
-                    "✅ Fetched: ${result.title} (${result.wordCount} words)"
+                    "🌐 Fetching: $url"
                 )
 
-                val fullText = buildString {
-                    append(result.title)
-                    append("\n\n")
-                    append(result.content)
-                }
+                val result =
+                    webPageFetcher.fetchAndClean(url)
 
-                val chunks        = fileProcessor.chunkText(
-                    text         = fullText,
-                    maxChunkSize = 800,
-                    overlap      = 100
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "✅ Fetched: ${result.title} " +
+                        "(${result.wordCount} words)"
                 )
-                val totalChunks   = chunks.size
+
+                val fullText =
+                    buildString {
+                        append(result.title)
+                        append("\n\n")
+                        append(result.content)
+                    }
+
+                val chunks =
+                    fileProcessor.chunkText(
+                        text = fullText,
+                        maxChunkSize = 800,
+                        overlap = 100
+                    )
+
+                val totalChunks = chunks.size
                 val limitedChunks = chunks.take(20)
 
-                val newChunks    = mutableListOf<String>()
+                val newChunks =
+                    mutableListOf<String>()
+
                 var skippedCount = 0
 
                 limitedChunks.forEach { chunk ->
-                    if (memoryRepository.existsByHash(calculateHash(chunk))) {
+
+                    if (
+                        memoryRepository.existsByHash(
+                            calculateHash(chunk)
+                        )
+                    ) {
                         skippedCount++
                     } else {
                         newChunks.add(chunk)
@@ -776,60 +955,124 @@ fun updateEnhancedQuery(newText: String) {
 
                 android.util.Log.d(
                     "ChatViewModel",
-                    "📦 Total: $totalChunks, New: ${newChunks.size}, Skipped: $skippedCount"
+                    "📦 Total: $totalChunks, " +
+                        "New: ${newChunks.size}, " +
+                        "Skipped: $skippedCount"
                 )
 
                 var savedCount = 0
 
                 if (newChunks.isNotEmpty()) {
-                    val embeddings = try {
-                        embeddingService.getBatchEmbeddings(newChunks)
-                    } catch (e: Exception) {
-                        android.util.Log.w(
-                            "ChatViewModel",
-                            "⚠️ Batch failed: ${e.message}"
-                        )
-                        newChunks.map { emptyList() }
-                    }
+
+                    val embeddings =
+                        try {
+                            embeddingService
+                                .getBatchEmbeddings(
+                                    newChunks
+                                )
+
+                        } catch (e: Exception) {
+
+                            android.util.Log.w(
+                                "ChatViewModel",
+                                "⚠️ Batch failed: ${e.message}"
+                            )
+
+                            newChunks.map {
+                                emptyList()
+                            }
+                        }
 
                     newChunks.forEachIndexed { i, chunk ->
-                        val embeddingList = embeddings.getOrElse(i) { emptyList() }
-                        val id = memoryRepository.addMemoryWithEmbedding(
-                            content   = chunk,
-                            embedding = embeddingList,
-                            category  = "WEB",
-                            isShared  = true
-                        )
-                        if (id > 0) savedCount++
+
+                        val embeddingList =
+                            embeddings.getOrElse(i) {
+                                emptyList()
+                            }
+
+                        val id =
+                            memoryRepository
+                                .addMemoryWithEmbedding(
+                                    content = chunk,
+                                    embedding = embeddingList,
+                                    category = "WEB",
+                                    isShared = true
+                                )
+
+                        if (id > 0) {
+                            savedCount++
+                        }
                     }
                 }
 
-                _successMessage.value = buildString {
-                    append("✅ تم حفظ $savedCount جزء من:\n")
-                    append("📄 ${result.title}")
-                    if (skippedCount > 0)
-                        append("\n⚠️ تم تخطي $skippedCount (موجودة مسبقاً)")
-                    if (totalChunks > 20)
-                        append("\n📌 من أصل $totalChunks (الحد الأقصى 20)")
-                    append("\n📊 ${result.wordCount} كلمة")
-                    if (newChunks.isNotEmpty())
-                        append("\n🚀 Batch: طلب API واحد")
-                }
+                _successMessage.value =
+                    buildString {
+                        append(
+                            "✅ تم حفظ $savedCount جزء من:\n"
+                        )
+
+                        append(
+                            "📄 ${result.title}"
+                        )
+
+                        if (skippedCount > 0) {
+                            append(
+                                "\n⚠️ تم تخطي $skippedCount (موجودة مسبقاً)"
+                            )
+                        }
+
+                        if (totalChunks > 20) {
+                            append(
+                                "\n📌 من أصل $totalChunks (الحد الأقصى 20)"
+                            )
+                        }
+
+                        append(
+                            "\n📊 ${result.wordCount} كلمة"
+                        )
+
+                        if (newChunks.isNotEmpty()) {
+                            append(
+                                "\n🚀 Batch: طلب API واحد"
+                            )
+                        }
+                    }
 
             } catch (e: Exception) {
-                android.util.Log.e("ChatViewModel", "❌ Web fetch: ${e.message}", e)
-                _error.value = when {
-                    e.message?.contains("Unable to resolve host") == true ->
-                        "❌ لا يوجد اتصال بالإنترنت"
-                    e.message?.contains("timeout", ignoreCase = true) == true ->
-                        "❌ انتهت مهلة الاتصال"
-                    e.message?.contains("URL") == true ->
-                        "❌ رابط غير صالح"
-                    e.message?.contains("محتوى") == true ->
-                        "❌ ${e.message}"
-                    else ->
-                        "❌ فشل جلب الصفحة: ${e.message}"
-                }
+
+                android.util.Log.e(
+                    "ChatViewModel",
+                    "❌ Web fetch: ${e.message}",
+                    e
+                )
+
+                _error.value =
+                    when {
+                        e.message?.contains(
+                            "Unable to resolve host"
+                        ) == true ->
+                            "❌ لا يوجد اتصال بالإنترنت"
+
+                        e.message?.contains(
+                            "timeout",
+                            ignoreCase = true
+                        ) == true ->
+                            "❌ انتهت مهلة الاتصال"
+
+                        e.message?.contains(
+                            "URL"
+                        ) == true ->
+                            "❌ رابط غير صالح"
+
+                        e.message?.contains(
+                            "محتوى"
+                        ) == true ->
+                            "❌ ${e.message}"
+
+                        else ->
+                            "❌ فشل جلب الصفحة: ${e.message}"
+                    }
+
             } finally {
                 _isLoading.value = false
             }
@@ -840,43 +1083,102 @@ fun updateEnhancedQuery(newText: String) {
     // Helpers
     // ============================================================
 
-    fun clearSelectedImage()  { _selectedImageBase64.value = null }
-    fun clearError()          { _error.value = null }
-    fun clearSuccessMessage() { _successMessage.value = null }
-
-    private fun calculateHash(content: String): String = try {
-        MessageDigest.getInstance("SHA-256")
-            .digest(content.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-    } catch (e: Exception) { "" }
-
-    private fun getDisplayName(uri: Uri): String = try {
-        val context = getApplication<Application>()
-        context.contentResolver.query(
-            uri,
-            arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
-            null, null, null
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val index = cursor.getColumnIndex(
-                    android.provider.OpenableColumns.DISPLAY_NAME
-                )
-                if (index >= 0) cursor.getString(index) else null
-            } else null
-        } ?: uri.lastPathSegment ?: "ملف"
-    } catch (e: Exception) {
-        uri.lastPathSegment ?: "ملف"
+    fun clearSelectedImage() {
+        _selectedImageBase64.value = null
     }
+
+    fun clearError() {
+        _error.value = null
+    }
+
+    fun clearSuccessMessage() {
+        _successMessage.value = null
+    }
+
+    private fun calculateHash(
+        content: String
+    ): String =
+        try {
+            MessageDigest
+                .getInstance("SHA-256")
+                .digest(
+                    content.toByteArray(
+                        Charsets.UTF_8
+                    )
+                )
+                .joinToString("") {
+                    "%02x".format(it)
+                }
+        } catch (e: Exception) {
+            ""
+        }
+
+    private fun getDisplayName(
+        uri: Uri
+    ): String =
+        try {
+            val context =
+                getApplication<Application>()
+
+            context.contentResolver
+                .query(
+                    uri,
+                    arrayOf(
+                        android.provider.OpenableColumns.DISPLAY_NAME
+                    ),
+                    null,
+                    null,
+                    null
+                )
+                ?.use { cursor ->
+
+                    if (cursor.moveToFirst()) {
+
+                        val index =
+                            cursor.getColumnIndex(
+                                android.provider.OpenableColumns.DISPLAY_NAME
+                            )
+
+                        if (index >= 0)
+                            cursor.getString(index)
+                        else
+                            null
+
+                    } else {
+                        null
+                    }
+
+                }
+                ?: uri.lastPathSegment
+                ?: "ملف"
+
+        } catch (e: Exception) {
+            uri.lastPathSegment ?: "ملف"
+        }
 
     // ============================================================
     // حذف المحادثة
     // ============================================================
 
-    fun deleteConversation(conversation: Conversation) {
+    fun deleteConversation(
+        conversation: Conversation
+    ) {
         viewModelScope.launch {
-            conversationRepository.deleteMessages(conversation.id)
-            conversationRepository.deleteConversation(conversation)
-            if (_currentConversationId.value == conversation.id) newConversation()
+
+            conversationRepository.deleteMessages(
+                conversation.id
+            )
+
+            conversationRepository.deleteConversation(
+                conversation
+            )
+
+            if (
+                _currentConversationId.value ==
+                conversation.id
+            ) {
+                newConversation()
+            }
         }
     }
 }
