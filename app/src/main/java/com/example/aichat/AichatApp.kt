@@ -25,6 +25,9 @@ class AichatApp : Application() {
     companion object {
         private const val TAG = "AichatApp"
         private const val CONTEXT_TTL_MS = 120_000L
+
+        // المهلة الداخلية لعملية الالتقاط اليدوي.
+        private const val MANUAL_CAPTURE_TTL_MS = 15_000L
     }
 
     @Volatile
@@ -40,6 +43,9 @@ class AichatApp : Application() {
 
     @Volatile
     private var captureFlag = false
+
+    @Volatile
+    private var manualCaptureStartedAt = 0L
 
     private val ctxLock = Any()
 
@@ -113,12 +119,105 @@ class AichatApp : Application() {
         }
     }
 
+    /**
+     * بدء الالتقاط اليدوي.
+     *
+     * المسار الجديد:
+     *
+     * GeckoTestScreen
+     *      ↓
+     * triggerCapture()
+     *      ↓
+     * WebExtension.Port
+     *      ↓
+     * background.js
+     *      ↓
+     * content.js
+     *      ↓
+     * CAPTURE_RESULT
+     */
     fun triggerCapture() {
+
         captureFlag = true
+        manualCaptureStartedAt =
+            System.currentTimeMillis()
 
         logDebug(
             "📌 captureFlag = true (manual capture)"
         )
+
+        val port = aiCapturePort
+
+        if (port == null) {
+
+            logDebug(
+                "❌ MANUAL_CAPTURE: Native Port unavailable"
+            )
+
+            captureFlag = false
+            manualCaptureStartedAt = 0L
+
+            mainHandler.post {
+
+                onManualCaptureResult?.invoke(
+                    false,
+                    "",
+                    JSONObject()
+                        .put("reason", "native_port_unavailable")
+                )
+            }
+
+            return
+        }
+
+        try {
+
+            val message =
+                JSONObject()
+                    .put(
+                        "type",
+                        "MANUAL_CAPTURE"
+                    )
+                    .put(
+                        "timestamp",
+                        System.currentTimeMillis()
+                    )
+
+            port.postMessage(
+                message
+            )
+
+            logDebug(
+                "📤 MANUAL_CAPTURE SENT to background"
+            )
+
+        } catch (e: Exception) {
+
+            captureFlag = false
+            manualCaptureStartedAt = 0L
+
+            logDebug(
+                "❌ MANUAL_CAPTURE FAILED: " +
+                    (e.message ?: e.toString())
+            )
+
+            mainHandler.post {
+
+                onManualCaptureResult?.invoke(
+                    false,
+                    "",
+                    JSONObject()
+                        .put(
+                            "reason",
+                            "port_send_failed"
+                        )
+                        .put(
+                            "error",
+                            e.message ?: e.toString()
+                        )
+                )
+            }
+        }
     }
 
     fun setContextPending(
@@ -220,19 +319,6 @@ class AichatApp : Application() {
             d.endsWith(".$target")
     }
 
-    /**
-     * إرسال النص الحالي مباشرة إلى background.js.
-     *
-     * المسار:
-     *
-     * AichatApp
-     *      ↓
-     * WebExtension.Port
-     *      ↓
-     * background.js
-     *      ↓
-     * content.js
-     */
     private fun sendPendingContextToPort(
         forcedPort: WebExtension.Port? = null
     ) {
@@ -362,11 +448,75 @@ class AichatApp : Application() {
         )
     }
 
+    private fun handleManualAssistantResponse(
+        source: String,
+        text: String
+    ): Boolean {
+
+        if (!captureFlag) {
+            return false
+        }
+
+        val started =
+            manualCaptureStartedAt
+
+        val age =
+            if (started > 0L) {
+                System.currentTimeMillis() - started
+            } else {
+                Long.MAX_VALUE
+            }
+
+        if (age > MANUAL_CAPTURE_TTL_MS) {
+
+            logDebug(
+                "⌛ Manual capture response arrived too late: " +
+                    "${age}ms"
+            )
+
+            captureFlag = false
+            manualCaptureStartedAt = 0L
+
+            return false
+        }
+
+        captureFlag = false
+        manualCaptureStartedAt = 0L
+
+        logDebug(
+            "🧠 Manual capture received through ASSISTANT_RESPONSE"
+        )
+
+        mainHandler.post {
+
+            onManualCaptureResult?.invoke(
+                true,
+                text,
+                JSONObject()
+                    .put(
+                        "assistant",
+                        1
+                    )
+                    .put(
+                        "articles",
+                        0
+                    )
+                    .put(
+                        "bodyLen",
+                        text.length
+                    )
+                    .put(
+                        "source",
+                        source
+                    )
+            )
+        }
+
+        return true
+    }
+
     /**
      * معالجة رسائل content.js التي تصل عبر Native Port.
-     *
-     * هذه الرسائل لا تأتي من onMessage().
-     * لذلك يجب التعامل معها هنا.
      */
     private fun handlePortMessage(
         message: Any,
@@ -393,27 +543,52 @@ class AichatApp : Application() {
         }
 
         when (type) {
+
             "ASSISTANT_RESPONSE" -> {
 
-    val text = json.optString("text", "")
-    val source = json.optString("source", "web")
+                val text =
+                    json.optString(
+                        "text",
+                        ""
+                    )
 
-    if (text.isBlank()) {
-        logDebug("⚠️ ASSISTANT_RESPONSE: empty")
-        return
-    }
+                val source =
+                    json.optString(
+                        "source",
+                        "web"
+                    )
 
-    logDebug(
-        "📨 ASSISTANT_RESPONSE received: " +
-            "source=$source, len=${text.length}"
-    )
+                if (text.isBlank()) {
+                    logDebug(
+                        "⚠️ ASSISTANT_RESPONSE: empty"
+                    )
+                    return
+                }
 
-    mainHandler.post {
-        onAiResponseCaptured?.invoke(
-            source,
-            text
-        )
-    }
+                logDebug(
+                    "📨 ASSISTANT_RESPONSE received: " +
+                        "source=$source, len=${text.length}"
+                )
+
+                /*
+                 * إذا كان هناك التقاط يدوي منتظر،
+                 * لا نرسله لمسار Auto Response.
+                 */
+                if (
+                    handleManualAssistantResponse(
+                        source,
+                        text
+                    )
+                ) {
+                    return
+                }
+
+                mainHandler.post {
+                    onAiResponseCaptured?.invoke(
+                        source,
+                        text
+                    )
+                }
             }
 
             "CONTEXT_WRITTEN" -> {
@@ -451,13 +626,11 @@ class AichatApp : Application() {
                 )
 
                 mainHandler.post {
-
-                    onContextWritten
-                        ?.invoke(
-                            success,
-                            stage,
-                            detail
-                        )
+                    onContextWritten?.invoke(
+                        success,
+                        stage,
+                        detail
+                    )
                 }
 
                 showToast(
@@ -472,7 +645,7 @@ class AichatApp : Application() {
 
                         stage ==
                             "text_injected" ->
-                            "✅ تمت الكتابة في المنصة"
+                            "✅ تمت الكتابة"
 
                         else ->
                             "✅ تمت الكتابة"
@@ -519,13 +692,17 @@ class AichatApp : Application() {
 
                 val text =
                     json.optString(
-                        "text"
+                        "text",
+                        ""
                     )
 
                 val debug =
                     json.optJSONObject(
                         "debug"
                     )
+
+                captureFlag = false
+                manualCaptureStartedAt = 0L
 
                 logDebug(
                     if (success) {
@@ -537,12 +714,11 @@ class AichatApp : Application() {
 
                 mainHandler.post {
 
-                    onManualCaptureResult
-                        ?.invoke(
-                            success,
-                            text,
-                            debug
-                        )
+                    onManualCaptureResult?.invoke(
+                        success,
+                        text,
+                        debug
+                    )
                 }
             }
 
@@ -567,11 +743,10 @@ class AichatApp : Application() {
 
                     mainHandler.post {
 
-                        onAiResponseCaptured
-                            ?.invoke(
-                                domain,
-                                text
-                            )
+                        onAiResponseCaptured?.invoke(
+                            domain,
+                            text
+                        )
                     }
                 }
             }
@@ -605,6 +780,7 @@ class AichatApp : Application() {
                             message: Any,
                             port: WebExtension.Port
                         ) {
+
                             logDebug(
                                 "📩 Background → Kotlin: $message"
                             )
@@ -634,10 +810,6 @@ class AichatApp : Application() {
                     "✅ Port delegate attached"
                 )
 
-                /*
-                 * إذا كان هناك نص pending قبل اتصال الـPort،
-                 * أرسله الآن مباشرة.
-                 */
                 mainHandler.postDelayed({
 
                     sendPendingContextToPort(
@@ -827,8 +999,7 @@ class AichatApp : Application() {
                     "POLL" -> {
 
                         /*
-                         * أبقينا هذا المسار للتوافق مع الاختبارات
-                         * السابقة، لكن التدفق العملي الجديد لا يعتمد عليه.
+                         * مسار قديم للتوافق فقط.
                          */
 
                         val domain =
@@ -858,11 +1029,9 @@ class AichatApp : Application() {
                             captureFlag
                         ) {
 
-                            captureFlag =
-                                false
-
-                            capture =
-                                true
+                            captureFlag = false
+                            manualCaptureStartedAt = 0L
+                            capture = true
                         }
 
                         resp.put(
@@ -906,6 +1075,9 @@ class AichatApp : Application() {
                                 "debug"
                             )
 
+                        captureFlag = false
+                        manualCaptureStartedAt = 0L
+
                         logDebug(
                             if (success) {
                                 "🧠 Capture OK: ${text.take(60)}…"
@@ -916,12 +1088,11 @@ class AichatApp : Application() {
 
                         mainHandler.post {
 
-                            onManualCaptureResult
-                                ?.invoke(
-                                    success,
-                                    text,
-                                    debug
-                                )
+                            onManualCaptureResult?.invoke(
+                                success,
+                                text,
+                                debug
+                            )
                         }
 
                         reply()
@@ -948,11 +1119,10 @@ class AichatApp : Application() {
 
                             mainHandler.post {
 
-                                onAiResponseCaptured
-                                    ?.invoke(
-                                        domain,
-                                        text
-                                    )
+                                onAiResponseCaptured?.invoke(
+                                    domain,
+                                    text
+                                )
                             }
                         }
 
@@ -991,12 +1161,11 @@ class AichatApp : Application() {
 
                         mainHandler.post {
 
-                            onContextWritten
-                                ?.invoke(
-                                    success,
-                                    stage,
-                                    detail
-                                )
+                            onContextWritten?.invoke(
+                                success,
+                                stage,
+                                detail
+                            )
                         }
 
                         showToast(
