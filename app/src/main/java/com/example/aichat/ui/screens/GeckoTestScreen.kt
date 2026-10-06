@@ -258,10 +258,11 @@ fun GeckoTestScreen(
 
                 if (success && text.isNotBlank()) {
                     vm.onWebAiResponse(
-                        platformId = p.id,
-                        platformName = p.name,
-                        text = text
-                    )
+    platformId = p.id,
+    platformName = p.name,
+    text = text,
+    forceSaveToMemory = true
+)
 
                     Toast.makeText(
                         context,
