@@ -93,7 +93,6 @@ function findChatGPTTab() {
             throw new Error("NO_CHATGPT_TAB");
         }
 
-        // Prefer the active ChatGPT tab.
         for (var i = 0; i < tabs.length; i++) {
 
             if (tabs[i].active) {
@@ -107,7 +106,6 @@ function findChatGPTTab() {
             }
         }
 
-        // Otherwise use the first ChatGPT tab.
         logLocal(
             "🎯 Using first ChatGPT tab: " +
             tabs[0].id
@@ -119,7 +117,7 @@ function findChatGPTTab() {
 
 
 // ============================================================
-// Send message to current platform content.js
+// Send CONTEXT_TO_PAGE to current platform
 // ============================================================
 
 function sendToActivePlatform(message) {
@@ -171,6 +169,103 @@ function sendToActivePlatform(message) {
 
 
 // ============================================================
+// Manual capture
+//
+// Kotlin
+//   ↓
+// Native Port
+//   ↓
+// Background
+//   ↓
+// Content
+// ============================================================
+
+function sendManualCaptureToActivePlatform() {
+
+    return findActivePlatformTab()
+        .then(function (tab) {
+
+            logLocal(
+                "📤 MANUAL_CAPTURE → Content: " +
+                "tab=" +
+                tab.id +
+                " url=" +
+                (tab.url || "")
+            );
+
+            return browser.tabs.sendMessage(
+                tab.id,
+                {
+                    type: "MANUAL_CAPTURE",
+                    timestamp: Date.now()
+                }
+            );
+        })
+        .then(function (response) {
+
+            logLocal(
+                "✅ MANUAL_CAPTURE Content replied: " +
+                JSON.stringify(response)
+            );
+
+            return response;
+        });
+}
+
+
+// ============================================================
+// Report manual capture failure to Kotlin
+// ============================================================
+
+function reportManualCaptureFailure(
+    detail
+) {
+
+    if (!nativePort) {
+
+        logLocal(
+            "❌ Cannot report manual capture failure: Native Port unavailable"
+        );
+
+        return;
+    }
+
+    try {
+
+        nativePort.postMessage({
+
+            type: "CAPTURE_RESULT",
+
+            success: false,
+
+            text: "",
+
+            debug: {
+                reason: detail
+            }
+        });
+
+        logLocal(
+            "📤 CAPTURE_RESULT failure → Kotlin: " +
+            detail
+        );
+
+    } catch (error) {
+
+        logLocal(
+            "❌ Failed to report capture failure: " +
+            (
+                error &&
+                error.message
+                    ? error.message
+                    : String(error)
+            )
+        );
+    }
+}
+
+
+// ============================================================
 // Connect Native Messaging
 // ============================================================
 
@@ -207,7 +302,7 @@ function connectToNative() {
 
 
                 // ------------------------------------------------
-                // DIRECT CONTEXT INJECTION
+                // CONTEXT_TO_PAGE
                 // ------------------------------------------------
 
                 if (
@@ -243,8 +338,6 @@ function connectToNative() {
                                 detail
                             );
 
-
-                            // Report failure back to Kotlin
                             if (nativePort) {
 
                                 try {
@@ -288,6 +381,53 @@ function connectToNative() {
 
 
                 // ------------------------------------------------
+                // MANUAL_CAPTURE
+                // ------------------------------------------------
+
+                if (
+                    message &&
+                    message.type ===
+                        "MANUAL_CAPTURE"
+                ) {
+
+                    logLocal(
+                        "📥 MANUAL_CAPTURE received from Kotlin"
+                    );
+
+                    sendManualCaptureToActivePlatform(
+                    )
+
+                        .then(function () {
+
+                            logLocal(
+                                "✅ MANUAL_CAPTURE delivered to content.js"
+                            );
+
+                        })
+
+                        .catch(function (error) {
+
+                            var detail =
+                                error &&
+                                error.message
+                                    ? error.message
+                                    : String(error);
+
+                            logLocal(
+                                "❌ MANUAL_CAPTURE → Content FAILED: " +
+                                detail
+                            );
+
+                            reportManualCaptureFailure(
+                                detail
+                            );
+                        });
+
+                    return;
+                }
+
+
+                // ------------------------------------------------
                 // OLD REVERSE TEST
                 // ------------------------------------------------
 
@@ -297,7 +437,6 @@ function connectToNative() {
                         "REVERSE_TEST"
                 ) {
 
-                    // Keep old test explicitly on ChatGPT.
                     findChatGPTTab()
 
                         .then(function (tab) {
@@ -361,7 +500,6 @@ function connectToNative() {
                 );
 
                 nativePort = null;
-
 
                 setTimeout(
                     function () {
@@ -465,6 +603,7 @@ browser.runtime.onMessage.addListener(
                         ""
                     )
                 );
+
             } else {
 
                 logLocal(
