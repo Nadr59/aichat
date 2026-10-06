@@ -553,115 +553,134 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // Web AI response
     // ============================================================
 
-    fun onWebAiResponse(
-        platformId: String,
-        platformName: String,
-        text: String
-    ) {
-        if (text.isBlank()) return
+      // ============================================================
+// Web AI response
+// ============================================================
 
-        viewModelScope.launch {
-            try {
-                val cleanText = text.trim()
+fun onWebAiResponse(
+    platformId: String,
+    platformName: String,
+    text: String,
+    forceSaveToMemory: Boolean = false
+) {
+    if (text.isBlank()) return
 
-                android.util.Log.d(
-                    "ChatViewModel",
-                    "🌐 Web AI response from $platformName: " +
-                        "${cleanText.take(80)}..."
-                )
+    viewModelScope.launch {
+        try {
+            val cleanText = text.trim()
 
-                // ====================================================
-                // 1. الحصول على المحادثة الحالية
-                // ====================================================
+            android.util.Log.d(
+                "ChatViewModel",
+                "🌐 Web AI response from $platformName: " +
+                    "${cleanText.take(80)}..."
+            )
 
-                val convId =
-                    _currentConversationId.value ?: run {
-                        val id =
-                            conversationRepository.insertConversation(
-                                Conversation(
-                                    title = "$platformName — Web",
-                                    memoryAccessEnabled =
-                                        _memoryAccessEnabled.value
-                                )
+            // ====================================================
+            // 1. الحصول على المحادثة الحالية
+            // ====================================================
+
+            val convId =
+                _currentConversationId.value ?: run {
+                    val id =
+                        conversationRepository.insertConversation(
+                            Conversation(
+                                title = "$platformName — Web",
+                                memoryAccessEnabled =
+                                    _memoryAccessEnabled.value
                             )
-
-                        _currentConversationId.value = id
-                        startCollecting(id)
-
-                        id
-                    }
-
-                // ====================================================
-                // 2. حفظ الرد في سجل المحادثة
-                // ====================================================
-
-                val messageId =
-                    conversationRepository.insertMessage(
-                        Message(
-                            conversationId = convId,
-                            role = "assistant",
-                            content = cleanText,
-                            messageType = "text"
-                        )
-                    )
-
-                conversationRepository.updateTitleAndTimestamp(
-                    id = convId,
-                    title = conversationRepository
-                        .getMessagesOnce(convId)
-                        .firstOrNull {
-                            it.role == "user"
-                        }
-                        ?.content
-                        ?.take(50)
-                        ?: "$platformName — Web",
-                    updatedAt = System.currentTimeMillis()
-                )
-
-                android.util.Log.d(
-                    "ChatViewModel",
-                    "✅ Web response saved to conversation: " +
-                        "id=$messageId, conversation=$convId"
-                )
-
-                // ====================================================
-                // 3. الحفظ التلقائي في الذاكرة المشتركة
-                // ====================================================
-
-                if (aiSettings.autoSave) {
-
-                    val memoryId =
-                        memoryRepository.addMemory(
-                            content = cleanText,
-                            sourceConversationId = convId,
-                            sourceMessageId = messageId,
-                            category = "KNOWLEDGE",
-                            isShared = true
                         )
 
-                    android.util.Log.d(
-                        "ChatViewModel",
-                        "🧠 Web response saved to SHARED MEMORY: " +
-                            "memoryId=$memoryId"
-                    )
+                    _currentConversationId.value = id
+                    startCollecting(id)
 
-                } else {
-
-                    android.util.Log.d(
-                        "ChatViewModel",
-                        "⚪ Auto-save disabled — response not saved to shared memory"
-                    )
+                    id
                 }
 
-            } catch (e: Exception) {
-                android.util.Log.e(
+            // ====================================================
+            // 2. حفظ الرد في سجل المحادثة
+            // ====================================================
+
+            val messageId =
+                conversationRepository.insertMessage(
+                    Message(
+                        conversationId = convId,
+                        role = "assistant",
+                        content = cleanText,
+                        messageType = "text"
+                    )
+                )
+
+            conversationRepository.updateTitleAndTimestamp(
+                id = convId,
+                title = conversationRepository
+                    .getMessagesOnce(convId)
+                    .firstOrNull {
+                        it.role == "user"
+                    }
+                    ?.content
+                    ?.take(50)
+                    ?: "$platformName — Web",
+                updatedAt = System.currentTimeMillis()
+            )
+
+            android.util.Log.d(
+                "ChatViewModel",
+                "✅ Web response saved to conversation: " +
+                    "id=$messageId, conversation=$convId"
+            )
+
+            // ====================================================
+            // 3. تحديد هل نحفظ الرد في الذاكرة المشتركة
+            //
+            // forceSaveToMemory = true
+            // يعني أن المستخدم ضغط زر الحفظ اليدوي.
+            //
+            // وإلا نعتمد على إعداد AutoSave.
+            // ====================================================
+
+            val shouldSaveToMemory =
+                forceSaveToMemory || aiSettings.autoSave
+
+            if (shouldSaveToMemory) {
+
+                val memoryId =
+                    memoryRepository.addMemory(
+                        content = cleanText,
+                        sourceConversationId = convId,
+                        sourceMessageId = messageId,
+                        category = "KNOWLEDGE",
+                        isShared = true
+                    )
+
+                android.util.Log.d(
                     "ChatViewModel",
-                    "❌ onWebAiResponse: ${e.message}",
-                    e
+                    "🧠 Web response saved to SHARED MEMORY: " +
+                        "memoryId=$memoryId, " +
+                        "manual=$forceSaveToMemory, " +
+                        "autoSave=${aiSettings.autoSave}"
+                )
+
+            } else {
+
+                android.util.Log.d(
+                    "ChatViewModel",
+                    "⚪ Auto-save disabled — " +
+                        "automatic response not saved to shared memory"
                 )
             }
+
+        } catch (e: Exception) {
+
+            android.util.Log.e(
+                "ChatViewModel",
+                "❌ onWebAiResponse: ${e.message}",
+                e
+            )
         }
     }
+}
+
+
 
     // ============================================================
     // الصور
