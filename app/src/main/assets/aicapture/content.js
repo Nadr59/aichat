@@ -3,25 +3,10 @@
 
     // ============================================================
     // AiChat — PLATFORM REGISTRY + ASSISTANT RESPONSE CAPTURE
-    // Version 1.0.32
-    //
-    // Architecture:
-    //   Content Script
-    //       ├── Platform Registry
-    //       ├── Input / Injection
-    //       └── Response Capture
-    //
-    // Current adapters:
-    //   - ChatGPT
-    //   - Gemini
-    //   - Generic fallback
-    //
-    // IMPORTANT:
-    //   Existing GeckoView / Manifest V2 / browser.* architecture
-    //   is preserved.
+    // Version 1.0.33
     // ============================================================
 
-    var VERSION = "1.0.32";
+    var VERSION = "1.0.33";
 
     // ============================================================
     // DEBUG LOG
@@ -63,11 +48,11 @@
             ],
 
             extractResponse: function (element) {
+
                 if (!element) {
                     return "";
                 }
 
-                // Prefer rendered markdown.
                 var markdown = null;
 
                 try {
@@ -109,11 +94,11 @@
             ],
 
             extractResponse: function (element) {
+
                 if (!element) {
                     return "";
                 }
 
-                // Prefer the actual response content when available.
                 var contentSelectors = [
                     ".model-response-text",
                     ".markdown",
@@ -122,14 +107,21 @@
                     ".response-container"
                 ];
 
-                for (var i = 0; i < contentSelectors.length; i++) {
+                for (
+                    var i = 0;
+                    i < contentSelectors.length;
+                    i++
+                ) {
+
                     try {
+
                         var child =
                             element.querySelector(
                                 contentSelectors[i]
                             );
 
                         if (child) {
+
                             var childText =
                                 getElementText(child);
 
@@ -137,6 +129,7 @@
                                 return childText;
                             }
                         }
+
                     } catch (e) {}
                 }
 
@@ -159,6 +152,10 @@
                 ".prose.prose-base",
                 "div.prose"
             ],
+
+            extractResponse: function (element) {
+                return getElementText(element);
+            },
 
             legacyContainerMode: false
         },
@@ -194,6 +191,7 @@
     // ============================================================
 
     function detectPlatform() {
+
         if (PLATFORMS.chatgpt.matches()) {
             return PLATFORMS.chatgpt;
         }
@@ -209,7 +207,8 @@
         return PLATFORMS.generic;
     }
 
-    var CURRENT_PLATFORM = detectPlatform();
+    var CURRENT_PLATFORM =
+        detectPlatform();
 
     log(
         "🌐 Platform detected: " +
@@ -245,7 +244,11 @@
 
     function findInput() {
 
-        for (var i = 0; i < INPUT_SELECTORS.length; i++) {
+        for (
+            var i = 0;
+            i < INPUT_SELECTORS.length;
+            i++
+        ) {
 
             try {
 
@@ -501,9 +504,6 @@
 
     // ============================================================
     // CHATGPT LEGACY CONTAINERS
-    //
-    // Kept intentionally because the existing ChatGPT capture
-    // path is already proven to work.
     // ============================================================
 
     function getChatGPTConversationContainers() {
@@ -570,7 +570,6 @@
             CURRENT_PLATFORM.legacyContainerMode
         ) {
 
-            // Preserve the old proven ChatGPT route.
             return getChatGPTConversationContainers();
         }
 
@@ -630,10 +629,6 @@
             .replace(/\r\n/g, "\n")
             .replace(/\r/g, "\n");
 
-        // --------------------------------------------------------
-        // ChatGPT footer
-        // --------------------------------------------------------
-
         var footer =
             "ChatGPT هو نظام ذكاء اصطناعي وقد يخطئ.";
 
@@ -648,10 +643,6 @@
                     footerIndex
                 );
         }
-
-        // --------------------------------------------------------
-        // Known sources markers
-        // --------------------------------------------------------
 
         var sourceMarkers = [
             "\nF المصادر",
@@ -693,10 +684,6 @@
                 );
         }
 
-        // --------------------------------------------------------
-        // Gemini / generic obvious UI markers
-        // --------------------------------------------------------
-
         var genericFooterMarkers = [
             "\nWas this response helpful?",
             "\nهل كانت هذه الإجابة مفيدة؟"
@@ -723,10 +710,6 @@
             }
         }
 
-        // --------------------------------------------------------
-        // Normalize whitespace
-        // --------------------------------------------------------
-
         cleaned = cleaned
             .replace(/^\s+/, "")
             .replace(/\s+$/, "");
@@ -746,8 +729,6 @@
 
     // ============================================================
     // CHATGPT EXTRACTION
-    //
-    // EXACT existing logic preserved.
     // ============================================================
 
     function extractChatGPTAssistantText(
@@ -822,7 +803,6 @@
             return "";
         }
 
-        // Always inspect the newest matching element first.
         for (
             var i = elements.length - 1;
             i >= 0;
@@ -855,7 +835,6 @@
                 );
 
             if (text) {
-
                 return text;
             }
         }
@@ -903,6 +882,131 @@
     }
 
     // ============================================================
+    // MANUAL CAPTURE
+    //
+    // IMPORTANT:
+    // This captures the response that is ALREADY visible.
+    //
+    // It does NOT use baselineAssistant because the user is
+    // explicitly asking to save the current response.
+    // ============================================================
+
+    function sendManualCaptureResult(
+        success,
+        text,
+        reason
+    ) {
+
+        var cleaned =
+            cleanAssistantResponse(
+                text || ""
+            );
+
+        var debug = {
+            assistant:
+                cleaned ? 1 : 0,
+
+            articles:
+                0,
+
+            bodyLen:
+                cleaned.length,
+
+            platform:
+                CURRENT_PLATFORM.id,
+
+            reason:
+                reason || ""
+        };
+
+        try {
+
+            browser.runtime.sendMessage({
+
+                type:
+                    "CAPTURE_RESULT",
+
+                success:
+                    !!cleaned,
+
+                text:
+                    cleaned,
+
+                debug:
+                    debug,
+
+                source:
+                    CURRENT_PLATFORM.id,
+
+                timestamp:
+                    Date.now()
+            });
+
+            log(
+                cleaned
+                    ? "📤 CAPTURE_RESULT sent success len=" +
+                      cleaned.length
+                    : "📤 CAPTURE_RESULT sent failure reason=" +
+                      (reason || "empty")
+            );
+
+        } catch (e) {
+
+            log(
+                "❌ CAPTURE_RESULT send failed: " +
+                e
+            );
+        }
+    }
+
+
+    function captureCurrentResponse() {
+
+        log(
+            "🎯 Manual capture requested " +
+            "platform=" +
+            CURRENT_PLATFORM.id
+        );
+
+        var current =
+            getCurrentAssistantText();
+
+        log(
+            "🔎 Manual capture current response len=" +
+            current.length
+        );
+
+        if (!current) {
+
+            log(
+                "⚠️ Manual capture: no assistant response found"
+            );
+
+            sendManualCaptureResult(
+                false,
+                "",
+                "assistant_response_not_found"
+            );
+
+            return;
+        }
+
+        log(
+            "📝 Manual capture response: " +
+            current.substring(
+                0,
+                500
+            )
+        );
+
+        sendManualCaptureResult(
+            true,
+            current,
+            "current_response"
+        );
+    }
+
+    // ============================================================
     // CAPTURE STATE
     // ============================================================
 
@@ -921,21 +1025,42 @@
     // ============================================================
 
     function logResponseElementDiagnostics() {
-        var elements = getPlatformResponseElements();
 
-        log("🔬 " + CURRENT_PLATFORM.name +
-            " response candidates=" + elements.length);
+        var elements =
+            getPlatformResponseElements();
 
-        elements.slice(-10).forEach(function (el, index) {
-            var text = (el.innerText || el.textContent || "").trim();
+        log(
+            "🔬 " +
+            CURRENT_PLATFORM.name +
+            " response candidates=" +
+            elements.length
+        );
 
-            log(
-                "🔎 candidate[" + index + "] " +
-                el.tagName +
-                " class=" + (el.className || "") +
-                " len=" + text.length
-            );
-        });
+        elements.slice(-10).forEach(
+            function (
+                el,
+                index
+            ) {
+
+                var text =
+                    (
+                        el.innerText ||
+                        el.textContent ||
+                        ""
+                    ).trim();
+
+                log(
+                    "🔎 candidate[" +
+                    index +
+                    "] " +
+                    el.tagName +
+                    " class=" +
+                    (el.className || "") +
+                    " len=" +
+                    text.length
+                );
+            }
+        );
     }
 
     // ============================================================
@@ -963,8 +1088,11 @@
             baselineAssistant.length
         );
 
-        // For Gemini this is especially useful during the first test.
-        if (CURRENT_PLATFORM.id === "gemini") {
+        if (
+            CURRENT_PLATFORM.id ===
+            "gemini"
+        ) {
+
             logResponseElementDiagnostics();
         }
 
@@ -1015,10 +1143,18 @@
         try {
 
             browser.runtime.sendMessage({
-                type: "ASSISTANT_RESPONSE",
-                text: answer,
-                source: CURRENT_PLATFORM.id,
-                timestamp: Date.now()
+
+                type:
+                    "ASSISTANT_RESPONSE",
+
+                text:
+                    answer,
+
+                source:
+                    CURRENT_PLATFORM.id,
+
+                timestamp:
+                    Date.now()
             });
 
             log(
@@ -1062,10 +1198,6 @@
             return;
         }
 
-        // --------------------------------------------------------
-        // Ignore the old response.
-        // --------------------------------------------------------
-
         if (
             baselineAssistant &&
             current ===
@@ -1079,10 +1211,6 @@
 
             return;
         }
-
-        // --------------------------------------------------------
-        // Response changed.
-        // --------------------------------------------------------
 
         if (
             current !==
@@ -1109,10 +1237,6 @@
 
             return;
         }
-
-        // --------------------------------------------------------
-        // Response stable.
-        // --------------------------------------------------------
 
         if (
             lastCandidate &&
@@ -1146,6 +1270,31 @@
                 return;
             }
 
+            // ----------------------------------------------------
+            // MANUAL_CAPTURE
+            // ----------------------------------------------------
+
+            if (
+                message.type ===
+                "MANUAL_CAPTURE"
+            ) {
+
+                log(
+                    "🎯 MANUAL_CAPTURE received from background"
+                );
+
+                captureCurrentResponse();
+
+                return Promise.resolve({
+                    ok: true,
+                    type: "MANUAL_CAPTURE"
+                });
+            }
+
+            // ----------------------------------------------------
+            // CONTEXT_TO_PAGE
+            // ----------------------------------------------------
+
             if (
                 message.type ===
                 "CONTEXT_TO_PAGE"
@@ -1167,14 +1316,15 @@
                         "⚠️ CONTEXT_TO_PAGE text empty"
                     );
 
-                    return;
+                    return Promise.resolve({
+                        ok: false,
+                        reason: "empty_text"
+                    });
                 }
 
-                // ------------------------------------------------
-                // IMPORTANT:
-                // Capture starts BEFORE sending the prompt.
-                // ------------------------------------------------
-
+                /*
+                 * Capture starts BEFORE sending the prompt.
+                 */
                 startResponseCapture();
 
                 findInputWithRetry(
@@ -1234,6 +1384,11 @@
                         );
                     }
                 );
+
+                return Promise.resolve({
+                    ok: true,
+                    type: "CONTEXT_TO_PAGE"
+                });
             }
         }
     );
@@ -1245,9 +1400,15 @@
     try {
 
         browser.runtime.sendMessage({
-            type: "CONTENT_READY",
-            version: VERSION,
-            url: location.href
+
+            type:
+                "CONTENT_READY",
+
+            version:
+                VERSION,
+
+            url:
+                location.href
         });
 
         log(
