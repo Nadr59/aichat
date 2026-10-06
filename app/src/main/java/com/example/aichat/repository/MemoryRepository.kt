@@ -2,84 +2,93 @@ package com.example.aichat.repository
 
 import android.content.Context
 import android.util.Log
-import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.local.MemoryDao
+import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.MemoryItem
-import kotlinx.coroutines.flow.Flow
+import com.example.aichat.util.EmbeddingService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.security.MessageDigest
+import kotlin.math.sqrt
 
 class MemoryRepository(
     private val memoryDao: MemoryDao,
-    private val context: Context
+    context: Context
 ) {
 
     companion object {
         private const val TAG = "MemoryRepository"
+
+        // الحد الأدنى للتشابه الدلالي لقبول الذاكرة.
         private const val SIMILARITY_THRESHOLD = 0.45
-        private const val MAX_RESULTS = 8
+
+        // عدد النتائج النهائية التي نعيدها للمرحلة التالية.
+        private const val MAX_RESULTS = 12
+
+        // عدد النتائج الدلالية واللفظية التي نأخذها قبل الدمج.
+        private const val SEMANTIC_RESULTS = 8
+        private const val KEYWORD_RESULTS = 8
     }
 
     private val aiSettings = AiSettings(context)
 
-    // ✅ مُصحَّح: apiKeyProvider كدالة — يقرأ المفتاح الفعلي من aiSettings
-    // في كل نداء شبكة، لا قيمة مجمَّدة عند الإنشاء.
-    // العميل (OkHttpClient) يُبنى مرة واحدة فقط طوال عمر هذا الـ Repository.
-    private val embeddingService = EmbeddingService { aiSettings.geminiKey }
-
-    suspend fun getAllSharedMemoriesList(): List<MemoryItem> {
-        return memoryDao.getAllSharedMemories()
+    private val embeddingService = EmbeddingService {
+        aiSettings.geminiKey
     }
 
     // ============================================================
-    // ✅ حساب Hash للمحتوى لمنع التكرار (مرحلة 3)
+    // Basic memory access
     // ============================================================
 
-    private fun calculateHash(content: String): String {
-        return try {
-            MessageDigest.getInstance("SHA-256")
-                .digest(content.toByteArray(Charsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Hash calculation failed: ${e.message}")
-            ""
+    suspend fun getAllSharedMemoriesList(): List<MemoryItem> =
+        withContext(Dispatchers.IO) {
+            memoryDao.getAllSharedMemories()
+        }
+
+    suspend fun getSharedMemories(): List<MemoryItem> =
+        withContext(Dispatchers.IO) {
+            memoryDao.getAllSharedMemories()
+        }
+
+    suspend fun getMemoryById(memoryId: Long): MemoryItem? =
+        withContext(Dispatchers.IO) {
+            memoryDao.getMemoryById(memoryId)
+        }
+
+    // ============================================================
+    // Hash
+    // ============================================================
+
+    fun calculateHash(content: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val bytes = digest.digest(content.trim().toByteArray(Charsets.UTF_8))
+
+        return bytes.joinToString("") {
+            "%02x".format(it)
         }
     }
 
     // ============================================================
-    // استخراج Embedding (منطق موحد للحفظ والتعديل)
+    // Embedding
     // ============================================================
 
-    private suspend fun extractEmbedding(content: String): String {
-        val apiKey = aiSettings.geminiKey
+    private suspend fun extractEmbedding(content: String): List<Float> {
+        val apiKey = aiSettings.geminiKey.trim()
 
         if (apiKey.isBlank()) {
-            Log.w(TAG, "⚠️ Skipping embedding - Gemini API key not configured")
-            return ""
+            return emptyList()
         }
 
-        Log.d(TAG, "🔄 Extracting embedding for: ${content.take(50)}...")
-
         return try {
-            val vector = embeddingService.getEmbedding(content)
-
-            if (vector.isNotEmpty()) {
-                Log.d(TAG, "✅ Embedding extracted: ${vector.size} dimensions")
-                // ✅ مُصحَّح: استدعاء عبر اسم الصنف (companion object)
-                val compressed = EmbeddingService.vectorToString(vector, compress = true)
-                Log.d(TAG, "🗜️ Compressed size: ${compressed.length} chars")
-                compressed
-            } else {
-                Log.w(TAG, "⚠️ Empty embedding returned")
-                ""
-            }
+            embeddingService.getEmbedding(content)
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Embedding extraction failed: ${e.message}")
-            ""
+            Log.w(TAG, "Embedding failed: ${e.message}")
+            emptyList()
         }
     }
 
     // ============================================================
-    // إضافة ذاكرة مع Embedding
+    // Add memory
     // ============================================================
 
     suspend fun addMemory(
@@ -88,35 +97,35 @@ class MemoryRepository(
         sourceMessageId: Long? = null,
         category: String = "OTHER",
         isShared: Boolean = true
-    ): Long {
+    ): Long = withContext(Dispatchers.IO) {
 
         val cleanContent = content.trim()
 
         if (cleanContent.isBlank()) {
-            Log.w(TAG, "⚠️ Skipping empty content")
-            return 0
+            return@withContext -1L
         }
 
         val hash = calculateHash(cleanContent)
 
-        if (hash.isNotBlank()) {
-            val existing = memoryDao.getByHash(hash)
-            if (existing != null) {
-                Log.d(TAG, "⚠️ Duplicate content detected (id=${existing.id}), skipping")
-                return existing.id
-            }
+        // منع التكرار
+        val existing = memoryDao.getByHash(hash)
+
+        if (existing != null) {
+            Log.d(TAG, "Duplicate memory ignored: id=${existing.id}")
+            return@withContext existing.id
         }
 
         val embedding = extractEmbedding(cleanContent)
 
-        val embeddingModel = if (embedding.isNotBlank()) EmbeddingService.CURRENT_MODEL else ""
-        val embeddingDimensions = if (embedding.isNotBlank()) EmbeddingService.CURRENT_DIMENSIONS else 0
-
         val memory = MemoryItem(
             content = cleanContent,
-            embedding = embedding,
-            embeddingModel = embeddingModel,
-            embeddingDimensions = embeddingDimensions,
+            embedding = embedding.joinToString(","),
+            embeddingModel = "text-embedding-004",
+            embeddingDimensions = if (embedding.isNotEmpty()) {
+                embedding.size
+            } else {
+                768
+            },
             contentHash = hash,
             sourceConversationId = sourceConversationId,
             sourceMessageId = sourceMessageId,
@@ -125,303 +134,163 @@ class MemoryRepository(
         )
 
         val id = memoryDao.insertMemory(memory)
-        Log.d(TAG, "✅ Memory saved with id=$id, hash=${hash.take(8)}...")
-        return id
+
+        Log.d(
+            TAG,
+            "Memory added: id=$id, embedding=${embedding.size}"
+        )
+
+        id
     }
 
     // ============================================================
-    // تعديل ذاكرة مع إعادة حساب الـ Embedding والـ Hash
+    // Update memory
     // ============================================================
 
-    suspend fun updateMemory(memory: MemoryItem) {
-        val cleanContent = memory.content.trim()
-        val newEmbedding = extractEmbedding(cleanContent)
-        val newHash = calculateHash(cleanContent)
+    suspend fun updateMemory(memory: MemoryItem): Unit =
+        withContext(Dispatchers.IO) {
 
-        val embeddingModel = if (newEmbedding.isNotBlank()) EmbeddingService.CURRENT_MODEL else ""
-        val embeddingDimensions = if (newEmbedding.isNotBlank()) EmbeddingService.CURRENT_DIMENSIONS else 0
+            val cleanContent = memory.content.trim()
 
-        memoryDao.updateMemory(
-            memory.copy(
+            if (cleanContent.isBlank()) {
+                return@withContext
+            }
+
+            val hash = calculateHash(cleanContent)
+            val embedding = extractEmbedding(cleanContent)
+
+            val updated = memory.copy(
                 content = cleanContent,
-                embedding = newEmbedding,
-                embeddingModel = embeddingModel,
-                embeddingDimensions = embeddingDimensions,
-                contentHash = newHash,
+                embedding = embedding.joinToString(","),
+                embeddingModel = "text-embedding-004",
+                embeddingDimensions = if (embedding.isNotEmpty()) {
+                    embedding.size
+                } else {
+                    768
+                },
+                contentHash = hash,
                 updatedAt = System.currentTimeMillis()
             )
-        )
 
-        Log.d(TAG, "✅ Memory updated id=${memory.id}")
-    }
-
-    // ============================================================
-    // Backfill: استخراج Embeddings والـ Hash للذكريات القديمة
-    // ============================================================
-
-    suspend fun backfillEmbeddings(): Int {
-        if (aiSettings.geminiKey.isBlank()) return 0
-
-        val allMemories = memoryDao.getAllSharedMemories()
-
-        allMemories.filter { it.contentHash.isBlank() }.forEach { memory ->
-            val hash = calculateHash(memory.content)
-            if (hash.isNotBlank()) {
-                memoryDao.updateMemory(memory.copy(contentHash = hash))
-            }
+            memoryDao.updateMemory(updated)
         }
 
-        val missing = allMemories.filter { it.embedding.isBlank() }
+    // ============================================================
+    // Backfill embeddings
+    // ============================================================
 
-        if (missing.isEmpty()) {
-            Log.d(TAG, "✅ Backfill: all memories already have embeddings")
-            return 0
-        }
+    suspend fun backfillEmbeddings(): Int =
+        withContext(Dispatchers.IO) {
 
-        Log.d(TAG, "🔄 Backfill: processing ${missing.size} memories...")
-        var updated = 0
+            val memories = memoryDao.getAllSharedMemories()
 
-        missing.forEach { memory ->
-            val embedding = extractEmbedding(memory.content)
-            if (embedding.isNotBlank()) {
-                memoryDao.updateMemory(
-                    memory.copy(
-                        embedding = embedding,
-                        embeddingModel = EmbeddingService.CURRENT_MODEL,
-                        embeddingDimensions = EmbeddingService.CURRENT_DIMENSIONS
-                    )
+            var updatedCount = 0
+
+            for (memory in memories) {
+
+                if (memory.embedding.isNotBlank()) {
+                    continue
+                }
+
+                val embedding = extractEmbedding(memory.content)
+
+                if (embedding.isEmpty()) {
+                    continue
+                }
+
+                val updated = memory.copy(
+                    embedding = embedding.joinToString(","),
+                    embeddingModel = "text-embedding-004",
+                    embeddingDimensions = embedding.size,
+                    updatedAt = System.currentTimeMillis()
                 )
-                updated++
+
+                memoryDao.updateMemory(updated)
+
+                updatedCount++
             }
-        }
-
-        Log.d(TAG, "✅ Backfill complete: $updated/${missing.size} updated")
-        return updated
-    }
-
-    // ============================================================
-    // التحقق من وجود محتوى بنفس الـ hash (فلترة مسبقة قبل طلب API)
-    // ============================================================
-
-    suspend fun existsByHash(hash: String): Boolean {
-        if (hash.isBlank()) return false
-        return memoryDao.getByHash(hash) != null
-    }
-
-    /**
-     * حفظ ذاكرة مع embedding جاهز (من Batch) — بدل استدعاء getEmbedding مرة أخرى
-     */
-    suspend fun addMemoryWithEmbedding(
-        content:   String,
-        embedding: List<Double>,
-        category:  String  = "OTHER",
-        isShared:  Boolean = true,
-        sourceConversationId: Long? = null,
-        sourceMessageId:      Long? = null
-    ): Long {
-        val cleanContent = content.trim()
-        if (cleanContent.isBlank()) return 0
-
-        val hash = calculateHash(cleanContent)
-
-        if (hash.isNotBlank()) {
-            val existing = memoryDao.getByHash(hash)
-            if (existing != null) {
-                Log.d(TAG, "⚠️ Duplicate (id=${existing.id}), skipping")
-                return existing.id
-            }
-        }
-
-        // ✅ مُصحَّح: استدعاء عبر اسم الصنف، بلا إنشاء instance جديد
-        val embeddingStr = if (embedding.isNotEmpty()) {
-            try {
-                EmbeddingService.vectorToString(embedding, compress = true)
-            } catch (e: Exception) {
-                ""
-            }
-        } else ""
-
-        val embeddingModel = if (embeddingStr.isNotBlank()) EmbeddingService.CURRENT_MODEL else ""
-        val embeddingDims  = if (embeddingStr.isNotBlank()) EmbeddingService.CURRENT_DIMENSIONS else 0
-
-        val memory = MemoryItem(
-            content              = cleanContent,
-            embedding            = embeddingStr,
-            embeddingModel       = embeddingModel,
-            embeddingDimensions  = embeddingDims,
-            contentHash          = hash,
-            sourceConversationId = sourceConversationId,
-            sourceMessageId      = sourceMessageId,
-            category             = category,
-            isShared             = isShared
-        )
-
-        val id = memoryDao.insertMemory(memory)
-        Log.d(TAG, "✅ Memory saved with embedding (id=$id)")
-        return id
-    }
-
-    // ============================================================
-    // حذف ذاكرة
-    // ============================================================
-
-    suspend fun deleteMemory(memory: MemoryItem) {
-        memoryDao.deleteMemory(memory)
-        Log.d(TAG, "🗑️ Memory deleted id=${memory.id}")
-    }
-
-    // ============================================================
-    // جميع الذكريات المشتركة
-    // ============================================================
-
-    fun getSharedMemories(): Flow<List<MemoryItem>> {
-        return memoryDao.getSharedMemories()
-    }
-
-    // ============================================================
-    // البحث في الذكريات المشتركة
-    // ✅ مُصحَّح: حذف المعاملين الميتين (useSemanticAnalysis, ollamaUrl)
-    // ============================================================
-
-    suspend fun searchSharedMemories(query: String): List<MemoryItem> {
-
-        val cleanQuery = query.trim()
-
-        if (cleanQuery.isBlank()) {
-            Log.d(TAG, "⚪ Empty query")
-            return emptyList()
-        }
-
-        val allMemories = memoryDao.getAllSharedMemories()
-
-        if (allMemories.isEmpty()) {
-            Log.d(TAG, "⚪ No memories in database")
-            return emptyList()
-        }
-
-        Log.d(TAG, "📚 Total memories: ${allMemories.size}")
-
-        val withEmbeddings = allMemories.count { it.embedding.isNotBlank() }
-        Log.d(TAG, "🧠 Memories with embeddings: $withEmbeddings/${allMemories.size}")
-
-        val hasEmbeddings = withEmbeddings > 0
-        val hasApiKey = aiSettings.geminiKey.isNotBlank()
-
-        return if (hasEmbeddings && hasApiKey) {
-            Log.d(TAG, "🔍 Using hybrid search (Embeddings + Keywords)")
-            searchWithEmbeddings(cleanQuery, allMemories)
-        } else {
-            if (!hasApiKey) {
-                Log.w(TAG, "⚠️ Gemini API key not configured, using traditional search")
-            }
-            Log.d(TAG, "🔍 Using traditional search (Keywords)")
-            fallbackSearch(cleanQuery, allMemories)
-        }
-    }
-
-    // ============================================================
-    // البحث الدلالي
-    // ============================================================
-
-    private suspend fun searchWithEmbeddings(
-        query: String,
-        memories: List<MemoryItem>
-    ): List<MemoryItem> {
-
-        val queryVector = try {
-            Log.d(TAG, "🔄 Getting query embedding for: $query")
-            embeddingService.getEmbedding(query)
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Query embedding failed: ${e.message}")
-            return fallbackSearch(query, memories)
-        }
-
-        if (queryVector.isEmpty()) {
-            Log.w(TAG, "⚠️ Empty query vector, using fallback")
-            return fallbackSearch(query, memories)
-        }
-
-        Log.d(TAG, "✅ Query embedding: ${queryVector.size} dimensions")
-
-        val scored = memories.mapNotNull { memory ->
-            if (memory.embedding.isBlank()) return@mapNotNull null
-
-            if (memory.embeddingDimensions > 0 &&
-                memory.embeddingDimensions != EmbeddingService.CURRENT_DIMENSIONS
-            ) {
-                Log.w(
-                    TAG,
-                    "⚠️ Dimension mismatch: memory=${memory.embeddingDimensions}, " +
-                    "current=${EmbeddingService.CURRENT_DIMENSIONS} → skipping"
-                )
-                return@mapNotNull null
-            }
-
-            // ✅ مُصحَّح: استدعاء عبر اسم الصنف
-            val memoryVector = EmbeddingService.stringToVector(memory.embedding)
-            if (memoryVector.isEmpty()) return@mapNotNull null
-
-            val similarity = EmbeddingService.cosineSimilarity(queryVector, memoryVector)
 
             Log.d(
                 TAG,
-                "📊 Similarity: ${String.format("%.3f", similarity)} " +
-                "- ${memory.content.take(50)}..."
+                "Backfill completed: updated=$updatedCount"
             )
 
-            if (similarity >= SIMILARITY_THRESHOLD) {
-                Pair(memory, similarity)
+            updatedCount
+        }
+
+    // ============================================================
+    // Add memory with an already generated embedding
+    // ============================================================
+
+    suspend fun addMemoryWithEmbedding(
+        content: String,
+        embedding: List<Float>,
+        category: String = "OTHER",
+        isShared: Boolean = true,
+        sourceConversationId: Long? = null,
+        sourceMessageId: Long? = null
+    ): Long = withContext(Dispatchers.IO) {
+
+        val cleanContent = content.trim()
+
+        if (cleanContent.isBlank()) {
+            return@withContext -1L
+        }
+
+        val hash = calculateHash(cleanContent)
+
+        val existing = memoryDao.getByHash(hash)
+
+        if (existing != null) {
+            Log.d(
+                TAG,
+                "Duplicate memory ignored: id=${existing.id}"
+            )
+
+            return@withContext existing.id
+        }
+
+        val memory = MemoryItem(
+            content = cleanContent,
+            embedding = embedding.joinToString(","),
+            embeddingModel = "text-embedding-004",
+            embeddingDimensions = if (embedding.isNotEmpty()) {
+                embedding.size
             } else {
-                null
-            }
-        }
-
-        val semanticResults = scored
-            .sortedByDescending { it.second }
-            .take(3)
-            .map { it.first }
-
-        Log.d(TAG, "✅ Semantic search found: ${semanticResults.size} memories")
-
-        return if (semanticResults.isEmpty()) {
-            Log.w(TAG, "⚠️ No semantic results, falling back to keyword search")
-            fallbackSearch(query, memories)
-        } else {
-            semanticResults
-        }
-    }
-
-    // ============================================================
-    // Fallback: البحث التقليدي بالكلمات
-    // ============================================================
-
-    private fun fallbackSearch(
-        query: String,
-        memories: List<MemoryItem>
-    ): List<MemoryItem> {
-        val result = MemorySearchEngine.search(
-            query = query,
-            memories = memories,
-            limit = MAX_RESULTS,
-            minScore = 0.05
+                768
+            },
+            contentHash = hash,
+            sourceConversationId = sourceConversationId,
+            sourceMessageId = sourceMessageId,
+            category = category,
+            isShared = isShared
         )
-        Log.d(TAG, "📊 Keyword search found: ${result.memories.size} memories")
-        return result.memories
+
+        memoryDao.insertMemory(memory)
     }
 
     // ============================================================
-    // باقي الدوال
+    // Delete
     // ============================================================
 
-    fun getConversationMemories(conversationId: Long): Flow<List<MemoryItem>> {
-        return memoryDao.getConversationMemories(conversationId)
-    }
+    suspend fun deleteMemory(memory: MemoryItem) =
+        withContext(Dispatchers.IO) {
+            memoryDao.deleteMemory(memory)
+        }
 
-    suspend fun getMemoryById(memoryId: Long): MemoryItem? {
-        return memoryDao.getMemoryById(memoryId)
-    }
+    // ============================================================
+    // TRUE HYBRID MEMORY SEARCH
+    //
+    // 1. Semantic search
+    // 2. Keyword search
+    // 3. Merge both result sets
+    // 4. Remove duplicates
+    // 5. Prefer semantic matches when both methods find the same item
+    // 6. Return a wider candidate set for the curator
+    // ============================================================
 
-    suspend fun deleteConversationMemories(conversationId: Long) {
-        memoryDao.deleteConversationMemories(conversationId)
-    }
-}
+    suspend fun searchSharedMemories(
+        query: String
+    ): List<MemoryItem> = withContext(Dispatchers.IO) {
+
+       
