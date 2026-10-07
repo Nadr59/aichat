@@ -22,28 +22,31 @@ class MemoryCuratorService(
     companion object {
         private const val TAG = "MemoryCurator"
 
-        /**
-         * تحذير مُلصَق حتمياً بعد المحتوى المُستخلَص من الذاكرة تحديداً
-         * (لا بعد نقاط الهوية الأسلوبية)، بهدف تقريب مسافة الانتباه بين
-         * التحذير والحقائق نفسها.
-         *
-         * ⚠️ تجربة غير مؤكدة الفعالية بعد: محاولات سابقة لمنع النموذج
-         * المُجيب من "إثراء" السياق بمعرفته العامة عبر تعليمات في
-         * SystemPrompt فشلت بدليل تجريبي مباشر (نموذج pixtral-12b-2409
-         * استمر بمزج تفاصيل عامة غير مؤكدة حتى مع تعطيل وثيقة الدقة
-         * بالكامل). هذا تدخّل مختلف (قرب فيزيائي من المحتوى بدل فقرة
-         * منفصلة)، ويحتاج اختباراً فعلياً قبل اعتباره حلاً ناجحاً.
-         *
-         * ملاحظة تصميمية (جديد): تُلحَق هذه العبارة فقط إذا كانت هناك
-         * ذاكرة فعلية مسترجَعة (candidates.isNotEmpty())، لأنها تتحدث
-         * صراحة عن "حقائق مؤكدة بخصوص الموضوع". إن كان مخرج الوسيط
-         * نقاط هوية أسلوبية فقط بلا ذاكرة، لا معنى لإلحاق تحذير عن
-         * حقائق غير موجودة أصلاً.
-         */
+        private const val MAX_SELECTED = 5
+
         private const val CONTEXT_DISCLAIMER =
             "\n\n⚠️ ملاحظة: هذا كل ما هو مؤكد ومتاح بخصوص هذا الموضوع تحديداً. " +
             "لا تُضف تفاصيل تقنية أو تاريخية أو مؤسسية إضافية من معرفتك العامة " +
             "غير مذكورة صراحة أعلاه، حتى لو بدت مألوفة أو مرتبطة لديك."
+    }
+
+    /**
+     * نتيجة اختيار الذاكرة.
+     *
+     * هذه الحقول الداخلية لا يطلبها الـ LLM.
+     */
+    data class CuratorResult(
+        val selectedIds: List<Long>,
+        val reasoning: String,
+        val irrelevantIds: List<Long> = emptyList(),
+        val isFallback: Boolean = false,
+        val fallbackReason: String? = null,
+        val rawResponse: String? = null
+    )
+
+    sealed interface CuratorOutcome {
+        data class Success(val result: CuratorResult) : CuratorOutcome
+        data class Fallback(val result: CuratorResult) : CuratorOutcome
     }
 
     private val client = OkHttpClient.Builder()
@@ -52,101 +55,402 @@ class MemoryCuratorService(
         .build()
 
     /**
-     * الدالة الرئيسية للوسيط الذكي.
+     * المرحلة 2:
+     * اختيار الذكريات بواسطة IDs الحقيقية.
      *
-     * @param mediatorIdentityText نص هوية/أسلوب اختياري (من الإعدادات افتراضياً).
-     *        فارغ = سلوك الوسيط الأصلي بالضبط (تنقية ذاكرة فقط، بلا كسر توافق).
-     *        غير فارغ = يتحول الوسيط أيضاً لمحسّن طلبات ضمن نفس الاستدعاء الواحد،
-     *        بلا أي استدعاء شبكة إضافي عن السابق.
-     *
-     * ملاحظة توافق: هذا المعامل له قيمة افتراضية، لذا أي استدعاء قديم
-     * لـ curate(userQuery, candidates) بدون تعديل يستمر بالعمل بلا كسر.
+     * هذه الدالة لا تعيد نصاً مولداً من الـ LLM.
+     * تعيد فقط IDs لمصادر الذاكرة الأصلية.
      */
+    suspend fun curateSelection(
+        userQuery: String,
+        candidates: List<MemoryItem>
+    ): CuratorResult = withContext(Dispatchers.IO) {
+
+        if (candidates.isEmpty()) {
+            return@withContext CuratorResult(
+                selectedIds = emptyList(),
+                reasoning = "No candidates",
+                rawResponse = null
+            )
+        }
+
+        if (!settings.memoryCuratorEnabled) {
+            return@withContext fallbackResult(
+                candidates = candidates,
+                reason = "Curator disabled"
+            )
+        }
+
+        val prompt = MemoryCuratorPrompt.buildSelectionPrompt(
+            query = userQuery,
+            candidates = candidates
+        )
+
+        val curatorProvider = settings.memoryCuratorProvider
+
+        try {
+            val rawResponse = when (curatorProvider) {
+
+                "custom" -> {
+                    val baseUrl = settings.customUrl.trim()
+                    val model = settings.customModel.trim()
+
+                    if (baseUrl.isBlank() || model.isBlank()) {
+                        return@withContext fallbackResult(
+                            candidates,
+                            "Custom curator URL or model blank"
+                        )
+                    }
+
+                    callCustomProvider(
+                        prompt = prompt,
+                        baseUrl = baseUrl,
+                        apiKey = settings.customKey,
+                        model = model
+                    )
+                }
+
+                else -> {
+                    val apiKey = settings.geminiKey
+
+                    if (apiKey.isBlank()) {
+                        return@withContext fallbackResult(
+                            candidates,
+                            "Gemini API key blank"
+                        )
+                    }
+
+                    callGeminiFlash(
+                        prompt = prompt,
+                        apiKey = apiKey,
+                        model = settings.memoryCuratorModel
+                    )
+                }
+            }
+
+            val parsed = parseCuratorResponse(rawResponse)
+
+            val sanitized = sanitize(
+                result = parsed.copy(rawResponse = rawResponse),
+                candidates = candidates
+            )
+
+            if (sanitized.isFallback) {
+                Log.w(
+                    TAG,
+                    "⚠️ Curator validation fallback: ${sanitized.fallbackReason}"
+                )
+            } else {
+                Log.d(
+                    TAG,
+                    "✅ Curator selected IDs: ${sanitized.selectedIds}"
+                )
+            }
+
+            sanitized
+
+        } catch (e: Exception) {
+
+            Log.w(
+                TAG,
+                "⚠️ Curator ($curatorProvider) EXCEPTION: ${e.message}",
+                e
+            )
+
+            fallbackResult(
+                candidates = candidates,
+                reason = "API/Parser failure: ${e.message}"
+            )
+        }
+    }
+
+    /**
+     * التوافق مع المسار القديم.
+     *
+     * مهم:
+     * لا نعيد JSON للـ ChatViewModel.
+     * نعيد محتوى الذكريات الأصلية المختارة فقط.
+     *
+     * سيتم حذف هذه الدالة بعد الانتقال إلى MemoryWindowBuilder
+     * في المرحلة 3.
+     */
+    @Deprecated("Use curateSelection for MemoryWindow")
     suspend fun curate(
         userQuery: String,
         candidates: List<MemoryItem>,
         mediatorIdentityText: String = settings.mediatorIdentityText
-    ): String =
-        withContext(Dispatchers.IO) {
+    ): String = withContext(Dispatchers.IO) {
 
-            // لا داعي لاستدعاء LLM إطلاقاً إن لم توجد ذاكرة ولا نص هوية
-            if (candidates.isEmpty() && mediatorIdentityText.isBlank()) {
-                return@withContext ""
-            }
+        if (candidates.isEmpty() && mediatorIdentityText.isBlank()) {
+            return@withContext ""
+        }
 
-            if (!settings.memoryCuratorEnabled) {
-                Log.d(TAG, "⚪ Curator DISABLED by setting")
-                // ملاحظة: عند تعطيل الوسيط، تُتجاهَل نقاط الهوية تماماً
-                // (تحتاج LLM بالضرورة)، ويُكتفى بالمسار الاحتياطي الخام.
-                return@withContext fallbackBuilder.build(candidates)
-            }
+        if (!settings.memoryCuratorEnabled) {
+            Log.d(TAG, "⚪ Curator DISABLED by setting")
+            return@withContext fallbackBuilder.build(candidates)
+        }
 
-            val prompt = MemoryCuratorPrompt.build(userQuery, candidates, mediatorIdentityText)
-            val curatorProvider = settings.memoryCuratorProvider
+        /*
+         * إذا لم توجد ذاكرة، نحافظ على السلوك القديم الخاص بالهوية.
+         * لا نغير مسار enhancer الحالي.
+         */
+        if (candidates.isEmpty()) {
+            return@withContext try {
+                val prompt = MemoryCuratorPrompt.build(
+                    userQuery,
+                    candidates,
+                    mediatorIdentityText
+                )
 
-            try {
-                val result: String = when (curatorProvider) {
-
-                    "custom" -> {
-                        val baseUrl = settings.customUrl.trim()
-                        val model   = settings.customModel.trim()
-
-                        if (baseUrl.isBlank() || model.isBlank()) {
-                            Log.w(TAG, "⚠️ Custom curator: URL or model blank")
-                            return@withContext fallbackBuilder.build(candidates)
-                        }
-
-                        callCustomProvider(
-                            prompt  = prompt,
-                            baseUrl = baseUrl,
-                            apiKey  = settings.customKey,
-                            model   = model
-                        )
-                    }
-
-                    else -> {
-                        val apiKey = settings.geminiKey
-                        if (apiKey.isBlank()) {
-                            Log.w(TAG, "⚠️ No Gemini key (blank)")
-                            return@withContext fallbackBuilder.build(candidates)
-                        }
-                        callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
-                    }
-                }
+                val result = callCuratorProvider(prompt)
 
                 if (result.isBlank() || result.trim().equals("NONE", ignoreCase = true)) {
-                    Log.d(TAG, "⚪ Curator found nothing relevant")
                     ""
                 } else {
-                    val trimmedResult = result.trim()
-                    Log.d(TAG, "✅ Curated: ${trimmedResult.take(80)}...")
-
-                    // التحذير يُلحَق فقط عند وجود ذاكرة فعلية مسترجَعة
-                    if (candidates.isNotEmpty()) {
-                        trimmedResult + CONTEXT_DISCLAIMER
-                    } else {
-                        trimmedResult
-                    }
+                    result.trim()
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "⚠️ Curator ($curatorProvider) EXCEPTION: ${e.message}", e)
-                fallbackBuilder.build(candidates)
+                Log.w(TAG, "⚠️ Legacy curator failed: ${e.message}")
+                ""
             }
         }
 
+        val result = curateSelection(
+            userQuery = userQuery,
+            candidates = candidates
+        )
+
+        val selected = result.selectedIds
+            .mapNotNull { id ->
+                candidates.find { it.id == id }
+            }
+
+        if (selected.isEmpty()) {
+            return@withContext ""
+        }
+
+        selected.joinToString("\n\n") { it.content } + CONTEXT_DISCLAIMER
+    }
+
     /**
-     * تحسين طلب المستخدم بناءً على الهوية المفعّلة فقط (بدون ذاكرة).
-     * 
-     * تُستخدَم عندما يطلب المستخدم صراحة "تحسين السؤال" من الواجهة
-     * (بالضغط على زر التحسين)، وليست عملية تلقائية.
-     * 
-     * @param userQuery السؤال الأصلي كما كتبه المستخدم
-     * @param mediatorIdentityText وصف الهوية/الأسلوب المطلوب من الإعدادات
-     * 
-     * @return السؤال المُحسّن (مُعاد صياغته بالكامل)، أو السؤال الأصلي
-     *         دون تغيير إن فشل التحسين أو لم يكن ممكناً منطقياً.
-     * 
-     * ⚠️ التغيير: حذف معامل memoryCandidates - التحسين يعتمد فقط على السؤال + الهوية
+     * Parser للـ JSON الخاص بالـ Curator.
+     *
+     * يقبل:
+     * 1. JSON مباشر.
+     * 2. JSON داخل ```json ... ```
+     * 3. نصاً يحتوي JSON يمكن استخراج أول object منه.
+     */
+    private fun parseCuratorResponse(raw: String): CuratorResult {
+
+        val cleaned = extractJsonObject(raw)
+
+        val json = JSONObject(cleaned)
+
+        val selectedIds = parseLongArray(
+            json.optJSONArray("selectedIds")
+        )
+
+        val irrelevantIds = parseLongArray(
+            json.optJSONArray("irrelevantIds")
+        )
+
+        val reasoning = json.optString(
+            "reasoning",
+            ""
+        ).trim()
+
+        return CuratorResult(
+            selectedIds = selectedIds,
+            reasoning = reasoning,
+            irrelevantIds = irrelevantIds
+        )
+    }
+
+    /**
+     * استخراج JSON حتى لو وضعه النموذج داخل Markdown.
+     */
+    private fun extractJsonObject(raw: String): String {
+
+        val text = raw.trim()
+
+        if (text.startsWith("{") && text.endsWith("}")) {
+            return text
+        }
+
+        val withoutMarkdown = text
+            .replace("```json", "", ignoreCase = true)
+            .replace("```", "")
+            .trim()
+
+        if (withoutMarkdown.startsWith("{") &&
+            withoutMarkdown.endsWith("}")
+        ) {
+            return withoutMarkdown
+        }
+
+        val start = withoutMarkdown.indexOf('{')
+        val end = withoutMarkdown.lastIndexOf('}')
+
+        if (start >= 0 && end > start) {
+            return withoutMarkdown.substring(start, end + 1)
+        }
+
+        throw IllegalArgumentException("No JSON object found")
+    }
+
+    private fun parseLongArray(array: JSONArray?): List<Long> {
+
+        if (array == null) {
+            return emptyList()
+        }
+
+        val result = mutableListOf<Long>()
+
+        for (i in 0 until array.length()) {
+            when (val value = array.opt(i)) {
+                is Number -> result.add(value.toLong())
+                is String -> value.toLongOrNull()?.let { result.add(it) }
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * طبقة التحقق الإلزامية بعد الـ LLM.
+     *
+     * تمنع:
+     * - IDs وهمية.
+     * - التكرار.
+     * - التداخل بين selected و irrelevant.
+     *
+     * وإذا أصبحت القائمة المختارة فارغة بسبب IDs غير صالحة،
+     * نعود إلى أفضل نتائج RRF.
+     *
+     * ملاحظة:
+     * selectedIds=[] من الـ LLM تعتبر اختياراً صالحاً.
+     * لذلك لا نعمل fallback إلا إذا كانت القائمة الأصلية غير فارغة
+     * وتم إرسال IDs غير صالحة أدت إلى حذف الاختيار.
+     */
+    private fun sanitize(
+        result: CuratorResult,
+        candidates: List<MemoryItem>,
+        limit: Int = MAX_SELECTED
+    ): CuratorResult {
+
+        val validIds = candidates
+            .map { it.id }
+            .toSet()
+
+        val originalSelected = result.selectedIds
+
+        val cleanSelected = originalSelected
+            .filter { it in validIds }
+            .distinct()
+            .take(limit)
+
+        val cleanIrrelevant = result.irrelevantIds
+            .filter { it in validIds && it !in cleanSelected }
+            .distinct()
+
+        /*
+         * إذا لم يرسل الـ LLM أي ID أصلاً، فهذا اختيار صحيح:
+         * لا توجد ذاكرة مناسبة.
+         */
+        if (originalSelected.isEmpty()) {
+            return result.copy(
+                selectedIds = emptyList(),
+                irrelevantIds = cleanIrrelevant,
+                isFallback = false,
+                fallbackReason = null
+            )
+        }
+
+        /*
+         * إذا أرسل IDs لكن كلها وهمية/غير موجودة:
+         * استخدم أفضل مرشحات RRF.
+         */
+        if (cleanSelected.isEmpty() && candidates.isNotEmpty()) {
+
+            val fallbackIds = candidates
+                .take(limit)
+                .map { it.id }
+
+            return CuratorResult(
+                selectedIds = fallbackIds,
+                reasoning = "Fallback: LLM returned invalid IDs",
+                irrelevantIds = emptyList(),
+                isFallback = true,
+                fallbackReason =
+                    "Invalid IDs returned by LLM: $originalSelected",
+                rawResponse = result.rawResponse
+            )
+        }
+
+        return result.copy(
+            selectedIds = cleanSelected,
+            irrelevantIds = cleanIrrelevant
+        )
+    }
+
+    private fun fallbackResult(
+        candidates: List<MemoryItem>,
+        reason: String
+    ): CuratorResult {
+
+        val ids = candidates
+            .take(MAX_SELECTED)
+            .map { it.id }
+
+        Log.w(TAG, "↩️ RRF fallback: $reason")
+
+        return CuratorResult(
+            selectedIds = ids,
+            reasoning = "Fallback to RRF candidates",
+            irrelevantIds = emptyList(),
+            isFallback = true,
+            fallbackReason = reason,
+            rawResponse = null
+        )
+    }
+
+    private suspend fun callCuratorProvider(prompt: String): String {
+        return when (settings.memoryCuratorProvider) {
+
+            "custom" -> {
+                val baseUrl = settings.customUrl.trim()
+                val model = settings.customModel.trim()
+
+                if (baseUrl.isBlank() || model.isBlank()) {
+                    throw Exception("Custom curator not configured")
+                }
+
+                callCustomProvider(
+                    prompt = prompt,
+                    baseUrl = baseUrl,
+                    apiKey = settings.customKey,
+                    model = model
+                )
+            }
+
+            else -> {
+                val apiKey = settings.geminiKey
+
+                if (apiKey.isBlank()) {
+                    throw Exception("Gemini API key is blank")
+                }
+
+                callGeminiFlash(
+                    prompt,
+                    apiKey,
+                    settings.memoryCuratorModel
+                )
+            }
+        }
+    }
+
+    /**
+     * تحسين طلب المستخدم بناءً على الهوية فقط.
      */
     suspend fun enhanceQuery(
         userQuery: String,
@@ -164,47 +468,50 @@ class MemoryCuratorService(
         }
 
         try {
-            Log.d(TAG, "🔄 Enhancing query (identity-only): ${userQuery.take(50)}...")
+            Log.d(
+                TAG,
+                "🔄 Enhancing query (identity-only): ${userQuery.take(50)}..."
+            )
 
-            // ✅ تمرير السؤال + الهوية فقط (بدون memoryCandidates)
             val prompt = MemoryCuratorPrompt.buildEnhancerPrompt(
-                userQuery            = userQuery,
+                userQuery = userQuery,
                 mediatorIdentityText = mediatorIdentityText
             )
 
             val enhanced = callConfiguredProvider(prompt).trim()
 
-            // التحقق من جودة الناتج
-            val isValid = enhanced.isNotBlank() &&
-                          enhanced != userQuery &&
-                          !enhanced.equals("NONE", ignoreCase = true) &&
-                          enhanced.length >= 10
+            val isValid =
+                enhanced.isNotBlank() &&
+                enhanced != userQuery &&
+                !enhanced.equals("NONE", ignoreCase = true) &&
+                enhanced.length >= 10
 
             if (isValid) {
-                Log.d(TAG, "✅ Enhanced (no memory): ${enhanced.take(80)}...")
+                Log.d(
+                    TAG,
+                    "✅ Enhanced (no memory): ${enhanced.take(80)}..."
+                )
                 enhanced
             } else {
-                Log.d(TAG, "⚠️ Enhancement invalid or identical, returning original")
+                Log.d(
+                    TAG,
+                    "⚠️ Enhancement invalid or identical, returning original"
+                )
                 userQuery
             }
 
         } catch (e: Exception) {
-            Log.w(TAG, "❌ Query enhancement failed: ${e.message}", e)
+            Log.w(
+                TAG,
+                "❌ Query enhancement failed: ${e.message}",
+                e
+            )
             userQuery
         }
     }
 
     /**
-     * 🆕 تحسين صياغة السؤال فقط (بدون إضافة محتوى أو توسيع)
-     * 
-     * الفرق عن enhanceQuery():
-     * - هذه: نفس المعنى، لغة أفضل (رسمي/عامي/أكاديمي/إبداعي)
-     * - تلك: توسيع السؤال وإضافة تفاصيل بناءً على الهوية
-     * 
-     * @param userQuery السؤال الأصلي
-     * @param style النمط المطلوب (FORMAL, CASUAL, ACADEMIC, CREATIVE)
-     * 
-     * @return السؤال بنفس المحتوى لكن بصياغة محسّنة
+     * تحسين صياغة السؤال فقط.
      */
     suspend fun refineQueryStyle(
         userQuery: String,
@@ -222,7 +529,10 @@ class MemoryCuratorService(
         }
 
         try {
-            Log.d(TAG, "🎨 Refining query style: ${style.displayName} - ${userQuery.take(50)}...")
+            Log.d(
+                TAG,
+                "🎨 Refining query style: ${style.displayName} - ${userQuery.take(50)}..."
+            )
 
             val prompt = MemoryCuratorPrompt.buildStyleRefinementPrompt(
                 userQuery = userQuery,
@@ -231,131 +541,235 @@ class MemoryCuratorService(
 
             val refined = callConfiguredProvider(prompt).trim()
 
-            // التحقق من الجودة (أقل صرامة من enhanceQuery)
-            val isValid = refined.isNotBlank() &&
-                          refined.length >= 5 &&
-                          !refined.equals("NONE", ignoreCase = true)
+            val isValid =
+                refined.isNotBlank() &&
+                refined.length >= 5 &&
+                !refined.equals("NONE", ignoreCase = true)
 
             if (isValid) {
-                Log.d(TAG, "✅ Refined (${style.displayName}): ${refined.take(80)}...")
+                Log.d(
+                    TAG,
+                    "✅ Refined (${style.displayName}): ${refined.take(80)}..."
+                )
                 refined
             } else {
-                Log.d(TAG, "⚠️ Refinement invalid, returning original")
+                Log.d(
+                    TAG,
+                    "⚠️ Refinement invalid, returning original"
+                )
                 userQuery
             }
 
         } catch (e: Exception) {
-            Log.w(TAG, "❌ Query style refinement failed: ${e.message}", e)
+            Log.w(
+                TAG,
+                "❌ Query style refinement failed: ${e.message}",
+                e
+            )
             userQuery
         }
     }
 
-    // ── Helper: استدعاء الموفر المُختار ──────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Helper: الموفر المستخدم للتحسين وإعادة الصياغة
+    // ─────────────────────────────────────────────────────────────
 
-    private suspend fun callConfiguredProvider(prompt: String): String {
-    return when (settings.memoryCuratorProvider) {
-        "ollama" -> {
-            val model = settings.memoryCuratorOllamaModel.trim()
-            if (model.isBlank()) {
-                throw Exception("Ollama model not configured")
+    private suspend fun callConfiguredProvider(
+        prompt: String
+    ): String {
+
+        return when (settings.memoryCuratorProvider) {
+
+            "ollama" -> {
+                val model = settings.memoryCuratorOllamaModel.trim()
+
+                if (model.isBlank()) {
+                    throw Exception("Ollama model not configured")
+                }
+
+                Log.d(TAG, "🤖 Using Ollama (local): $model")
+
+                callOllama(
+                    prompt = prompt,
+                    model = model
+                )
             }
-            Log.d(TAG, "🤖 Using Ollama (local): $model")
-            callOllama(prompt, model)
-        }
-        
-        "custom" -> {
-            val baseUrl = settings.customUrl.trim()
-            val model   = settings.customModel.trim()
-            if (baseUrl.isBlank() || model.isBlank()) {
-                throw Exception("Custom provider not configured")
+
+            "custom" -> {
+                val baseUrl = settings.customUrl.trim()
+                val model = settings.customModel.trim()
+
+                if (baseUrl.isBlank() || model.isBlank()) {
+                    throw Exception("Custom provider not configured")
+                }
+
+                Log.d(TAG, "🔧 Using Custom: $baseUrl")
+
+                callCustomProvider(
+                    prompt = prompt,
+                    baseUrl = baseUrl,
+                    apiKey = settings.customKey,
+                    model = model
+                )
             }
-            Log.d(TAG, "🔧 Using Custom: $baseUrl")
-            callCustomProvider(prompt, baseUrl, settings.customKey, model)
-        }
-        
-        else -> {
-            val apiKey = settings.geminiKey
-            if (apiKey.isBlank()) {
-                throw Exception("Gemini API key is blank")
+
+            else -> {
+                val apiKey = settings.geminiKey
+
+                if (apiKey.isBlank()) {
+                    throw Exception("Gemini API key is blank")
+                }
+
+                Log.d(
+                    TAG,
+                    "✨ Using Gemini: ${settings.memoryCuratorModel}"
+                )
+
+                callGeminiFlash(
+                    prompt = prompt,
+                    apiKey = apiKey,
+                    model = settings.memoryCuratorModel
+                )
             }
-            Log.d(TAG, "✨ Using Gemini: ${settings.memoryCuratorModel}")
-            callGeminiFlash(prompt, apiKey, settings.memoryCuratorModel)
         }
     }
-    }
-    // ── Ollama (محلي - OpenAI-compatible) ─────────────────────────
 
-private fun callOllama(prompt: String, model: String): String {
-    val json = JSONObject().apply {
-        put("model", model)
-        put("messages", JSONArray().apply {
-            put(JSONObject().apply {
-                put("role", "user")
-                put("content", prompt)
-            })
-        })
-        put("temperature", 0.2)
-        put("max_tokens", 2000)
-        put("stream", false)
-    }
+    // ─────────────────────────────────────────────────────────────
+    // Ollama
+    // ─────────────────────────────────────────────────────────────
 
-    // Ollama يستخدم OpenAI-compatible API على المنفذ 11434
-    val request = Request.Builder()
-        .url("http://127.0.0.1:11434/v1/chat/completions")
-        .addHeader("Content-Type", "application/json")
-        .post(json.toString().toRequestBody("application/json".toMediaType()))
-        .build()
+    private fun callOllama(
+        prompt: String,
+        model: String
+    ): String {
 
-    client.newCall(request).execute().use { response ->
-        if (!response.isSuccessful) {
-            throw Exception(
-                "Ollama failed: ${response.code} - ${response.body?.string()}\n" +
-                "تأكد من تشغيل Ollama في Termux: ollama serve"
-            )
-        }
-
-        val body = response.body?.string()
-            ?: throw Exception("Empty response from Ollama")
-
-        return try {
-            JSONObject(body)
-                .getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .getString("content")
-        } catch (e: Exception) {
-            throw Exception("خطأ في تحليل رد Ollama. تأكد من تشغيل النموذج: $model")
-        }
-    }
-}
-
-    // ── Gemini Flash ──────────────────────────────────────────────────
-
-    private fun callGeminiFlash(prompt: String, apiKey: String, model: String): String {
         val json = JSONObject().apply {
-            put("contents", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("parts", JSONArray().apply {
-                        put(JSONObject().apply { put("text", prompt) })
-                    })
-                })
-            })
-            put("generationConfig", JSONObject().apply {
-                put("temperature", 0.2)
-                put("maxOutputTokens", 2000)
-            })
+            put("model", model)
+
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(
+                        JSONObject().apply {
+                            put("role", "user")
+                            put("content", prompt)
+                        }
+                    )
+                }
+            )
+
+            put("temperature", 0.2)
+            put("max_tokens", 2000)
+            put("stream", false)
+
+            // إجبار Ollama على JSON
+            put("format", "json")
         }
 
         val request = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-            .addHeader("x-goog-api-key", apiKey)
+            .url("http://127.0.0.1:11434/v1/chat/completions")
             .addHeader("Content-Type", "application/json")
-            .post(json.toString().toRequestBody("application/json".toMediaType()))
+            .post(
+                json.toString()
+                    .toRequestBody("application/json".toMediaType())
+            )
             .build()
 
         client.newCall(request).execute().use { response ->
+
             if (!response.isSuccessful) {
-                throw Exception("Gemini Flash failed: ${response.code} - ${response.body?.string()}")
+                throw Exception(
+                    "Ollama failed: ${response.code} - " +
+                        "${response.body?.string()}\n" +
+                        "تأكد من تشغيل Ollama في Termux: ollama serve"
+                )
+            }
+
+            val body = response.body?.string()
+                ?: throw Exception("Empty response from Ollama")
+
+            return try {
+
+                JSONObject(body)
+                    .getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+
+            } catch (e: Exception) {
+
+                throw Exception(
+                    "خطأ في تحليل رد Ollama. " +
+                        "تأكد من تشغيل النموذج: $model"
+                )
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Gemini Flash
+    // ─────────────────────────────────────────────────────────────
+
+    private fun callGeminiFlash(
+        prompt: String,
+        apiKey: String,
+        model: String
+    ): String {
+
+        val json = JSONObject().apply {
+
+            put(
+                "contents",
+                JSONArray().apply {
+                    put(
+                        JSONObject().apply {
+                            put(
+                                "parts",
+                                JSONArray().apply {
+                                    put(
+                                        JSONObject().apply {
+                                            put("text", prompt)
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    )
+                }
+            )
+
+            put(
+                "generationConfig",
+                JSONObject().apply {
+                    put("temperature", 0.2)
+                    put("maxOutputTokens", 2000)
+
+                    // إجبار Gemini على JSON
+                    put("responseMimeType", "application/json")
+                }
+            )
+        }
+
+        val request = Request.Builder()
+            .url(
+                "https://generativelanguage.googleapis.com/v1beta/models/" +
+                    "$model:generateContent"
+            )
+            .addHeader("x-goog-api-key", apiKey)
+            .addHeader("Content-Type", "application/json")
+            .post(
+                json.toString()
+                    .toRequestBody("application/json".toMediaType())
+            )
+            .build()
+
+        client.newCall(request).execute().use { response ->
+
+            if (!response.isSuccessful) {
+                throw Exception(
+                    "Gemini Flash failed: " +
+                        "${response.code} - ${response.body?.string()}"
+                )
             }
 
             val body = response.body?.string()
@@ -371,22 +785,33 @@ private fun callOllama(prompt: String, model: String): String {
         }
     }
 
-    // ── Custom (OpenAI-compatible chat/completions) ──────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Custom OpenAI-compatible
+    // ─────────────────────────────────────────────────────────────
 
     private fun callCustomProvider(
-        prompt:  String,
+        prompt: String,
         baseUrl: String,
-        apiKey:  String,
-        model:   String
+        apiKey: String,
+        model: String
     ): String {
+
         val json = JSONObject().apply {
+
             put("model", model)
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", prompt)
-                })
-            })
+
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(
+                        JSONObject().apply {
+                            put("role", "user")
+                            put("content", prompt)
+                        }
+                    )
+                }
+            )
+
             put("temperature", 0.2)
             put("max_tokens", 2000)
         }
@@ -394,41 +819,70 @@ private fun callOllama(prompt: String, model: String): String {
         val requestBuilder = Request.Builder()
             .url(baseUrl)
             .addHeader("Content-Type", "application/json")
-            .post(json.toString().toRequestBody("application/json".toMediaType()))
+            .post(
+                json.toString()
+                    .toRequestBody("application/json".toMediaType())
+            )
 
         if (apiKey.isNotBlank()) {
-            requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+            requestBuilder.addHeader(
+                "Authorization",
+                "Bearer $apiKey"
+            )
         }
 
-        client.newCall(requestBuilder.build()).execute().use { response ->
-            if (!response.isSuccessful) {
+        client.newCall(requestBuilder.build())
+            .execute()
+            .use { response ->
+
+                if (!response.isSuccessful) {
+                    throw Exception(
+                        "Custom curator failed: " +
+                            "${response.code} - ${response.body?.string()}"
+                    )
+                }
+
+                val body = response.body?.string()
+                    ?: throw Exception(
+                        "Empty response from custom curator"
+                    )
+
+                val message =
+                    JSONObject(body)
+                        .getJSONArray("choices")
+                        .getJSONObject(0)
+                        .getJSONObject("message")
+
+                val content =
+                    message
+                        .optString("content", "")
+                        .takeIf {
+                            it.isNotBlank() && it != "null"
+                        }
+
+                if (content != null) {
+                    return content
+                }
+
+                val reasoning =
+                    message
+                        .optString("reasoning", "")
+                        .takeIf {
+                            it.isNotBlank() && it != "null"
+                        }
+
+                if (reasoning != null) {
+                    Log.d(
+                        TAG,
+                        "ℹ️ Custom curator: using 'reasoning' field"
+                    )
+                    return reasoning
+                }
+
                 throw Exception(
-                    "Custom curator failed: ${response.code} - ${response.body?.string()}"
+                    "Both 'content' and 'reasoning' fields are empty. " +
+                        "Raw: ${body.take(300)}"
                 )
             }
-
-            val body = response.body?.string()
-                ?: throw Exception("Empty response from custom curator")
-
-            val message = JSONObject(body)
-                .getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-
-            val content = message.optString("content", "")
-                .takeIf { it.isNotBlank() && it != "null" }
-
-            if (content != null) return content
-
-            val reasoning = message.optString("reasoning", "")
-                .takeIf { it.isNotBlank() && it != "null" }
-
-            if (reasoning != null) {
-                Log.d(TAG, "ℹ️ Custom curator: using 'reasoning' field (content was empty)")
-                return reasoning
-            }
-
-            throw Exception("Both 'content' and 'reasoning' fields are empty. Raw: ${body.take(300)}")
-        }
     }
 }
