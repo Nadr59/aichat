@@ -6,8 +6,10 @@ import com.example.aichat.data.model.QueryStyle
 object MemoryCuratorPrompt {
 
     /**
-     * الدالة الأصلية لتنقية الذاكرة - بدون تغيير.
-     * تُستخدم في sendChatMessage() لتنظيم نتائج البحث في الذاكرة.
+     * الدالة القديمة لتنقية الذاكرة.
+     *
+     * تبقى للتوافق مع المسار الحالي حتى يتم الانتقال إلى
+     * MemoryWindowBuilder في المرحلة 3.
      */
     fun build(
         userQuery: String,
@@ -45,7 +47,60 @@ object MemoryCuratorPrompt {
     }
 
     /**
-     * برومبت محسّن الطلبات - توسيع السؤال بناءً على الهوية.
+     * 🆕 المرحلة 2:
+     * Prompt مخصص لاختيار الذكريات بواسطة ID الحقيقي.
+     *
+     * مهم جداً:
+     * - لا يستخدم رقم ترتيب الذاكرة.
+     * - لا يسمح للـ LLM بتلخيص المحتوى.
+     * - المخرج المطلوب JSON فقط.
+     */
+    fun buildSelectionPrompt(
+        query: String,
+        candidates: List<MemoryItem>
+    ): String = buildString {
+
+        appendLine("أنت Curator للذاكرة المشتركة.")
+        appendLine("مهمتك الوحيدة هي اختيار IDs للذكريات المرتبطة مباشرة بسؤال المستخدم.")
+        appendLine()
+
+        appendLine("القواعد الصارمة:")
+        appendLine("1. أجب بـ JSON فقط.")
+        appendLine("2. لا تكتب أي نص قبل JSON أو بعده.")
+        appendLine("3. لا تستخدم Markdown أو ```.")
+        appendLine("4. لا تلخص محتوى الذكريات.")
+        appendLine("5. لا تخترع أي ID.")
+        appendLine("6. استخدم فقط IDs الموجودة فعلياً في قائمة المرشحين.")
+        appendLine("7. اختر الذكريات التي تجيب مباشرة عن السؤال فقط.")
+        appendLine("8. الحد الأقصى للاختيار هو 5 ذكريات.")
+        appendLine("9. إذا لم توجد ذاكرة مرتبطة مباشرة بالسؤال، استخدم selectedIds فارغة.")
+        appendLine("10. irrelevantIds اختيارية، ويمكن تركها فارغة.")
+        appendLine()
+
+        appendLine("السؤال:")
+        appendLine("\"$query\"")
+        appendLine()
+
+        appendLine("المرشحون:")
+
+        if (candidates.isEmpty()) {
+            appendLine("(لا توجد مرشحات)")
+        } else {
+            candidates.forEach { memory ->
+                appendLine("ID: ${memory.id}")
+                appendLine("المحتوى: ${memory.content.take(400)}")
+                appendLine()
+            }
+        }
+
+        appendLine("أخرج JSON بهذا الشكل فقط:")
+        appendLine(
+            """{"selectedIds":[27,31],"reasoning":"سبب مختصر","irrelevantIds":[42]}"""
+        )
+    }
+
+    /**
+     * برومبت تحسين الطلبات - توسيع السؤال بناءً على الهوية.
      */
     fun buildEnhancerPrompt(
         userQuery: String,
@@ -129,11 +184,7 @@ object MemoryCuratorPrompt {
     }
 
     /**
-     * 🆕 بناء prompt تحسين صياغة السؤال (بدون إضافة محتوى)
-     * 
-     * الفرق عن buildEnhancerPrompt:
-     * - هنا: نفس المحتوى، لغة أفضل فقط
-     * - هناك: توسيع وإضافة تفاصيل
+     * تحسين صياغة السؤال فقط.
      */
     fun buildStyleRefinementPrompt(
         userQuery: String,
