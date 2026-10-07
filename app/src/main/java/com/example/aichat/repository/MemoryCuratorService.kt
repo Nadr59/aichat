@@ -634,7 +634,7 @@ class MemoryCuratorService(
                 )
                 .build()
 
-        client.newCall(request)
+        return client.newCall(request)
             .execute()
             .use { response ->
 
@@ -744,7 +744,7 @@ class MemoryCuratorService(
                 )
                 .build()
 
-        client.newCall(request)
+        return client.newCall(request)
             .execute()
             .use { response ->
 
