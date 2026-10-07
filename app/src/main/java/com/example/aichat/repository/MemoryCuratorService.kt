@@ -197,7 +197,7 @@ class MemoryCuratorService(
         }
 
     // ============================================================
-    // تحسين السؤال — Enhanced Query
+    // Enhance Query — اختبار اتصال الوسيط
     // ============================================================
 
     suspend fun enhanceQuery(
@@ -232,10 +232,13 @@ class MemoryCuratorService(
         }
 
         try {
+            /*
+             * buildEnhancerPrompt() في MemoryCuratorPrompt
+             * يستقبل السؤال والهوية فقط.
+             */
             val prompt = MemoryCuratorPrompt.buildEnhancerPrompt(
                 userQuery = userQuery,
-                mediatorIdentityText = mediatorIdentityText,
-                memoryCandidates = memoryCandidates
+                mediatorIdentityText = mediatorIdentityText
             )
 
             Log.d(
@@ -293,7 +296,7 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // تحسين الصياغة حسب النمط
+    // Refine Query Style
     // ============================================================
 
     suspend fun refineQueryStyle(
@@ -315,16 +318,21 @@ class MemoryCuratorService(
         }
 
         try {
-            val prompt = style.buildPrompt(userQuery)
+            val prompt =
+                MemoryCuratorPrompt.buildStyleRefinementPrompt(
+                    userQuery = userQuery,
+                    style = style
+                )
 
             Log.d(
                 TAG,
                 "🎨 STYLE REFINE START | " +
-                    "style=${style.displayName} | " +
+                    "style=$style | " +
                     "queryLen=${userQuery.length}"
             )
 
-            val refined = callConfiguredProvider(prompt).trim()
+            val refined =
+                callConfiguredProvider(prompt).trim()
 
             if (refined.isBlank()) {
                 Log.d(
@@ -338,8 +346,7 @@ class MemoryCuratorService(
             Log.d(
                 TAG,
                 "🎨 STYLE REFINE SUCCESS | " +
-                    "style=${style.displayName} | " +
-                    "len=${refined.length}"
+                    "style=$style | len=${refined.length}"
             )
 
             refined
@@ -357,7 +364,7 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // اختيار مزود الوسيط
+    // Configured Provider
     // ============================================================
 
     private suspend fun callConfiguredProvider(
@@ -391,10 +398,16 @@ class MemoryCuratorService(
 
             "custom" -> {
 
-                val baseUrl = settings.customUrl.trim()
-                val model = settings.customModel.trim()
+                val baseUrl =
+                    settings.customUrl.trim()
 
-                if (baseUrl.isBlank() || model.isBlank()) {
+                val model =
+                    settings.customModel.trim()
+
+                if (
+                    baseUrl.isBlank() ||
+                    model.isBlank()
+                ) {
                     throw Exception(
                         "Custom provider not configured"
                     )
@@ -415,7 +428,8 @@ class MemoryCuratorService(
 
             else -> {
 
-                val apiKey = settings.geminiKey
+                val apiKey =
+                    settings.geminiKey
 
                 if (apiKey.isBlank()) {
                     throw Exception(
@@ -430,16 +444,16 @@ class MemoryCuratorService(
                 )
 
                 callGeminiFlash(
-                    prompt,
-                    apiKey,
-                    settings.memoryCuratorModel
+                    prompt = prompt,
+                    apiKey = apiKey,
+                    model = settings.memoryCuratorModel
                 )
             }
         }
     }
 
     // ============================================================
-    // مزود الوسيط — يدعم JSON للـ Curator
+    // Curator Provider
     // ============================================================
 
     private suspend fun callCuratorProvider(
@@ -462,7 +476,8 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 CURATOR PROVIDER | Ollama | model=$model"
+                    "🧠 CURATOR PROVIDER | Ollama | " +
+                        "model=$model"
                 )
 
                 callOllama(
@@ -474,10 +489,16 @@ class MemoryCuratorService(
 
             "custom" -> {
 
-                val baseUrl = settings.customUrl.trim()
-                val model = settings.customModel.trim()
+                val baseUrl =
+                    settings.customUrl.trim()
 
-                if (baseUrl.isBlank() || model.isBlank()) {
+                val model =
+                    settings.customModel.trim()
+
+                if (
+                    baseUrl.isBlank() ||
+                    model.isBlank()
+                ) {
                     throw Exception(
                         "Custom curator not configured"
                     )
@@ -485,7 +506,8 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 CURATOR PROVIDER | Custom | model=$model"
+                    "🧠 CURATOR PROVIDER | Custom | " +
+                        "model=$model"
                 )
 
                 callCustomProvider(
@@ -498,7 +520,8 @@ class MemoryCuratorService(
 
             else -> {
 
-                val apiKey = settings.geminiKey
+                val apiKey =
+                    settings.geminiKey
 
                 if (apiKey.isBlank()) {
                     throw Exception(
@@ -535,116 +558,126 @@ class MemoryCuratorService(
 
         Log.d(
             TAG,
-            "🧠 REQUEST SENT | Gemini | model=$model | " +
-                "json=$forceJson | promptLen=${prompt.length}"
+            "🧠 REQUEST SENT | Gemini | " +
+                "model=$model | json=$forceJson | " +
+                "promptLen=${prompt.length}"
         )
 
-        val generationConfig = JSONObject().apply {
-            put("temperature", 0.2)
-            put("maxOutputTokens", 2000)
+        val generationConfig =
+            JSONObject().apply {
 
-            if (forceJson) {
-                put(
-                    "responseMimeType",
-                    "application/json"
-                )
-            }
-        }
+                put("temperature", 0.2)
+                put("maxOutputTokens", 2000)
 
-        val json = JSONObject().apply {
-
-            put(
-                "contents",
-                JSONArray().apply {
+                if (forceJson) {
                     put(
-                        JSONObject().apply {
-                            put(
-                                "parts",
-                                JSONArray().apply {
-                                    put(
-                                        JSONObject().apply {
-                                            put(
-                                                "text",
-                                                prompt
-                                            )
-                                        }
-                                    )
-                                }
-                            )
-                        }
+                        "responseMimeType",
+                        "application/json"
                     )
                 }
-            )
+            }
 
-            put(
-                "generationConfig",
-                generationConfig
-            )
-        }
+        val json =
+            JSONObject().apply {
 
-        val request = Request.Builder()
-            .url(
-                "https://generativelanguage.googleapis.com/" +
-                    "v1beta/models/$model:generateContent"
-            )
-            .addHeader(
-                "x-goog-api-key",
-                apiKey
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .post(
-                json.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .build()
+                put(
+                    "contents",
+                    JSONArray().apply {
 
-        client.newCall(request).execute().use { response ->
+                        put(
+                            JSONObject().apply {
 
-            if (!response.isSuccessful) {
+                                put(
+                                    "parts",
+                                    JSONArray().apply {
 
-                val errorBody =
-                    response.body?.string()
-
-                Log.w(
-                    TAG,
-                    "🧠 GEMINI HTTP ERROR | " +
-                        "code=${response.code}"
+                                        put(
+                                            JSONObject().apply {
+                                                put(
+                                                    "text",
+                                                    prompt
+                                                )
+                                            }
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                    }
                 )
 
-                throw Exception(
-                    "Gemini Flash failed: " +
-                        "${response.code} - $errorBody"
+                put(
+                    "generationConfig",
+                    generationConfig
                 )
             }
 
-            val body =
-                response.body?.string()
-                    ?: throw Exception(
-                        "Empty response from Gemini Flash"
+        val request =
+            Request.Builder()
+                .url(
+                    "https://generativelanguage.googleapis.com/" +
+                        "v1beta/models/$model:generateContent"
+                )
+                .addHeader(
+                    "x-goog-api-key",
+                    apiKey
+                )
+                .addHeader(
+                    "Content-Type",
+                    "application/json"
+                )
+                .post(
+                    json.toString()
+                        .toRequestBody(
+                            "application/json".toMediaType()
+                        )
+                )
+                .build()
+
+        client.newCall(request)
+            .execute()
+            .use { response ->
+
+                if (!response.isSuccessful) {
+
+                    val errorBody =
+                        response.body?.string()
+
+                    Log.w(
+                        TAG,
+                        "🧠 GEMINI HTTP ERROR | " +
+                            "code=${response.code}"
                     )
 
-            val result =
-                JSONObject(body)
-                    .getJSONArray("candidates")
-                    .getJSONObject(0)
-                    .getJSONObject("content")
-                    .getJSONArray("parts")
-                    .getJSONObject(0)
-                    .getString("text")
+                    throw Exception(
+                        "Gemini Flash failed: " +
+                            "${response.code} - $errorBody"
+                    )
+                }
 
-            Log.d(
-                TAG,
-                "🧠 GEMINI RESPONSE RECEIVED | " +
-                    "len=${result.length()}"
-            )
+                val body =
+                    response.body?.string()
+                        ?: throw Exception(
+                            "Empty response from Gemini Flash"
+                        )
 
-            return result
-        }
+                val result =
+                    JSONObject(body)
+                        .getJSONArray("candidates")
+                        .getJSONObject(0)
+                        .getJSONObject("content")
+                        .getJSONArray("parts")
+                        .getJSONObject(0)
+                        .getString("text")
+
+                Log.d(
+                    TAG,
+                    "🧠 GEMINI RESPONSE RECEIVED | " +
+                        "len=${result.length}"
+                )
+
+                result
+            }
     }
 
     // ============================================================
@@ -659,90 +692,107 @@ class MemoryCuratorService(
 
         Log.d(
             TAG,
-            "🧠 REQUEST SENT | Ollama | model=$model | " +
-                "json=$forceJson | promptLen=${prompt.length}"
+            "🧠 REQUEST SENT | Ollama | " +
+                "model=$model | json=$forceJson | " +
+                "promptLen=${prompt.length}"
         )
 
-        val json = JSONObject().apply {
+        val json =
+            JSONObject().apply {
 
-            put("model", model)
-            put("stream", false)
+                put("model", model)
+                put("stream", false)
 
-            if (forceJson) {
-                put("format", "json")
+                if (forceJson) {
+                    put("format", "json")
+                }
+
+                put(
+                    "messages",
+                    JSONArray().apply {
+
+                        put(
+                            JSONObject().apply {
+                                put(
+                                    "role",
+                                    "user"
+                                )
+                                put(
+                                    "content",
+                                    prompt
+                                )
+                            }
+                        )
+                    }
+                )
             }
 
-            put(
-                "messages",
-                JSONArray().apply {
-                    put(
-                        JSONObject().apply {
-                            put("role", "user")
-                            put("content", prompt)
-                        }
+        val request =
+            Request.Builder()
+                .url(
+                    "http://127.0.0.1:11434/api/chat"
+                )
+                .addHeader(
+                    "Content-Type",
+                    "application/json"
+                )
+                .post(
+                    json.toString()
+                        .toRequestBody(
+                            "application/json".toMediaType()
+                        )
+                )
+                .build()
+
+        client.newCall(request)
+            .execute()
+            .use { response ->
+
+                if (!response.isSuccessful) {
+
+                    val errorBody =
+                        response.body?.string()
+
+                    Log.w(
+                        TAG,
+                        "🧠 OLLAMA HTTP ERROR | " +
+                            "code=${response.code}"
+                    )
+
+                    throw Exception(
+                        "Ollama failed: " +
+                            "${response.code} - $errorBody"
                     )
                 }
-            )
-        }
 
-        val request = Request.Builder()
-            .url("http://127.0.0.1:11434/api/chat")
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .post(
-                json.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
-            .build()
-
-        client.newCall(request).execute().use { response ->
-
-            if (!response.isSuccessful) {
-
-                val errorBody =
+                val body =
                     response.body?.string()
+                        ?: throw Exception(
+                            "Empty response from Ollama"
+                        )
 
-                Log.w(
-                    TAG,
-                    "🧠 OLLAMA HTTP ERROR | " +
-                        "code=${response.code}"
-                )
+                val result =
+                    JSONObject(body)
+                        .getJSONObject("message")
+                        .optString(
+                            "content",
+                            ""
+                        )
 
-                throw Exception(
-                    "Ollama failed: " +
-                        "${response.code} - $errorBody"
-                )
-            }
-
-            val body =
-                response.body?.string()
-                    ?: throw Exception(
-                        "Empty response from Ollama"
+                if (result.isBlank()) {
+                    throw Exception(
+                        "Ollama returned empty content"
                     )
+                }
 
-            val result =
-                JSONObject(body)
-                    .getJSONObject("message")
-                    .optString("content", "")
-
-            if (result.isBlank()) {
-                throw Exception(
-                    "Ollama returned empty content"
+                Log.d(
+                    TAG,
+                    "🧠 OLLAMA RESPONSE RECEIVED | " +
+                        "len=${result.length}"
                 )
+
+                result
             }
-
-            Log.d(
-                TAG,
-                "🧠 OLLAMA RESPONSE RECEIVED | " +
-                    "len=${result.length()}"
-            )
-
-            return result
-        }
     }
 
     // ============================================================
@@ -758,42 +808,62 @@ class MemoryCuratorService(
 
         Log.d(
             TAG,
-            "🧠 REQUEST SENT | Custom | model=$model | " +
+            "🧠 REQUEST SENT | Custom | " +
+                "model=$model | " +
                 "promptLen=${prompt.length}"
         )
 
-        val json = JSONObject().apply {
+        val json =
+            JSONObject().apply {
 
-            put("model", model)
+                put(
+                    "model",
+                    model
+                )
 
-            put(
-                "messages",
-                JSONArray().apply {
-                    put(
-                        JSONObject().apply {
-                            put("role", "user")
-                            put("content", prompt)
-                        }
-                    )
-                }
-            )
+                put(
+                    "messages",
+                    JSONArray().apply {
 
-            put("temperature", 0.2)
-            put("max_tokens", 2000)
-        }
+                        put(
+                            JSONObject().apply {
+                                put(
+                                    "role",
+                                    "user"
+                                )
+                                put(
+                                    "content",
+                                    prompt
+                                )
+                            }
+                        )
+                    }
+                )
 
-        val requestBuilder = Request.Builder()
-            .url(baseUrl)
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .post(
-                json.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
+                put(
+                    "temperature",
+                    0.2
+                )
+
+                put(
+                    "max_tokens",
+                    2000
+                )
+            }
+
+        val requestBuilder =
+            Request.Builder()
+                .url(baseUrl)
+                .addHeader(
+                    "Content-Type",
+                    "application/json"
+                )
+                .post(
+                    json.toString()
+                        .toRequestBody(
+                            "application/json".toMediaType()
+                        )
+                )
 
         if (apiKey.isNotBlank()) {
             requestBuilder.addHeader(
@@ -804,83 +874,92 @@ class MemoryCuratorService(
 
         client.newCall(
             requestBuilder.build()
-        ).execute().use { response ->
+        )
+            .execute()
+            .use { response ->
 
-            if (!response.isSuccessful) {
+                if (!response.isSuccessful) {
 
-                val errorBody =
-                    response.body?.string()
+                    val errorBody =
+                        response.body?.string()
 
-                Log.w(
-                    TAG,
-                    "🧠 CUSTOM HTTP ERROR | " +
-                        "code=${response.code}"
-                )
-
-                throw Exception(
-                    "Custom curator failed: " +
-                        "${response.code} - $errorBody"
-                )
-            }
-
-            val body =
-                response.body?.string()
-                    ?: throw Exception(
-                        "Empty response from custom curator"
+                    Log.w(
+                        TAG,
+                        "🧠 CUSTOM HTTP ERROR | " +
+                            "code=${response.code}"
                     )
 
-            val message =
-                JSONObject(body)
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
+                    throw Exception(
+                        "Custom curator failed: " +
+                            "${response.code} - $errorBody"
+                    )
+                }
 
-            val content =
-                message
-                    .optString("content", "")
-                    .takeIf {
-                        it.isNotBlank() &&
-                            it != "null"
-                    }
+                val body =
+                    response.body?.string()
+                        ?: throw Exception(
+                            "Empty response from custom curator"
+                        )
 
-            if (content != null) {
+                val message =
+                    JSONObject(body)
+                        .getJSONArray("choices")
+                        .getJSONObject(0)
+                        .getJSONObject("message")
 
-                Log.d(
-                    TAG,
-                    "🧠 CUSTOM RESPONSE RECEIVED | " +
-                        "len=${content.length}"
+                val content =
+                    message
+                        .optString(
+                            "content",
+                            ""
+                        )
+                        .takeIf {
+                            it.isNotBlank() &&
+                                it != "null"
+                        }
+
+                if (content != null) {
+
+                    Log.d(
+                        TAG,
+                        "🧠 CUSTOM RESPONSE RECEIVED | " +
+                            "len=${content.length}"
+                    )
+
+                    return content
+                }
+
+                val reasoning =
+                    message
+                        .optString(
+                            "reasoning",
+                            ""
+                        )
+                        .takeIf {
+                            it.isNotBlank() &&
+                                it != "null"
+                        }
+
+                if (reasoning != null) {
+
+                    Log.d(
+                        TAG,
+                        "ℹ️ Custom curator: " +
+                            "using reasoning"
+                    )
+
+                    return reasoning
+                }
+
+                throw Exception(
+                    "Both 'content' and 'reasoning' fields " +
+                        "are empty. Raw: ${body.take(300)}"
                 )
-
-                return content
             }
-
-            val reasoning =
-                message
-                    .optString("reasoning", "")
-                    .takeIf {
-                        it.isNotBlank() &&
-                            it != "null"
-                    }
-
-            if (reasoning != null) {
-
-                Log.d(
-                    TAG,
-                    "ℹ️ Custom curator: using reasoning"
-                )
-
-                return reasoning
-            }
-
-            throw Exception(
-                "Both 'content' and 'reasoning' fields " +
-                    "are empty. Raw: ${body.take(300)}"
-            )
-        }
     }
 
     // ============================================================
-    // تحليل نتيجة Curator
+    // Parse Curator JSON
     // ============================================================
 
     private fun parseCuratorResponse(
@@ -901,12 +980,16 @@ class MemoryCuratorService(
 
         val selected =
             parseLongArray(
-                json.optJSONArray("selectedIds")
+                json.optJSONArray(
+                    "selectedIds"
+                )
             )
 
         val irrelevant =
             parseLongArray(
-                json.optJSONArray("irrelevantIds")
+                json.optJSONArray(
+                    "irrelevantIds"
+                )
             )
 
         val sanitizedSelected =
@@ -930,11 +1013,12 @@ class MemoryCuratorService(
             ).trim()
 
         /*
-         * selectedIds فارغة صحيحة:
-         * معناها أن الوسيط قرر أنه لا توجد ذاكرة
-         * مرتبطة مباشرة بالسؤال.
+         * selectedIds فارغة صحيحة.
+         * معناها أن الوسيط قرر عدم وجود
+         * ذاكرة مرتبطة مباشرة بالسؤال.
          */
         if (selected.isEmpty()) {
+
             return CuratorResult(
                 selectedIds = emptyList(),
                 reasoning = reasoning,
@@ -945,14 +1029,15 @@ class MemoryCuratorService(
         }
 
         /*
-         * إذا أعاد النموذج IDs كلها غير موجودة
-         * فعليًا في المرشحين، فهذا فشل في الاختيار
-         * وليس "لا توجد ذاكرة".
+         * إذا كانت كل IDs التي أرسلها النموذج
+         * غير موجودة فعليًا في المرشحين،
+         * نستخدم fallback.
          */
         if (
             sanitizedSelected.isEmpty() &&
             selected.isNotEmpty()
         ) {
+
             return fallbackResult(
                 candidates = candidates,
                 reason = "Curator returned invalid IDs",
@@ -977,19 +1062,24 @@ class MemoryCuratorService(
             return emptyList()
         }
 
-        val result = mutableListOf<Long>()
+        val result =
+            mutableListOf<Long>()
 
         for (i in 0 until array.length()) {
 
             when (val value = array.opt(i)) {
 
                 is Number -> {
-                    result.add(value.toLong())
+                    result.add(
+                        value.toLong()
+                    )
                 }
 
                 is String -> {
                     value.toLongOrNull()
-                        ?.let { result.add(it) }
+                        ?.let {
+                            result.add(it)
+                        }
                 }
             }
         }
@@ -1009,10 +1099,16 @@ class MemoryCuratorService(
                 .removeSuffix("```")
                 .trim()
 
-        val start = cleaned.indexOf('{')
-        val end = cleaned.lastIndexOf('}')
+        val start =
+            cleaned.indexOf('{')
 
-        if (start < 0 || end <= start) {
+        val end =
+            cleaned.lastIndexOf('}')
+
+        if (
+            start < 0 ||
+            end <= start
+        ) {
             throw Exception(
                 "No JSON object found in curator response"
             )
