@@ -128,12 +128,32 @@ class MemoryCuratorService(
                 }
             }
 
-            val parsed = parseCuratorResponse(rawResponse)
+              val result = parseCuratorResponse(rawResponse)
+val sanitized = sanitize(
+    result.copy(rawResponse = rawResponse),
+    candidates
+)
 
-            val sanitized = sanitize(
-                result = parsed.copy(rawResponse = rawResponse),
-                candidates = candidates
-            )
+AichatApp.debugLog.add(
+    "🧠 CURATOR selected IDs: ${sanitized.selectedIds}"
+)
+
+AichatApp.debugLog.add(
+    "🧠 CURATOR irrelevant IDs: ${sanitized.irrelevantIds}"
+)
+
+AichatApp.debugLog.add(
+    "🧠 CURATOR fallback: ${sanitized.isFallback}" +
+        if (sanitized.fallbackReason != null) {
+            " (${sanitized.fallbackReason})"
+        } else {
+            ""
+        }
+)
+
+AichatApp.debugLog.add(
+    "🧠 CURATOR reasoning: ${sanitized.reasoning}"
+)
 
             if (sanitized.isFallback) {
                 Log.w(
