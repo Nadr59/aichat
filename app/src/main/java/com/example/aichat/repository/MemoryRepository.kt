@@ -2,8 +2,8 @@ package com.example.aichat.repository
 
 import android.content.Context
 import android.util.Log
-import com.example.aichat.data.local.MemoryDao
 import com.example.aichat.data.local.AiSettings
+import com.example.aichat.data.local.MemoryDao
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.util.EmbeddingService
 import kotlinx.coroutines.Dispatchers
@@ -19,13 +19,10 @@ class MemoryRepository(
     companion object {
         private const val TAG = "MemoryRepository"
 
-        // الحد الأدنى للتشابه الدلالي لقبول الذاكرة.
         private const val SIMILARITY_THRESHOLD = 0.45
 
-        // عدد النتائج النهائية التي نعيدها للمرحلة التالية.
         private const val MAX_RESULTS = 12
 
-        // عدد النتائج الدلالية واللفظية التي نأخذها قبل الدمج.
         private const val SEMANTIC_RESULTS = 8
         private const val KEYWORD_RESULTS = 8
     }
@@ -61,7 +58,9 @@ class MemoryRepository(
 
     fun calculateHash(content: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        val bytes = digest.digest(content.trim().toByteArray(Charsets.UTF_8))
+        val bytes = digest.digest(
+            content.trim().toByteArray(Charsets.UTF_8)
+        )
 
         return bytes.joinToString("") {
             "%02x".format(it)
@@ -72,7 +71,10 @@ class MemoryRepository(
     // Embedding
     // ============================================================
 
-    private suspend fun extractEmbedding(content: String): List<Float> {
+    private suspend fun extractEmbedding(
+        content: String
+    ): List<Float> {
+
         val apiKey = aiSettings.geminiKey.trim()
 
         if (apiKey.isBlank()) {
@@ -82,7 +84,10 @@ class MemoryRepository(
         return try {
             embeddingService.getEmbedding(content)
         } catch (e: Exception) {
-            Log.w(TAG, "Embedding failed: ${e.message}")
+            Log.w(
+                TAG,
+                "Embedding failed: ${e.message}"
+            )
             emptyList()
         }
     }
@@ -107,11 +112,13 @@ class MemoryRepository(
 
         val hash = calculateHash(cleanContent)
 
-        // منع التكرار
         val existing = memoryDao.getByHash(hash)
 
         if (existing != null) {
-            Log.d(TAG, "Duplicate memory ignored: id=${existing.id}")
+            Log.d(
+                TAG,
+                "Duplicate memory ignored: id=${existing.id}"
+            )
             return@withContext existing.id
         }
 
@@ -147,33 +154,34 @@ class MemoryRepository(
     // Update memory
     // ============================================================
 
-    suspend fun updateMemory(memory: MemoryItem): Unit =
-        withContext(Dispatchers.IO) {
+    suspend fun updateMemory(
+        memory: MemoryItem
+    ) = withContext(Dispatchers.IO) {
 
-            val cleanContent = memory.content.trim()
+        val cleanContent = memory.content.trim()
 
-            if (cleanContent.isBlank()) {
-                return@withContext
-            }
-
-            val hash = calculateHash(cleanContent)
-            val embedding = extractEmbedding(cleanContent)
-
-            val updated = memory.copy(
-                content = cleanContent,
-                embedding = embedding.joinToString(","),
-                embeddingModel = "text-embedding-004",
-                embeddingDimensions = if (embedding.isNotEmpty()) {
-                    embedding.size
-                } else {
-                    768
-                },
-                contentHash = hash,
-                updatedAt = System.currentTimeMillis()
-            )
-
-            memoryDao.updateMemory(updated)
+        if (cleanContent.isBlank()) {
+            return@withContext
         }
+
+        val hash = calculateHash(cleanContent)
+        val embedding = extractEmbedding(cleanContent)
+
+        val updated = memory.copy(
+            content = cleanContent,
+            embedding = embedding.joinToString(","),
+            embeddingModel = "text-embedding-004",
+            embeddingDimensions = if (embedding.isNotEmpty()) {
+                embedding.size
+            } else {
+                768
+            },
+            contentHash = hash,
+            updatedAt = System.currentTimeMillis()
+        )
+
+        memoryDao.updateMemory(updated)
+    }
 
     // ============================================================
     // Backfill embeddings
@@ -273,24 +281,276 @@ class MemoryRepository(
     // Delete
     // ============================================================
 
-    suspend fun deleteMemory(memory: MemoryItem) =
-        withContext(Dispatchers.IO) {
-            memoryDao.deleteMemory(memory)
-        }
+    suspend fun deleteMemory(
+        memory: MemoryItem
+    ) = withContext(Dispatchers.IO) {
+        memoryDao.deleteMemory(memory)
+    }
 
     // ============================================================
     // TRUE HYBRID MEMORY SEARCH
-    //
-    // 1. Semantic search
-    // 2. Keyword search
-    // 3. Merge both result sets
-    // 4. Remove duplicates
-    // 5. Prefer semantic matches when both methods find the same item
-    // 6. Return a wider candidate set for the curator
     // ============================================================
 
     suspend fun searchSharedMemories(
         query: String
     ): List<MemoryItem> = withContext(Dispatchers.IO) {
 
-       
+        val cleanQuery = query.trim()
+
+        if (cleanQuery.isBlank()) {
+            return@withContext emptyList()
+        }
+
+        val allMemories = memoryDao.getAllSharedMemories()
+
+        if (allMemories.isEmpty()) {
+            return@withContext emptyList()
+        }
+
+        val apiKey = aiSettings.geminiKey.trim()
+
+        // --------------------------------------------------------
+        // Keyword search
+        // --------------------------------------------------------
+
+        val keywordResults = try {
+            fallbackSearch(
+                query = cleanQuery,
+                memories = allMemories
+            )
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "Keyword search failed: ${e.message}"
+            )
+            emptyList()
+        }
+
+        // --------------------------------------------------------
+        // Semantic search
+        // --------------------------------------------------------
+
+        val semanticResults =
+            if (apiKey.isNotBlank()) {
+                try {
+                    searchWithEmbeddings(
+                        query = cleanQuery,
+                        memories = allMemories
+                    )
+                } catch (e: Exception) {
+                    Log.w(
+                        TAG,
+                        "Semantic search failed: ${e.message}"
+                    )
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+
+        // --------------------------------------------------------
+        // Merge semantic + keyword results
+        // --------------------------------------------------------
+
+        val merged = LinkedHashMap<Long, MemoryItem>()
+
+        semanticResults.forEach { memory ->
+            merged[memory.id] = memory
+        }
+
+        keywordResults.forEach { memory ->
+            if (!merged.containsKey(memory.id)) {
+                merged[memory.id] = memory
+            }
+        }
+
+        val finalResults = merged.values.take(MAX_RESULTS)
+
+        Log.d(
+            TAG,
+            "Hybrid search: semantic=${semanticResults.size}, " +
+                "keyword=${keywordResults.size}, " +
+                "merged=${finalResults.size}"
+        )
+
+        finalResults
+    }
+
+    // ============================================================
+    // Semantic search
+    // ============================================================
+
+    private suspend fun searchWithEmbeddings(
+        query: String,
+        memories: List<MemoryItem>
+    ): List<MemoryItem> {
+
+        if (memories.isEmpty()) {
+            return emptyList()
+        }
+
+        val queryEmbedding = try {
+            embeddingService.getEmbedding(query)
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "Query embedding failed: ${e.message}"
+            )
+            return emptyList()
+        }
+
+        if (queryEmbedding.isEmpty()) {
+            return emptyList()
+        }
+
+        val scored = mutableListOf<Pair<MemoryItem, Float>>()
+
+        for (memory in memories) {
+
+            if (memory.embedding.isBlank()) {
+                continue
+            }
+
+            val memoryEmbedding = parseEmbedding(
+                memory.embedding
+            )
+
+            if (memoryEmbedding.isEmpty()) {
+                continue
+            }
+
+            if (memoryEmbedding.size != queryEmbedding.size) {
+                continue
+            }
+
+            val similarity = cosineSimilarity(
+                queryEmbedding,
+                memoryEmbedding
+            )
+
+            if (similarity >= SIMILARITY_THRESHOLD) {
+                scored.add(
+                    memory to similarity
+                )
+            }
+        }
+
+        return scored
+            .sortedByDescending { it.second }
+            .take(SEMANTIC_RESULTS)
+            .map { it.first }
+    }
+
+    // ============================================================
+    // Keyword search
+    // ============================================================
+
+    private fun fallbackSearch(
+        query: String,
+        memories: List<MemoryItem>
+    ): List<MemoryItem> {
+
+        if (memories.isEmpty()) {
+            return emptyList()
+        }
+
+        return MemorySearchEngine.search(
+            query = query,
+            memories = memories,
+            limit = KEYWORD_RESULTS,
+            minScore = 0.05
+        )
+    }
+
+    // ============================================================
+    // Parse embedding
+    // ============================================================
+
+    private fun parseEmbedding(
+        value: String
+    ): List<Float> {
+
+        if (value.isBlank()) {
+            return emptyList()
+        }
+
+        return try {
+            value
+                .split(",")
+                .mapNotNull { item ->
+                    item.trim().toFloatOrNull()
+                }
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "Invalid embedding: ${e.message}"
+            )
+            emptyList()
+        }
+    }
+
+    // ============================================================
+    // Cosine similarity
+    // ============================================================
+
+    private fun cosineSimilarity(
+        a: List<Float>,
+        b: List<Float>
+    ): Float {
+
+        if (a.isEmpty() || b.isEmpty()) {
+            return 0f
+        }
+
+        if (a.size != b.size) {
+            return 0f
+        }
+
+        var dotProduct = 0.0
+        var magnitudeA = 0.0
+        var magnitudeB = 0.0
+
+        for (i in a.indices) {
+
+            val valueA = a[i].toDouble()
+            val valueB = b[i].toDouble()
+
+            dotProduct += valueA * valueB
+            magnitudeA += valueA * valueA
+            magnitudeB += valueB * valueB
+        }
+
+        if (magnitudeA == 0.0 || magnitudeB == 0.0) {
+            return 0f
+        }
+
+        val denominator =
+            sqrt(magnitudeA) * sqrt(magnitudeB)
+
+        return (dotProduct / denominator).toFloat()
+    }
+
+    // ============================================================
+    // Conversation memories
+    // ============================================================
+
+    fun getConversationMemories(
+        conversationId: Long
+    ) = memoryDao.getConversationMemories(conversationId)
+
+    suspend fun deleteConversationMemories(
+        conversationId: Long
+    ) = withContext(Dispatchers.IO) {
+        memoryDao.deleteConversationMemories(conversationId)
+    }
+
+    // ============================================================
+    // Duplicate check
+    // ============================================================
+
+    suspend fun existsByHash(
+        hash: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        memoryDao.getByHash(hash) != null
+    }
+}
