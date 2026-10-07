@@ -13,7 +13,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-import com.example.aichat.AichatApp
 
 class MemoryCuratorService(
     private val settings: AiSettings,
@@ -34,7 +33,7 @@ class MemoryCuratorService(
     /**
      * نتيجة اختيار الذاكرة.
      *
-     * هذه الحقول الداخلية لا يطلبها الـ LLM.
+     * هذه الحقول داخلية ولا يطلبها الـ LLM.
      */
     data class CuratorResult(
         val selectedIds: List<Long>,
@@ -129,42 +128,24 @@ class MemoryCuratorService(
                 }
             }
 
-              val result = parseCuratorResponse(rawResponse)
-val sanitized = sanitize(
-    result.copy(rawResponse = rawResponse),
-    candidates
-)
+            val result = parseCuratorResponse(rawResponse)
 
-AichatApp.debugLog.add(
-    "🧠 CURATOR selected IDs: ${sanitized.selectedIds}"
-)
-
-AichatApp.debugLog.add(
-    "🧠 CURATOR irrelevant IDs: ${sanitized.irrelevantIds}"
-)
-
-AichatApp.debugLog.add(
-    "🧠 CURATOR fallback: ${sanitized.isFallback}" +
-        if (sanitized.fallbackReason != null) {
-            " (${sanitized.fallbackReason})"
-        } else {
-            ""
-        }
-)
-
-AichatApp.debugLog.add(
-    "🧠 CURATOR reasoning: ${sanitized.reasoning}"
-)
+            val sanitized = sanitize(
+                result.copy(rawResponse = rawResponse),
+                candidates
+            )
 
             if (sanitized.isFallback) {
                 Log.w(
                     TAG,
-                    "⚠️ Curator validation fallback: ${sanitized.fallbackReason}"
+                    "⚠️ Curator validation fallback: " +
+                        sanitized.fallbackReason
                 )
             } else {
                 Log.d(
                     TAG,
-                    "✅ Curator selected IDs: ${sanitized.selectedIds}"
+                    "✅ Curator selected IDs: " +
+                        sanitized.selectedIds
                 )
             }
 
@@ -174,7 +155,8 @@ AichatApp.debugLog.add(
 
             Log.w(
                 TAG,
-                "⚠️ Curator ($curatorProvider) EXCEPTION: ${e.message}",
+                "⚠️ Curator ($curatorProvider) EXCEPTION: " +
+                    e.message,
                 e
             )
 
@@ -225,13 +207,19 @@ AichatApp.debugLog.add(
 
                 val result = callCuratorProvider(prompt)
 
-                if (result.isBlank() || result.trim().equals("NONE", ignoreCase = true)) {
+                if (
+                    result.isBlank() ||
+                    result.trim().equals("NONE", ignoreCase = true)
+                ) {
                     ""
                 } else {
                     result.trim()
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "⚠️ Legacy curator failed: ${e.message}")
+                Log.w(
+                    TAG,
+                    "⚠️ Legacy curator failed: ${e.message}"
+                )
                 ""
             }
         }
@@ -250,7 +238,8 @@ AichatApp.debugLog.add(
             return@withContext ""
         }
 
-        selected.joinToString("\n\n") { it.content } + CONTEXT_DISCLAIMER
+        selected.joinToString("\n\n") { it.content } +
+            CONTEXT_DISCLAIMER
     }
 
     /**
@@ -261,7 +250,9 @@ AichatApp.debugLog.add(
      * 2. JSON داخل ```json ... ```
      * 3. نصاً يحتوي JSON يمكن استخراج أول object منه.
      */
-    private fun parseCuratorResponse(raw: String): CuratorResult {
+    private fun parseCuratorResponse(
+        raw: String
+    ): CuratorResult {
 
         val cleaned = extractJsonObject(raw)
 
@@ -290,20 +281,30 @@ AichatApp.debugLog.add(
     /**
      * استخراج JSON حتى لو وضعه النموذج داخل Markdown.
      */
-    private fun extractJsonObject(raw: String): String {
+    private fun extractJsonObject(
+        raw: String
+    ): String {
 
         val text = raw.trim()
 
-        if (text.startsWith("{") && text.endsWith("}")) {
+        if (
+            text.startsWith("{") &&
+            text.endsWith("}")
+        ) {
             return text
         }
 
         val withoutMarkdown = text
-            .replace("```json", "", ignoreCase = true)
+            .replace(
+                "```json",
+                "",
+                ignoreCase = true
+            )
             .replace("```", "")
             .trim()
 
-        if (withoutMarkdown.startsWith("{") &&
+        if (
+            withoutMarkdown.startsWith("{") &&
             withoutMarkdown.endsWith("}")
         ) {
             return withoutMarkdown
@@ -313,13 +314,20 @@ AichatApp.debugLog.add(
         val end = withoutMarkdown.lastIndexOf('}')
 
         if (start >= 0 && end > start) {
-            return withoutMarkdown.substring(start, end + 1)
+            return withoutMarkdown.substring(
+                start,
+                end + 1
+            )
         }
 
-        throw IllegalArgumentException("No JSON object found")
+        throw IllegalArgumentException(
+            "No JSON object found"
+        )
     }
 
-    private fun parseLongArray(array: JSONArray?): List<Long> {
+    private fun parseLongArray(
+        array: JSONArray?
+    ): List<Long> {
 
         if (array == null) {
             return emptyList()
@@ -329,8 +337,15 @@ AichatApp.debugLog.add(
 
         for (i in 0 until array.length()) {
             when (val value = array.opt(i)) {
-                is Number -> result.add(value.toLong())
-                is String -> value.toLongOrNull()?.let { result.add(it) }
+                is Number -> {
+                    result.add(value.toLong())
+                }
+
+                is String -> {
+                    value.toLongOrNull()?.let {
+                        result.add(it)
+                    }
+                }
             }
         }
 
@@ -371,7 +386,10 @@ AichatApp.debugLog.add(
             .take(limit)
 
         val cleanIrrelevant = result.irrelevantIds
-            .filter { it in validIds && it !in cleanSelected }
+            .filter {
+                it in validIds &&
+                    it !in cleanSelected
+            }
             .distinct()
 
         /*
@@ -391,7 +409,10 @@ AichatApp.debugLog.add(
          * إذا أرسل IDs لكن كلها وهمية/غير موجودة:
          * استخدم أفضل مرشحات RRF.
          */
-        if (cleanSelected.isEmpty() && candidates.isNotEmpty()) {
+        if (
+            cleanSelected.isEmpty() &&
+            candidates.isNotEmpty()
+        ) {
 
             val fallbackIds = candidates
                 .take(limit)
@@ -403,7 +424,8 @@ AichatApp.debugLog.add(
                 irrelevantIds = emptyList(),
                 isFallback = true,
                 fallbackReason =
-                    "Invalid IDs returned by LLM: $originalSelected",
+                    "Invalid IDs returned by LLM: " +
+                        originalSelected,
                 rawResponse = result.rawResponse
             )
         }
@@ -423,7 +445,10 @@ AichatApp.debugLog.add(
             .take(MAX_SELECTED)
             .map { it.id }
 
-        Log.w(TAG, "↩️ RRF fallback: $reason")
+        Log.w(
+            TAG,
+            "↩️ RRF fallback: $reason"
+        )
 
         return CuratorResult(
             selectedIds = ids,
@@ -435,15 +460,23 @@ AichatApp.debugLog.add(
         )
     }
 
-    private suspend fun callCuratorProvider(prompt: String): String {
+    private suspend fun callCuratorProvider(
+        prompt: String
+    ): String {
+
         return when (settings.memoryCuratorProvider) {
 
             "custom" -> {
                 val baseUrl = settings.customUrl.trim()
                 val model = settings.customModel.trim()
 
-                if (baseUrl.isBlank() || model.isBlank()) {
-                    throw Exception("Custom curator not configured")
+                if (
+                    baseUrl.isBlank() ||
+                    model.isBlank()
+                ) {
+                    throw Exception(
+                        "Custom curator not configured"
+                    )
                 }
 
                 callCustomProvider(
@@ -458,7 +491,9 @@ AichatApp.debugLog.add(
                 val apiKey = settings.geminiKey
 
                 if (apiKey.isBlank()) {
-                    throw Exception("Gemini API key is blank")
+                    throw Exception(
+                        "Gemini API key is blank"
+                    )
                 }
 
                 callGeminiFlash(
@@ -479,44 +514,59 @@ AichatApp.debugLog.add(
     ): String = withContext(Dispatchers.IO) {
 
         if (mediatorIdentityText.isBlank()) {
-            Log.d(TAG, "⚪ No identity text, returning original query")
+            Log.d(
+                TAG,
+                "⚪ No identity text, returning original query"
+            )
             return@withContext userQuery
         }
 
         if (!settings.memoryCuratorEnabled) {
-            Log.d(TAG, "⚪ Curator disabled, returning original query")
+            Log.d(
+                TAG,
+                "⚪ Curator disabled, returning original query"
+            )
             return@withContext userQuery
         }
 
         try {
             Log.d(
                 TAG,
-                "🔄 Enhancing query (identity-only): ${userQuery.take(50)}..."
+                "🔄 Enhancing query (identity-only): " +
+                    "${userQuery.take(50)}..."
             )
 
-            val prompt = MemoryCuratorPrompt.buildEnhancerPrompt(
-                userQuery = userQuery,
-                mediatorIdentityText = mediatorIdentityText
-            )
+            val prompt =
+                MemoryCuratorPrompt.buildEnhancerPrompt(
+                    userQuery = userQuery,
+                    mediatorIdentityText =
+                        mediatorIdentityText
+                )
 
-            val enhanced = callConfiguredProvider(prompt).trim()
+            val enhanced =
+                callConfiguredProvider(prompt).trim()
 
             val isValid =
                 enhanced.isNotBlank() &&
-                enhanced != userQuery &&
-                !enhanced.equals("NONE", ignoreCase = true) &&
-                enhanced.length >= 10
+                    enhanced != userQuery &&
+                    !enhanced.equals(
+                        "NONE",
+                        ignoreCase = true
+                    ) &&
+                    enhanced.length >= 10
 
             if (isValid) {
                 Log.d(
                     TAG,
-                    "✅ Enhanced (no memory): ${enhanced.take(80)}..."
+                    "✅ Enhanced (no memory): " +
+                        "${enhanced.take(80)}..."
                 )
                 enhanced
             } else {
                 Log.d(
                     TAG,
-                    "⚠️ Enhancement invalid or identical, returning original"
+                    "⚠️ Enhancement invalid or identical, " +
+                        "returning original"
                 )
                 userQuery
             }
@@ -540,37 +590,51 @@ AichatApp.debugLog.add(
     ): String = withContext(Dispatchers.IO) {
 
         if (userQuery.isBlank()) {
-            Log.d(TAG, "⚪ Empty query, returning as-is")
+            Log.d(
+                TAG,
+                "⚪ Empty query, returning as-is"
+            )
             return@withContext userQuery
         }
 
         if (!settings.memoryCuratorEnabled) {
-            Log.d(TAG, "⚪ Curator disabled, returning original")
+            Log.d(
+                TAG,
+                "⚪ Curator disabled, returning original"
+            )
             return@withContext userQuery
         }
 
         try {
             Log.d(
                 TAG,
-                "🎨 Refining query style: ${style.displayName} - ${userQuery.take(50)}..."
+                "🎨 Refining query style: " +
+                    "${style.displayName} - " +
+                    "${userQuery.take(50)}..."
             )
 
-            val prompt = MemoryCuratorPrompt.buildStyleRefinementPrompt(
-                userQuery = userQuery,
-                style = style
-            )
+            val prompt =
+                MemoryCuratorPrompt.buildStyleRefinementPrompt(
+                    userQuery = userQuery,
+                    style = style
+                )
 
-            val refined = callConfiguredProvider(prompt).trim()
+            val refined =
+                callConfiguredProvider(prompt).trim()
 
             val isValid =
                 refined.isNotBlank() &&
-                refined.length >= 5 &&
-                !refined.equals("NONE", ignoreCase = true)
+                    refined.length >= 5 &&
+                    !refined.equals(
+                        "NONE",
+                        ignoreCase = true
+                    )
 
             if (isValid) {
                 Log.d(
                     TAG,
-                    "✅ Refined (${style.displayName}): ${refined.take(80)}..."
+                    "✅ Refined (${style.displayName}): " +
+                        "${refined.take(80)}..."
                 )
                 refined
             } else {
@@ -602,13 +666,19 @@ AichatApp.debugLog.add(
         return when (settings.memoryCuratorProvider) {
 
             "ollama" -> {
-                val model = settings.memoryCuratorOllamaModel.trim()
+                val model =
+                    settings.memoryCuratorOllamaModel.trim()
 
                 if (model.isBlank()) {
-                    throw Exception("Ollama model not configured")
+                    throw Exception(
+                        "Ollama model not configured"
+                    )
                 }
 
-                Log.d(TAG, "🤖 Using Ollama (local): $model")
+                Log.d(
+                    TAG,
+                    "🤖 Using Ollama (local): $model"
+                )
 
                 callOllama(
                     prompt = prompt,
@@ -617,14 +687,25 @@ AichatApp.debugLog.add(
             }
 
             "custom" -> {
-                val baseUrl = settings.customUrl.trim()
-                val model = settings.customModel.trim()
+                val baseUrl =
+                    settings.customUrl.trim()
 
-                if (baseUrl.isBlank() || model.isBlank()) {
-                    throw Exception("Custom provider not configured")
+                val model =
+                    settings.customModel.trim()
+
+                if (
+                    baseUrl.isBlank() ||
+                    model.isBlank()
+                ) {
+                    throw Exception(
+                        "Custom provider not configured"
+                    )
                 }
 
-                Log.d(TAG, "🔧 Using Custom: $baseUrl")
+                Log.d(
+                    TAG,
+                    "🔧 Using Custom: $baseUrl"
+                )
 
                 callCustomProvider(
                     prompt = prompt,
@@ -638,12 +719,15 @@ AichatApp.debugLog.add(
                 val apiKey = settings.geminiKey
 
                 if (apiKey.isBlank()) {
-                    throw Exception("Gemini API key is blank")
+                    throw Exception(
+                        "Gemini API key is blank"
+                    )
                 }
 
                 Log.d(
                     TAG,
-                    "✨ Using Gemini: ${settings.memoryCuratorModel}"
+                    "✨ Using Gemini: " +
+                        settings.memoryCuratorModel
                 )
 
                 callGeminiFlash(
@@ -665,6 +749,7 @@ AichatApp.debugLog.add(
     ): String {
 
         val json = JSONObject().apply {
+
             put("model", model)
 
             put(
@@ -688,11 +773,18 @@ AichatApp.debugLog.add(
         }
 
         val request = Request.Builder()
-            .url("http://127.0.0.1:11434/v1/chat/completions")
-            .addHeader("Content-Type", "application/json")
+            .url(
+                "http://127.0.0.1:11434/v1/chat/completions"
+            )
+            .addHeader(
+                "Content-Type",
+                "application/json"
+            )
             .post(
                 json.toString()
-                    .toRequestBody("application/json".toMediaType())
+                    .toRequestBody(
+                        "application/json".toMediaType()
+                    )
             )
             .build()
 
@@ -702,12 +794,16 @@ AichatApp.debugLog.add(
                 throw Exception(
                     "Ollama failed: ${response.code} - " +
                         "${response.body?.string()}\n" +
-                        "تأكد من تشغيل Ollama في Termux: ollama serve"
+                        "تأكد من تشغيل Ollama في Termux: " +
+                        "ollama serve"
                 )
             }
 
-            val body = response.body?.string()
-                ?: throw Exception("Empty response from Ollama")
+            val body =
+                response.body?.string()
+                    ?: throw Exception(
+                        "Empty response from Ollama"
+                    )
 
             return try {
 
@@ -749,7 +845,10 @@ AichatApp.debugLog.add(
                                 JSONArray().apply {
                                     put(
                                         JSONObject().apply {
-                                            put("text", prompt)
+                                            put(
+                                                "text",
+                                                prompt
+                                            )
                                         }
                                     )
                                 }
@@ -766,21 +865,32 @@ AichatApp.debugLog.add(
                     put("maxOutputTokens", 2000)
 
                     // إجبار Gemini على JSON
-                    put("responseMimeType", "application/json")
+                    put(
+                        "responseMimeType",
+                        "application/json"
+                    )
                 }
             )
         }
 
         val request = Request.Builder()
             .url(
-                "https://generativelanguage.googleapis.com/v1beta/models/" +
-                    "$model:generateContent"
+                "https://generativelanguage.googleapis.com/" +
+                    "v1beta/models/$model:generateContent"
             )
-            .addHeader("x-goog-api-key", apiKey)
-            .addHeader("Content-Type", "application/json")
+            .addHeader(
+                "x-goog-api-key",
+                apiKey
+            )
+            .addHeader(
+                "Content-Type",
+                "application/json"
+            )
             .post(
                 json.toString()
-                    .toRequestBody("application/json".toMediaType())
+                    .toRequestBody(
+                        "application/json".toMediaType()
+                    )
             )
             .build()
 
@@ -789,12 +899,16 @@ AichatApp.debugLog.add(
             if (!response.isSuccessful) {
                 throw Exception(
                     "Gemini Flash failed: " +
-                        "${response.code} - ${response.body?.string()}"
+                        "${response.code} - " +
+                        "${response.body?.string()}"
                 )
             }
 
-            val body = response.body?.string()
-                ?: throw Exception("Empty response from Gemini Flash")
+            val body =
+                response.body?.string()
+                    ?: throw Exception(
+                        "Empty response from Gemini Flash"
+                    )
 
             return JSONObject(body)
                 .getJSONArray("candidates")
@@ -839,10 +953,15 @@ AichatApp.debugLog.add(
 
         val requestBuilder = Request.Builder()
             .url(baseUrl)
-            .addHeader("Content-Type", "application/json")
+            .addHeader(
+                "Content-Type",
+                "application/json"
+            )
             .post(
                 json.toString()
-                    .toRequestBody("application/json".toMediaType())
+                    .toRequestBody(
+                        "application/json".toMediaType()
+                    )
             )
 
         if (apiKey.isNotBlank()) {
@@ -859,14 +978,16 @@ AichatApp.debugLog.add(
                 if (!response.isSuccessful) {
                     throw Exception(
                         "Custom curator failed: " +
-                            "${response.code} - ${response.body?.string()}"
+                            "${response.code} - " +
+                            "${response.body?.string()}"
                     )
                 }
 
-                val body = response.body?.string()
-                    ?: throw Exception(
-                        "Empty response from custom curator"
-                    )
+                val body =
+                    response.body?.string()
+                        ?: throw Exception(
+                            "Empty response from custom curator"
+                        )
 
                 val message =
                     JSONObject(body)
@@ -876,9 +997,13 @@ AichatApp.debugLog.add(
 
                 val content =
                     message
-                        .optString("content", "")
+                        .optString(
+                            "content",
+                            ""
+                        )
                         .takeIf {
-                            it.isNotBlank() && it != "null"
+                            it.isNotBlank() &&
+                                it != "null"
                         }
 
                 if (content != null) {
@@ -887,22 +1012,27 @@ AichatApp.debugLog.add(
 
                 val reasoning =
                     message
-                        .optString("reasoning", "")
+                        .optString(
+                            "reasoning",
+                            ""
+                        )
                         .takeIf {
-                            it.isNotBlank() && it != "null"
+                            it.isNotBlank() &&
+                                it != "null"
                         }
 
                 if (reasoning != null) {
                     Log.d(
                         TAG,
-                        "ℹ️ Custom curator: using 'reasoning' field"
+                        "ℹ️ Custom curator: " +
+                            "using 'reasoning' field"
                     )
                     return reasoning
                 }
 
                 throw Exception(
-                    "Both 'content' and 'reasoning' fields are empty. " +
-                        "Raw: ${body.take(300)}"
+                    "Both 'content' and 'reasoning' fields " +
+                        "are empty. Raw: ${body.take(300)}"
                 )
             }
     }
