@@ -68,12 +68,28 @@ class MemoryCuratorService(
     ): String =
         withContext(Dispatchers.IO) {
 
+            Log.d(
+                TAG,
+                "🔵 OLD CURATE START | " +
+                    "queryLen=${userQuery.length} | " +
+                    "candidates=${candidates.size} | " +
+                    "identityLen=${mediatorIdentityText.length}"
+            )
+
             if (candidates.isEmpty() && mediatorIdentityText.isBlank()) {
+                Log.d(
+                    TAG,
+                    "🔵 OLD CURATE EXIT | no candidates and no identity"
+                )
                 return@withContext ""
             }
 
             if (!settings.memoryCuratorEnabled) {
-                Log.d(TAG, "⚪ Curator DISABLED by setting")
+                Log.d(
+                    TAG,
+                    "🔵 OLD CURATE | Curator DISABLED"
+                )
+
                 return@withContext fallbackBuilder.build(candidates)
             }
 
@@ -84,13 +100,27 @@ class MemoryCuratorService(
                     mediatorIdentityText
                 )
 
+                Log.d(
+                    TAG,
+                    "🔵 OLD CURATE PROMPT READY | len=${prompt.length}"
+                )
+
                 val result = callCuratorProvider(prompt)
+
+                Log.d(
+                    TAG,
+                    "🔵 OLD CURATE RESPONSE | len=${result.length}"
+                )
 
                 if (
                     result.isBlank() ||
                     result.trim().equals("NONE", ignoreCase = true)
                 ) {
-                    Log.d(TAG, "⚪ Curator found nothing relevant")
+                    Log.d(
+                        TAG,
+                        "🔵 OLD CURATE FOUND NOTHING"
+                    )
+
                     return@withContext ""
                 }
 
@@ -98,7 +128,7 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "✅ Curated: ${trimmedResult.take(80)}..."
+                    "🔵 OLD CURATE SUCCESS | resultLen=${trimmedResult.length}"
                 )
 
                 if (candidates.isNotEmpty()) {
@@ -111,7 +141,7 @@ class MemoryCuratorService(
 
                 Log.w(
                     TAG,
-                    "⚠️ Curator EXCEPTION: ${e.message}",
+                    "🔵 OLD CURATE EXCEPTION | ${e.message}",
                     e
                 )
 
@@ -120,7 +150,7 @@ class MemoryCuratorService(
         }
 
     // ============================================================
-    // Curate Selection — اختيار IDs من المرشحين
+    // Curate Selection — المسار الجديد
     // ============================================================
 
     suspend fun curateSelection(
@@ -129,7 +159,21 @@ class MemoryCuratorService(
     ): CuratorResult =
         withContext(Dispatchers.IO) {
 
+            Log.d(
+                TAG,
+                "🟢 NEW CURATE START | " +
+                    "queryLen=${userQuery.length} | " +
+                    "candidates=${candidates.size}"
+            )
+
             if (candidates.isEmpty()) {
+
+                Log.d(
+                    TAG,
+                    "🟢 NEW CURATE EXIT | candidates=0 | " +
+                        "Gemini WILL NOT be called"
+                )
+
                 return@withContext CuratorResult(
                     selectedIds = emptyList(),
                     reasoning = "No candidates"
@@ -137,6 +181,12 @@ class MemoryCuratorService(
             }
 
             if (!settings.memoryCuratorEnabled) {
+
+                Log.d(
+                    TAG,
+                    "🟢 NEW CURATE | Curator DISABLED"
+                )
+
                 return@withContext fallbackResult(
                     candidates = candidates,
                     reason = "Curator disabled"
@@ -151,8 +201,8 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 CURATOR SELECTION START | " +
-                        "queryLen=${userQuery.length} | " +
+                    "🟢 NEW CURATE PROMPT READY | " +
+                        "len=${prompt.length} | " +
                         "candidates=${candidates.size}"
                 )
 
@@ -163,7 +213,7 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 CURATOR RESPONSE RECEIVED | " +
+                    "🟢 NEW CURATE RESPONSE RECEIVED | " +
                         "len=${rawResponse.length}"
                 )
 
@@ -174,9 +224,16 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 CURATOR PARSED | " +
+                    "🟢 NEW CURATE PARSED | " +
                         "selected=${parsed.selectedIds} | " +
-                        "irrelevant=${parsed.irrelevantIds}"
+                        "irrelevant=${parsed.irrelevantIds} | " +
+                        "fallback=${parsed.isFallback}"
+                )
+
+                Log.d(
+                    TAG,
+                    "🟢 NEW CURATE REASONING | " +
+                        parsed.reasoning.take(200)
                 )
 
                 parsed
@@ -185,7 +242,7 @@ class MemoryCuratorService(
 
                 Log.w(
                     TAG,
-                    "⚠️ CURATOR SELECTION FAILED: ${e.message}",
+                    "🟢 NEW CURATE FAILED | ${e.message}",
                     e
                 )
 
@@ -232,10 +289,6 @@ class MemoryCuratorService(
         }
 
         try {
-            /*
-             * buildEnhancerPrompt() في MemoryCuratorPrompt
-             * يستقبل السؤال والهوية فقط.
-             */
             val prompt = MemoryCuratorPrompt.buildEnhancerPrompt(
                 userQuery = userQuery,
                 mediatorIdentityText = mediatorIdentityText
@@ -461,6 +514,14 @@ class MemoryCuratorService(
         forceJson: Boolean = false
     ): String {
 
+        Log.d(
+            TAG,
+            "🟣 CURATOR PROVIDER DISPATCH | " +
+                "provider=${settings.memoryCuratorProvider} | " +
+                "forceJson=$forceJson | " +
+                "promptLen=${prompt.length}"
+        )
+
         return when (settings.memoryCuratorProvider) {
 
             "ollama" -> {
@@ -476,8 +537,7 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 CURATOR PROVIDER | Ollama | " +
-                        "model=$model"
+                    "🟣 CURATOR CALLING OLLAMA | model=$model"
                 )
 
                 callOllama(
@@ -506,8 +566,7 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 CURATOR PROVIDER | Custom | " +
-                        "model=$model"
+                    "🟣 CURATOR CALLING CUSTOM | model=$model"
                 )
 
                 callCustomProvider(
@@ -531,8 +590,9 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 CURATOR PROVIDER | Gemini | " +
-                        "model=${settings.memoryCuratorModel}"
+                    "🟣 CURATOR CALLING GEMINI | " +
+                        "model=${settings.memoryCuratorModel} | " +
+                        "forceJson=$forceJson"
                 )
 
                 callGeminiFlash(
@@ -558,8 +618,9 @@ class MemoryCuratorService(
 
         Log.d(
             TAG,
-            "🧠 REQUEST SENT | Gemini | " +
-                "model=$model | json=$forceJson | " +
+            "🟠 GEMINI REQUEST SENT | " +
+                "model=$model | " +
+                "json=$forceJson | " +
                 "promptLen=${prompt.length}"
         )
 
@@ -645,7 +706,7 @@ class MemoryCuratorService(
 
                     Log.w(
                         TAG,
-                        "🧠 GEMINI HTTP ERROR | " +
+                        "🟠 GEMINI HTTP ERROR | " +
                             "code=${response.code}"
                     )
 
@@ -672,7 +733,7 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 GEMINI RESPONSE RECEIVED | " +
+                    "🟠 GEMINI RESPONSE RECEIVED | " +
                         "len=${result.length}"
                 )
 
@@ -692,8 +753,9 @@ class MemoryCuratorService(
 
         Log.d(
             TAG,
-            "🧠 REQUEST SENT | Ollama | " +
-                "model=$model | json=$forceJson | " +
+            "🟠 OLLAMA REQUEST SENT | " +
+                "model=$model | " +
+                "json=$forceJson | " +
                 "promptLen=${prompt.length}"
         )
 
@@ -755,7 +817,7 @@ class MemoryCuratorService(
 
                     Log.w(
                         TAG,
-                        "🧠 OLLAMA HTTP ERROR | " +
+                        "🟠 OLLAMA HTTP ERROR | " +
                             "code=${response.code}"
                     )
 
@@ -787,7 +849,7 @@ class MemoryCuratorService(
 
                 Log.d(
                     TAG,
-                    "🧠 OLLAMA RESPONSE RECEIVED | " +
+                    "🟠 OLLAMA RESPONSE RECEIVED | " +
                         "len=${result.length}"
                 )
 
@@ -808,7 +870,7 @@ class MemoryCuratorService(
 
         Log.d(
             TAG,
-            "🧠 REQUEST SENT | Custom | " +
+            "🟠 CUSTOM REQUEST SENT | " +
                 "model=$model | " +
                 "promptLen=${prompt.length}"
         )
@@ -885,7 +947,7 @@ class MemoryCuratorService(
 
                     Log.w(
                         TAG,
-                        "🧠 CUSTOM HTTP ERROR | " +
+                        "🟠 CUSTOM HTTP ERROR | " +
                             "code=${response.code}"
                     )
 
@@ -922,7 +984,7 @@ class MemoryCuratorService(
 
                     Log.d(
                         TAG,
-                        "🧠 CUSTOM RESPONSE RECEIVED | " +
+                        "🟠 CUSTOM RESPONSE RECEIVED | " +
                             "len=${content.length}"
                     )
 
@@ -944,8 +1006,7 @@ class MemoryCuratorService(
 
                     Log.d(
                         TAG,
-                        "ℹ️ Custom curator: " +
-                            "using reasoning"
+                        "ℹ️ Custom curator: using reasoning"
                     )
 
                     return reasoning
@@ -966,6 +1027,13 @@ class MemoryCuratorService(
         rawResponse: String,
         candidates: List<MemoryItem>
     ): CuratorResult {
+
+        Log.d(
+            TAG,
+            "🟡 PARSE START | " +
+                "responseLen=${rawResponse.length} | " +
+                "candidates=${candidates.size}"
+        )
 
         val jsonText =
             extractJsonObject(rawResponse)
@@ -992,6 +1060,13 @@ class MemoryCuratorService(
                 )
             )
 
+        Log.d(
+            TAG,
+            "🟡 PARSE RAW IDS | " +
+                "selected=$selected | " +
+                "irrelevant=$irrelevant"
+        )
+
         val sanitizedSelected =
             selected
                 .filter { it in validIds }
@@ -1012,12 +1087,20 @@ class MemoryCuratorService(
                 ""
             ).trim()
 
-        /*
-         * selectedIds فارغة صحيحة.
-         * معناها أن الوسيط قرر عدم وجود
-         * ذاكرة مرتبطة مباشرة بالسؤال.
-         */
+        Log.d(
+            TAG,
+            "🟡 PARSE SANITIZED | " +
+                "selected=$sanitizedSelected | " +
+                "irrelevant=$sanitizedIrrelevant"
+        )
+
         if (selected.isEmpty()) {
+
+            Log.d(
+                TAG,
+                "🟡 PARSE RESULT | selectedIds empty | " +
+                    "valid no-memory decision"
+            )
 
             return CuratorResult(
                 selectedIds = emptyList(),
@@ -1028,15 +1111,15 @@ class MemoryCuratorService(
             )
         }
 
-        /*
-         * إذا كانت كل IDs التي أرسلها النموذج
-         * غير موجودة فعليًا في المرشحين،
-         * نستخدم fallback.
-         */
         if (
             sanitizedSelected.isEmpty() &&
             selected.isNotEmpty()
         ) {
+
+            Log.w(
+                TAG,
+                "🟡 PARSE RESULT | all returned IDs invalid"
+            )
 
             return fallbackResult(
                 candidates = candidates,
