@@ -21,10 +21,15 @@ class MemoryRepository(
 
         private const val SIMILARITY_THRESHOLD = 0.45
 
+        // عدد النتائج النهائية التي يرسلها البحث إلى المرحلة التالية.
         private const val MAX_RESULTS = 12
 
+        // عدد المرشحين من كل نوع بحث قبل RRF.
         private const val SEMANTIC_RESULTS = 8
         private const val KEYWORD_RESULTS = 8
+
+        // ثابت RRF القياسي.
+        private const val RRF_K = 60.0
     }
 
     private val aiSettings = AiSettings(context)
@@ -47,7 +52,9 @@ class MemoryRepository(
             memoryDao.getAllSharedMemories()
         }
 
-    suspend fun getMemoryById(memoryId: Long): MemoryItem? =
+    suspend fun getMemoryById(
+        memoryId: Long
+    ): MemoryItem? =
         withContext(Dispatchers.IO) {
             memoryDao.getMemoryById(memoryId)
         }
@@ -56,8 +63,12 @@ class MemoryRepository(
     // Hash
     // ============================================================
 
-    fun calculateHash(content: String): String {
+    fun calculateHash(
+        content: String
+    ): String {
+
         val digest = MessageDigest.getInstance("SHA-256")
+
         val bytes = digest.digest(
             content.trim().toByteArray(Charsets.UTF_8)
         )
@@ -88,6 +99,7 @@ class MemoryRepository(
                 TAG,
                 "Embedding failed: ${e.message}"
             )
+
             emptyList()
         }
     }
@@ -115,10 +127,12 @@ class MemoryRepository(
         val existing = memoryDao.getByHash(hash)
 
         if (existing != null) {
+
             Log.d(
                 TAG,
                 "Duplicate memory ignored: id=${existing.id}"
             )
+
             return@withContext existing.id
         }
 
@@ -165,6 +179,7 @@ class MemoryRepository(
         }
 
         val hash = calculateHash(cleanContent)
+
         val embedding = extractEmbedding(cleanContent)
 
         val updated = memory.copy(
@@ -200,7 +215,9 @@ class MemoryRepository(
                     continue
                 }
 
-                val embedding = extractEmbedding(memory.content)
+                val embedding = extractEmbedding(
+                    memory.content
+                )
 
                 if (embedding.isEmpty()) {
                     continue
@@ -250,6 +267,7 @@ class MemoryRepository(
         val existing = memoryDao.getByHash(hash)
 
         if (existing != null) {
+
             Log.d(
                 TAG,
                 "Duplicate memory ignored: id=${existing.id}"
@@ -288,7 +306,15 @@ class MemoryRepository(
     }
 
     // ============================================================
-    // TRUE HYBRID MEMORY SEARCH
+    // HYBRID MEMORY SEARCH WITH RRF
+    //
+    // Semantic Search + Keyword Search
+    //              ↓
+    //         RRF Ranking
+    //              ↓
+    //       Remove duplicates
+    //              ↓
+    //        Top 12 candidates
     // ============================================================
 
     suspend fun searchSharedMemories(
@@ -314,15 +340,19 @@ class MemoryRepository(
         // --------------------------------------------------------
 
         val keywordResults = try {
+
             fallbackSearch(
                 query = cleanQuery,
                 memories = allMemories
             )
+
         } catch (e: Exception) {
+
             Log.w(
                 TAG,
                 "Keyword search failed: ${e.message}"
             )
+
             emptyList()
         }
 
@@ -332,48 +362,111 @@ class MemoryRepository(
 
         val semanticResults =
             if (apiKey.isNotBlank()) {
+
                 try {
+
                     searchWithEmbeddings(
                         query = cleanQuery,
                         memories = allMemories
                     )
+
                 } catch (e: Exception) {
+
                     Log.w(
                         TAG,
                         "Semantic search failed: ${e.message}"
                     )
+
                     emptyList()
                 }
+
             } else {
                 emptyList()
             }
 
         // --------------------------------------------------------
-        // Merge semantic + keyword results
+        // RRF
         // --------------------------------------------------------
 
-        val merged = LinkedHashMap<Long, MemoryItem>()
-
-        semanticResults.forEach { memory ->
-            merged[memory.id] = memory
-        }
-
-        keywordResults.forEach { memory ->
-            if (!merged.containsKey(memory.id)) {
-                merged[memory.id] = memory
-            }
-        }
-
-        val finalResults = merged.values.take(MAX_RESULTS)
+        val finalResults = mergeWithRrf(
+            semanticResults = semanticResults,
+            keywordResults = keywordResults
+        )
 
         Log.d(
             TAG,
-            "Hybrid search: semantic=${semanticResults.size}, " +
+            "RRF search: " +
+                "semantic=${semanticResults.size}, " +
                 "keyword=${keywordResults.size}, " +
-                "merged=${finalResults.size}"
+                "final=${finalResults.size}"
         )
 
         finalResults
+    }
+
+    // ============================================================
+    // Reciprocal Rank Fusion
+    //
+    // RRF(d) =
+    //      1 / (K + semanticRank)
+    //    + 1 / (K + keywordRank)
+    //
+    // Memory found highly in both searches gets a stronger score.
+    // ============================================================
+
+    private fun mergeWithRrf(
+        semanticResults: List<MemoryItem>,
+        keywordResults: List<MemoryItem>
+    ): List<MemoryItem> {
+
+        if (semanticResults.isEmpty() &&
+            keywordResults.isEmpty()
+        ) {
+            return emptyList()
+        }
+
+        val memoriesById = LinkedHashMap<Long, MemoryItem>()
+
+        semanticResults.forEach { memory ->
+            memoriesById[memory.id] = memory
+        }
+
+        keywordResults.forEach { memory ->
+            memoriesById[memory.id] = memory
+        }
+
+        val scores = mutableMapOf<Long, Double>()
+
+        semanticResults.forEachIndexed { index, memory ->
+
+            val rank = index + 1
+
+            val score =
+                1.0 / (RRF_K + rank)
+
+            scores[memory.id] =
+                (scores[memory.id] ?: 0.0) + score
+        }
+
+        keywordResults.forEachIndexed { index, memory ->
+
+            val rank = index + 1
+
+            val score =
+                1.0 / (RRF_K + rank)
+
+            scores[memory.id] =
+                (scores[memory.id] ?: 0.0) + score
+        }
+
+        return memoriesById.keys
+            .sortedByDescending { id ->
+                scores[id] ?: 0.0
+            }
+            .take(MAX_RESULTS)
+            .mapNotNull { id ->
+                memoriesById[id]
+            }
     }
 
     // ============================================================
@@ -390,12 +483,18 @@ class MemoryRepository(
         }
 
         val queryEmbedding = try {
-            embeddingService.getEmbedding(query)
+
+            embeddingService.getEmbedding(
+                query
+            )
+
         } catch (e: Exception) {
+
             Log.w(
                 TAG,
                 "Query embedding failed: ${e.message}"
             )
+
             return emptyList()
         }
 
@@ -403,7 +502,8 @@ class MemoryRepository(
             return emptyList()
         }
 
-        val scored = mutableListOf<Pair<MemoryItem, Float>>()
+        val scored =
+            mutableListOf<Pair<MemoryItem, Float>>()
 
         for (memory in memories) {
 
@@ -411,24 +511,31 @@ class MemoryRepository(
                 continue
             }
 
-            val memoryEmbedding = parseEmbedding(
-                memory.embedding
-            )
+            val memoryEmbedding =
+                parseEmbedding(
+                    memory.embedding
+                )
 
             if (memoryEmbedding.isEmpty()) {
                 continue
             }
 
-            if (memoryEmbedding.size != queryEmbedding.size) {
+            if (memoryEmbedding.size !=
+                queryEmbedding.size
+            ) {
                 continue
             }
 
-            val similarity = cosineSimilarity(
-                queryEmbedding,
-                memoryEmbedding
-            )
+            val similarity =
+                cosineSimilarity(
+                    queryEmbedding,
+                    memoryEmbedding
+                )
 
-            if (similarity >= SIMILARITY_THRESHOLD) {
+            if (similarity >=
+                SIMILARITY_THRESHOLD
+            ) {
+
                 scored.add(
                     memory to similarity
                 )
@@ -436,9 +543,13 @@ class MemoryRepository(
         }
 
         return scored
-            .sortedByDescending { it.second }
+            .sortedByDescending {
+                it.second
+            }
             .take(SEMANTIC_RESULTS)
-            .map { it.first }
+            .map {
+                it.first
+            }
     }
 
     // ============================================================
@@ -475,16 +586,20 @@ class MemoryRepository(
         }
 
         return try {
+
             value
                 .split(",")
                 .mapNotNull { item ->
                     item.trim().toFloatOrNull()
                 }
+
         } catch (e: Exception) {
+
             Log.w(
                 TAG,
                 "Invalid embedding: ${e.message}"
             )
+
             emptyList()
         }
     }
@@ -520,14 +635,19 @@ class MemoryRepository(
             magnitudeB += valueB * valueB
         }
 
-        if (magnitudeA == 0.0 || magnitudeB == 0.0) {
+        if (magnitudeA == 0.0 ||
+            magnitudeB == 0.0
+        ) {
             return 0f
         }
 
         val denominator =
-            sqrt(magnitudeA) * sqrt(magnitudeB)
+            sqrt(magnitudeA) *
+                sqrt(magnitudeB)
 
-        return (dotProduct / denominator).toFloat()
+        return (
+            dotProduct / denominator
+        ).toFloat()
     }
 
     // ============================================================
@@ -536,12 +656,17 @@ class MemoryRepository(
 
     fun getConversationMemories(
         conversationId: Long
-    ) = memoryDao.getConversationMemories(conversationId)
+    ) = memoryDao.getConversationMemories(
+        conversationId
+    )
 
     suspend fun deleteConversationMemories(
         conversationId: Long
     ) = withContext(Dispatchers.IO) {
-        memoryDao.deleteConversationMemories(conversationId)
+
+        memoryDao.deleteConversationMemories(
+            conversationId
+        )
     }
 
     // ============================================================
@@ -551,6 +676,7 @@ class MemoryRepository(
     suspend fun existsByHash(
         hash: String
     ): Boolean = withContext(Dispatchers.IO) {
+
         memoryDao.getByHash(hash) != null
     }
 }
