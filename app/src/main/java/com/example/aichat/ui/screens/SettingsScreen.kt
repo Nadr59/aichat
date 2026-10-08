@@ -1471,58 +1471,61 @@ fun SettingsScreen(
                                     )
 
                                     Row(
-                                        modifier =
-                                            Modifier.fillMaxWidth(),
-                                        verticalAlignment =
-                                            Alignment.CenterVertically
-                                    ) {
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically
+) {
+    RadioButton(
+        selected = memoryCuratorProvider == "gemini",
+        onClick = {
+            memoryCuratorProvider = "gemini"
+            saved = false
+        }
+    )
+    Text("Gemini")
 
-                                        RadioButton(
-                                            selected =
-                                                memoryCuratorProvider ==
-                                                        "gemini",
-                                            onClick = {
-                                                memoryCuratorProvider =
-                                                    "gemini"
-                                                saved = false
-                                            }
-                                        )
+    Spacer(Modifier.width(8.dp))
 
-                                        Text("Gemini")
+    RadioButton(
+        selected = memoryCuratorProvider == "groq",
+        onClick = {
+            memoryCuratorProvider = "groq"
+            saved = false
+        }
+    )
+    Text("Groq")
 
-                                        Spacer(
-                                            Modifier.width(12.dp)
-                                        )
+    Spacer(Modifier.width(8.dp))
 
-                                        RadioButton(
-                                            selected =
-                                                memoryCuratorProvider ==
-                                                        "ollama",
-                                            onClick = {
-                                                memoryCuratorProvider =
-                                                    "ollama"
-                                                saved = false
-                                            }
-                                        )
+    RadioButton(
+        selected = memoryCuratorProvider == "mistral",
+        onClick = {
+            memoryCuratorProvider = "mistral"
+            saved = false
+        }
+    )
+    Text("Mistral")
 
-                                        Text("Ollama")
+    Spacer(Modifier.width(8.dp))
 
-                                        Spacer(
-                                            Modifier.width(12.dp)
-                                        )
+    RadioButton(
+        selected = memoryCuratorProvider == "ollama",
+        onClick = {
+            memoryCuratorProvider = "ollama"
+            saved = false
+        }
+    )
+    Text("Ollama")
 
-                                        RadioButton(
-                                            selected =
-                                                memoryCuratorProvider ==
-                                                        "custom",
-                                            onClick = {
-                                                memoryCuratorProvider =
-                                                    "custom"
-                                                saved = false
-                                            }
-                                        )
+    Spacer(Modifier.width(8.dp))
 
-                                        Text("Custom")
+    RadioButton(
+        selected = memoryCuratorProvider == "custom",
+        onClick = {
+            memoryCuratorProvider = "custom"
+            saved = false
+        }
+    )
+    Text("Custom")
                                     }
 
                                     when (memoryCuratorProvider) {
@@ -1559,6 +1562,57 @@ fun SettingsScreen(
                                                 "سيستخدم الوسيط مفتاح Gemini الموجود في إعدادات المحادثة أعلاه."
                                             )
                                         }
+                                        "groq" -> {
+    OutlinedTextField(
+        value = memoryCuratorModel,
+        onValueChange = {
+            memoryCuratorModel = it
+            saved = false
+        },
+        modifier = Modifier.fillMaxWidth(),
+        label = {
+            Text("نموذج Groq للوسيط")
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(12.dp)
+    )
+
+    InfoCard(
+        "سيستخدم الوسيط مفتاح Groq الموجود في إعدادات المحادثة أعلاه."
+    )
+
+    Text(
+        text = "مثال سريع: llama-3.3-70b-versatile",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+"mistral" -> {
+    OutlinedTextField(
+        value = memoryCuratorModel,
+        onValueChange = {
+            memoryCuratorModel = it
+            saved = false
+        },
+        modifier = Modifier.fillMaxWidth(),
+        label = {
+            Text("نموذج Mistral للوسيط")
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(12.dp)
+    )
+
+    InfoCard(
+        "سيستخدم الوسيط مفتاح Mistral الموجود في إعدادات المحادثة أعلاه."
+    )
+
+    Text(
+        text = "مثال سريع: mistral-small-latest",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
 
                                         // =========================
                                         // Curator Ollama
