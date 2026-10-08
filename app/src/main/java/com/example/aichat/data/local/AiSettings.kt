@@ -86,7 +86,7 @@ class AiSettings(context: Context) {
     var mistralKey: String
         get() = prefs.getString("mistral_key", "") ?: ""
         set(value) = prefs.edit()
-            .putString("mistral_key", value.trim())
+            .putString("mistral_key", value)
             .apply()
 
     var mistralModel: String
@@ -275,191 +275,11 @@ class AiSettings(context: Context) {
             .apply()
 
     /**
-     * الإعداد القديم.
+     * مزوّد الوسيط الذكي.
      *
-     * يبقى للتوافق مع النسخ السابقة.
-     * لا يستخدم كمصدر أساسي بعد الآن.
+     * النموذج لا يُحفظ هنا بشكل مستقل.
+     * يتم أخذه ديناميكيًا من إعدادات النموذج الخاصة بالمزوّد.
      */
-    var memoryCuratorModel: String
-        get() = prefs.getString(
-            "memory_curator_model",
-            "gemini-3.6-flash"
-        )?.trim() ?: "gemini-3.6-flash"
-        set(value) = prefs.edit()
-            .putString(
-                "memory_curator_model",
-                value.trim()
-            )
-            .apply()
-
-    // ============================================================
-    // Independent Curator Models
-    // ============================================================
-
-    var memoryCuratorGeminiModel: String
-        get() {
-            val saved = prefs.getString(
-                "memory_curator_gemini_model",
-                null
-            )?.trim()
-
-            if (!saved.isNullOrBlank()) {
-                return saved
-            }
-
-            val legacyProvider = prefs.getString(
-                "memory_curator_provider",
-                "gemini"
-            )?.trim()?.lowercase()
-
-            val legacyModel = prefs.getString(
-                "memory_curator_model",
-                ""
-            )?.trim().orEmpty()
-
-            return if (
-                legacyProvider == "gemini" &&
-                legacyModel.isNotBlank()
-            ) {
-                legacyModel
-            } else {
-                geminiModel
-            }
-        }
-        set(value) = prefs.edit()
-            .putString(
-                "memory_curator_gemini_model",
-                value.trim()
-            )
-            .apply()
-
-    var memoryCuratorGroqModel: String
-        get() {
-            val saved = prefs.getString(
-                "memory_curator_groq_model",
-                null
-            )?.trim()
-
-            if (!saved.isNullOrBlank()) {
-                return saved
-            }
-
-            val legacyProvider = prefs.getString(
-                "memory_curator_provider",
-                "gemini"
-            )?.trim()?.lowercase()
-
-            val legacyModel = prefs.getString(
-                "memory_curator_model",
-                ""
-            )?.trim().orEmpty()
-
-            return if (
-                legacyProvider == "groq" &&
-                legacyModel.isNotBlank()
-            ) {
-                legacyModel
-            } else {
-                groqModel
-            }
-        }
-        set(value) = prefs.edit()
-            .putString(
-                "memory_curator_groq_model",
-                value.trim()
-            )
-            .apply()
-
-    var memoryCuratorMistralModel: String
-        get() {
-            val saved = prefs.getString(
-                "memory_curator_mistral_model",
-                null
-            )?.trim()
-
-            if (!saved.isNullOrBlank()) {
-                return saved
-            }
-
-            val legacyProvider = prefs.getString(
-                "memory_curator_provider",
-                "gemini"
-            )?.trim()?.lowercase()
-
-            val legacyModel = prefs.getString(
-                "memory_curator_model",
-                ""
-            )?.trim().orEmpty()
-
-            return if (
-                legacyProvider == "mistral" &&
-                legacyModel.isNotBlank()
-            ) {
-                legacyModel
-            } else {
-                mistralModel
-            }
-        }
-        set(value) = prefs.edit()
-            .putString(
-                "memory_curator_mistral_model",
-                value.trim()
-            )
-            .apply()
-
-    var memoryCuratorOllamaModel: String
-        get() = prefs.getString(
-            "memory_curator_ollama_model",
-            "qwen2.5:1.5b"
-        )?.trim() ?: "qwen2.5:1.5b"
-        set(value) = prefs.edit()
-            .putString(
-                "memory_curator_ollama_model",
-                value.trim()
-            )
-            .apply()
-
-    var memoryCuratorCustomModel: String
-        get() {
-            val saved = prefs.getString(
-                "memory_curator_custom_model",
-                null
-            )?.trim()
-
-            if (!saved.isNullOrBlank()) {
-                return saved
-            }
-
-            val legacyProvider = prefs.getString(
-                "memory_curator_provider",
-                "gemini"
-            )?.trim()?.lowercase()
-
-            val legacyModel = prefs.getString(
-                "memory_curator_model",
-                ""
-            )?.trim().orEmpty()
-
-            return if (
-                legacyProvider == "custom" &&
-                legacyModel.isNotBlank()
-            ) {
-                legacyModel
-            } else {
-                customModel
-            }
-        }
-        set(value) = prefs.edit()
-            .putString(
-                "memory_curator_custom_model",
-                value.trim()
-            )
-            .apply()
-
-    // ============================================================
-    // Curator Provider
-    // ============================================================
-
     var memoryCuratorProvider: String
         get() = prefs.getString(
             "memory_curator_provider",
@@ -476,19 +296,32 @@ class AiSettings(context: Context) {
             .apply()
 
     /**
-     * يعيد نموذج الوسيط الصحيح حسب المزوّد المختار.
+     * يعيد نموذج الوسيط حسب المزوّد المختار.
+     *
+     * لا توجد قائمة نماذج ثابتة للوسيط.
+     * الوسيط يستخدم النموذج الذي حدده المستخدم
+     * في إعدادات المحادثة لذلك المزوّد.
      */
     fun getMemoryCuratorModel(): String {
         return when (memoryCuratorProvider) {
-            "gemini" -> memoryCuratorGeminiModel
-            "groq" -> memoryCuratorGroqModel
-            "mistral" -> memoryCuratorMistralModel
-            "ollama" -> memoryCuratorOllamaModel
-            "custom" -> memoryCuratorCustomModel
+
+            "gemini" -> geminiModel
+
+            "groq" -> groqModel
+
+            "mistral" -> mistralModel
+
+            "ollama" -> ollamaModel
+
+            "custom" -> customModel
+
             else -> ""
         }.trim()
     }
 
+    /**
+     * نص هوية/أسلوب الوسيط — حقل حر اختياري.
+     */
     var mediatorIdentityText: String
         get() = prefs.getString(
             "mediator_identity_text",
@@ -523,11 +356,17 @@ class AiSettings(context: Context) {
 
     fun getActiveKey(): String {
         return when (provider) {
+
             "gemini" -> geminiKey
+
             "openrouter" -> openrouterKey
+
             "openai" -> openaiKey
+
             "mistral" -> mistralKey
+
             "groq" -> groqKey
+
             "nvidia" -> nvidiaKey
 
             "huggingface",
@@ -544,11 +383,17 @@ class AiSettings(context: Context) {
 
     fun getActiveModel(): String {
         return when (provider) {
+
             "gemini" -> geminiModel
+
             "openrouter" -> openrouterModel
+
             "openai" -> openaiModel
+
             "mistral" -> mistralModel
+
             "groq" -> groqModel
+
             "nvidia" -> nvidiaModel
 
             "huggingface",
@@ -565,9 +410,15 @@ class AiSettings(context: Context) {
 
     fun isConfigured(): Boolean {
         return when (provider) {
-            "ollama" -> ollamaModel.isNotBlank()
-            "custom" -> customUrl.isNotBlank()
-            else -> getActiveKey().isNotBlank()
+
+            "ollama" ->
+                ollamaModel.isNotBlank()
+
+            "custom" ->
+                customUrl.isNotBlank()
+
+            else ->
+                getActiveKey().isNotBlank()
         }
     }
 }
