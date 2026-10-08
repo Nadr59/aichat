@@ -760,7 +760,6 @@ private fun DebugLogDialog(
         }
     )
 }
-
 @Composable
 private fun SendToWebDialog(
     chatViewModel: ChatViewModel,
@@ -772,11 +771,19 @@ private fun SendToWebDialog(
     var isEnhancing by remember { mutableStateOf(false) }
     var showStyleMenu by remember { mutableStateOf(false) }
     var includeContext by remember { mutableStateOf(false) }
+
+    // المرشحون الناتجون من البحث الهجين
     var searchResults by remember {
         mutableStateOf(emptyList<MemoryItem>())
     }
+
+    // الذكريات التي اختارها الـ Curator فعليًا
     var selectedIds by remember {
         mutableStateOf(setOf<Long>())
+    }
+
+    var curatorReasoning by remember {
+        mutableStateOf("")
     }
 
     val scope = rememberCoroutineScope()
@@ -795,6 +802,21 @@ private fun SendToWebDialog(
 
     val displayedText = enhancedQuery ?: query
 
+    /*
+     * المعمارية الجديدة:
+     *
+     * السؤال
+     *   ↓
+     * البحث الهجين
+     *   ↓
+     * المرشحون
+     *   ↓
+     * Curator
+     *   ↓
+     * selectedIds فقط
+     *
+     * الـ Curator لا يعيد ملخصًا للذاكرة.
+     */
     LaunchedEffect(
         includeContext,
         displayedText
@@ -804,23 +826,39 @@ private fun SendToWebDialog(
             displayedText.length > 2
         ) {
             try {
-                searchResults =
+                val candidates =
                     chatViewModel.searchSharedMemories(
                         displayedText
                     )
 
-                selectedIds =
-                    searchResults
-                        .take(3)
-                        .map { it.id }
-                        .toSet()
+                searchResults = candidates
+
+                if (candidates.isEmpty()) {
+                    selectedIds = emptySet()
+                    curatorReasoning = ""
+                } else {
+                    val curatorResult =
+                        memoryCuratorService.curateSelection(
+                            userQuery = displayedText,
+                            candidates = candidates
+                        )
+
+                    selectedIds =
+                        curatorResult.selectedIds
+                            .toSet()
+
+                    curatorReasoning =
+                        curatorResult.reasoning
+                }
             } catch (e: Exception) {
                 searchResults = emptyList()
                 selectedIds = emptySet()
+                curatorReasoning = ""
             }
         } else {
             searchResults = emptyList()
             selectedIds = emptySet()
+            curatorReasoning = ""
         }
     }
 
@@ -1057,7 +1095,8 @@ private fun SendToWebDialog(
                                 includeContext = !includeContext
                             }
                             .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment =
+                        Alignment.CenterVertically
                 ) {
                     Checkbox(
                         checked = includeContext,
@@ -1083,7 +1122,7 @@ private fun SendToWebDialog(
                         if (includeContext) {
                             Text(
                                 text =
-                                    "سيتم البحث عن ذكريات ذات صلة تلقائياً",
+                                    "سيتم البحث ثم اختيار الذاكرة بواسطة الوسيط",
                                 style =
                                     MaterialTheme
                                         .typography
@@ -1103,7 +1142,7 @@ private fun SendToWebDialog(
                 ) {
                     Text(
                         text =
-                            "ذكريات ذات صلة (${searchResults.size}):",
+                            "ذكريات مرشحة (${searchResults.size})",
                         style =
                             MaterialTheme
                                 .typography
@@ -1118,15 +1157,16 @@ private fun SendToWebDialog(
                     searchResults
                         .take(5)
                         .forEach { memory ->
+                            val isSelected =
+                                memory.id in selectedIds
+
                             Row(
                                 modifier =
                                     Modifier
                                         .fillMaxWidth()
                                         .clickable {
                                             selectedIds =
-                                                if (
-                                                    memory.id in selectedIds
-                                                ) {
+                                                if (isSelected) {
                                                     selectedIds -
                                                         memory.id
                                                 } else {
@@ -1139,8 +1179,7 @@ private fun SendToWebDialog(
                                     Alignment.CenterVertically
                             ) {
                                 Checkbox(
-                                    checked =
-                                        memory.id in selectedIds,
+                                    checked = isSelected,
                                     onCheckedChange = null
                                 )
 
@@ -1153,7 +1192,11 @@ private fun SendToWebDialog(
                                         memory.content.take(80) +
                                             if (
                                                 memory.content.length > 80
-                                            ) "..." else "",
+                                            ) {
+                                                "..."
+                                            } else {
+                                                ""
+                                            },
                                     style =
                                         MaterialTheme
                                             .typography
@@ -1161,6 +1204,21 @@ private fun SendToWebDialog(
                                 )
                             }
                         }
+
+                    if (curatorReasoning.isNotBlank()) {
+                        Text(
+                            text =
+                                "اختيار الوسيط: $curatorReasoning",
+                            style =
+                                MaterialTheme
+                                    .typography
+                                    .labelSmall,
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .onSurfaceVariant
+                        )
+                    }
                 } else if (
                     includeContext &&
                     displayedText.length > 2
@@ -1201,50 +1259,22 @@ private fun SendToWebDialog(
                                         includeContext &&
                                         selectedIds.isNotEmpty()
                                     ) {
+                                        /*
+                                         * مهم:
+                                         *
+                                         * هنا لا نستخدم ناتجًا نصيًا من الوسيط.
+                                         * نستخدم IDs التي اختارها الوسيط،
+                                         * ثم نستخرج الذاكرة الأصلية من المرشحين.
+                                         */
                                         val selected =
                                             searchResults.filter {
-                                                it.id in selectedIds
-                                            }
+                
 
-                                        val contextBuilder =
-                                            MemoryContextBuilder()
-
-                                        val ctx =
-                                            contextBuilder.build(
-                                                selected
-                                            )
-
-                                        buildString {
-                                            appendLine(
-                                                "السياق من محادثاتي السابقة:"
-                                            )
-                                            appendLine()
-                                            appendLine(ctx)
-                                            appendLine()
-                                            appendLine("───────────")
-                                            appendLine()
-                                            appendLine("السؤال:")
-                                            append(displayedText)
-                                        }
-                                    } else {
-                                        displayedText
-                                    }
-
-                                onSend(finalText)
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled =
-                            displayedText.isNotBlank() &&
-                                !isEnhancing
-                    ) {
-                        Text("📤 إرسال للمنصة")
-                    }
-                }
-            }
-        }
-    }
-}
+    
+        
+         
+            
+                                            
 
 private fun openExternal(
     context: Context,
