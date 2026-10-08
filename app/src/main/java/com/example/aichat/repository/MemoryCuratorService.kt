@@ -100,13 +100,13 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // New strict ID-based curator
+    // Strict ID-based curator
     // ============================================================
 
     suspend fun curateSelection(
         userQuery: String,
         candidates: List<MemoryItem>
-    ): CuratorOutcome = withContext(Dispatchers.IO) {
+    ): CuratorResult = withContext(Dispatchers.IO) {
 
         Log.d(
             TAG,
@@ -116,22 +116,19 @@ class MemoryCuratorService(
 
         if (candidates.isEmpty()) {
             Log.d(TAG, "NEW CURATE | no candidates")
-            return@withContext CuratorOutcome.Success(
-                CuratorResult(
-                    selectedIds = emptyList(),
-                    reasoning = "No candidates available."
-                )
+
+            return@withContext CuratorResult(
+                selectedIds = emptyList(),
+                reasoning = "No candidates available."
             )
         }
 
         if (!settings.memoryCuratorEnabled) {
             Log.d(TAG, "NEW CURATE | curator disabled")
 
-            return@withContext CuratorOutcome.Fallback(
-                fallbackResult(
-                    candidates = candidates,
-                    reason = "Curator disabled by setting"
-                )
+            return@withContext fallbackResult(
+                candidates = candidates,
+                reason = "Curator disabled by setting"
             )
         }
 
@@ -164,20 +161,16 @@ class MemoryCuratorService(
                     "NEW CURATE EMPTY RESPONSE"
                 )
 
-                return@withContext CuratorOutcome.Fallback(
-                    fallbackResult(
-                        candidates = candidates,
-                        reason = "Empty curator response"
-                    )
+                return@withContext fallbackResult(
+                    candidates = candidates,
+                    reason = "Empty curator response"
                 )
             }
 
-            val result = parseCuratorResponse(
+            parseCuratorResponse(
                 rawResponse = rawResponse,
                 candidates = candidates
             )
-
-            CuratorOutcome.Success(result)
 
         } catch (e: Exception) {
 
@@ -194,13 +187,11 @@ class MemoryCuratorService(
                     "${e::class.java.simpleName}: ${e.message}"
             )
 
-            CuratorOutcome.Fallback(
-                fallbackResult(
-                    candidates = candidates,
-                    reason =
-                        "Curator exception: " +
-                            "${e::class.java.simpleName}: ${e.message}"
-                )
+            fallbackResult(
+                candidates = candidates,
+                reason =
+                    "Curator exception: " +
+                        "${e::class.java.simpleName}: ${e.message}"
             )
         }
     }
@@ -353,6 +344,10 @@ class MemoryCuratorService(
 
         return when (settings.memoryCuratorProvider.lowercase()) {
 
+            // ====================================================
+            // Groq
+            // ====================================================
+
             "groq" -> {
                 val apiKey = settings.groqKey
                 val model = settings.memoryCuratorModel.trim()
@@ -373,13 +368,18 @@ class MemoryCuratorService(
 
                 callOpenAiCompatibleProvider(
                     providerName = "Groq",
-                    baseUrl = "https://api.groq.com/openai/v1/chat/completions",
+                    baseUrl =
+                        "https://api.groq.com/openai/v1/chat/completions",
                     apiKey = apiKey,
                     model = model,
                     prompt = prompt,
                     forceJson = forceJson
                 )
             }
+
+            // ====================================================
+            // Mistral
+            // ====================================================
 
             "mistral" -> {
                 val apiKey = settings.mistralKey
@@ -401,7 +401,8 @@ class MemoryCuratorService(
 
                 callOpenAiCompatibleProvider(
                     providerName = "Mistral",
-                    baseUrl = "https://api.mistral.ai/v1/chat/completions",
+                    baseUrl =
+                        "https://api.mistral.ai/v1/chat/completions",
                     apiKey = apiKey,
                     model = model,
                     prompt = prompt,
@@ -409,11 +410,18 @@ class MemoryCuratorService(
                 )
             }
 
+            // ====================================================
+            // Ollama
+            // ====================================================
+
             "ollama" -> {
-                val model = settings.memoryCuratorOllamaModel.trim()
+                val model =
+                    settings.memoryCuratorOllamaModel.trim()
 
                 if (model.isBlank()) {
-                    throw Exception("Ollama curator model is blank")
+                    throw Exception(
+                        "Ollama curator model is blank"
+                    )
                 }
 
                 Log.d(
@@ -429,11 +437,18 @@ class MemoryCuratorService(
                 )
             }
 
+            // ====================================================
+            // Custom
+            // ====================================================
+
             "custom" -> {
                 val baseUrl = settings.customUrl.trim()
                 val model = settings.customModel.trim()
 
-                if (baseUrl.isBlank() || model.isBlank()) {
+                if (
+                    baseUrl.isBlank() ||
+                    model.isBlank()
+                ) {
                     throw Exception(
                         "Custom provider not configured"
                     )
@@ -453,16 +468,24 @@ class MemoryCuratorService(
                 )
             }
 
+            // ====================================================
+            // Gemini
+            // ====================================================
+
             else -> {
                 val apiKey = settings.geminiKey
                 val model = settings.memoryCuratorModel.trim()
 
                 if (apiKey.isBlank()) {
-                    throw Exception("Gemini API key is blank")
+                    throw Exception(
+                        "Gemini API key is blank"
+                    )
                 }
 
                 if (model.isBlank()) {
-                    throw Exception("Gemini curator model is blank")
+                    throw Exception(
+                        "Gemini curator model is blank"
+                    )
                 }
 
                 Log.d(
@@ -482,7 +505,7 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // Configured provider — used by enhancement/refinement
+    // Configured provider — enhancement/refinement
     // ============================================================
 
     private suspend fun callConfiguredProvider(
@@ -510,7 +533,8 @@ class MemoryCuratorService(
 
                 callOpenAiCompatibleProvider(
                     providerName = "Groq",
-                    baseUrl = "https://api.groq.com/openai/v1/chat/completions",
+                    baseUrl =
+                        "https://api.groq.com/openai/v1/chat/completions",
                     apiKey = apiKey,
                     model = model,
                     prompt = prompt,
@@ -537,7 +561,8 @@ class MemoryCuratorService(
 
                 callOpenAiCompatibleProvider(
                     providerName = "Mistral",
-                    baseUrl = "https://api.mistral.ai/v1/chat/completions",
+                    baseUrl =
+                        "https://api.mistral.ai/v1/chat/completions",
                     apiKey = apiKey,
                     model = model,
                     prompt = prompt,
@@ -546,10 +571,13 @@ class MemoryCuratorService(
             }
 
             "ollama" -> {
-                val model = settings.memoryCuratorOllamaModel.trim()
+                val model =
+                    settings.memoryCuratorOllamaModel.trim()
 
                 if (model.isBlank()) {
-                    throw Exception("Ollama curator model is blank")
+                    throw Exception(
+                        "Ollama curator model is blank"
+                    )
                 }
 
                 Log.d(
@@ -568,7 +596,10 @@ class MemoryCuratorService(
                 val baseUrl = settings.customUrl.trim()
                 val model = settings.customModel.trim()
 
-                if (baseUrl.isBlank() || model.isBlank()) {
+                if (
+                    baseUrl.isBlank() ||
+                    model.isBlank()
+                ) {
                     throw Exception(
                         "Custom provider not configured"
                     )
@@ -591,20 +622,29 @@ class MemoryCuratorService(
                 val apiKey = settings.geminiKey
 
                 if (apiKey.isBlank()) {
-                    throw Exception("Gemini API key is blank")
+                    throw Exception(
+                        "Gemini API key is blank"
+                    )
+                }
+
+                val model =
+                    settings.memoryCuratorModel.trim()
+
+                if (model.isBlank()) {
+                    throw Exception(
+                        "Gemini curator model is blank"
+                    )
                 }
 
                 Log.d(
                     TAG,
-                    "🧠 ENHANCE PROVIDER | Gemini | " +
-                        "model=${settings.memoryCuratorModel}"
+                    "🧠 ENHANCE PROVIDER | Gemini | model=$model"
                 )
 
                 callGeminiFlash(
                     prompt = prompt,
                     apiKey = apiKey,
-                    model = settings.memoryCuratorModel
-                        .trim(),
+                    model = model,
                     forceJson = false
                 )
             }
@@ -737,7 +777,7 @@ class MemoryCuratorService(
             Log.d(
                 TAG,
                 "🧠 GEMINI RESPONSE PARSED | " +
-                    "len=${result.length()}"
+                    "len=${result.length}"
             )
 
             return result
@@ -745,7 +785,7 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // Groq / Mistral — OpenAI-compatible
+    // Groq / Mistral — OpenAI compatible
     // ============================================================
 
     private fun callOpenAiCompatibleProvider(
@@ -906,7 +946,8 @@ class MemoryCuratorService(
                 }
             )
 
-            put("options",
+            put(
+                "options",
                 JSONObject().apply {
                     put("temperature", 0.2)
                 }
@@ -1206,8 +1247,8 @@ class MemoryCuratorService(
         )
 
         /*
-         * selectedIds=[] is a valid decision:
-         * the curator found no relevant memory.
+         * selectedIds=[] is a valid decision.
+         * The curator found no relevant memory.
          */
         if (selected.isEmpty()) {
 
@@ -1364,7 +1405,7 @@ class MemoryCuratorService(
 }
 
 // ================================================================
-// Result models
+// Result model
 // ================================================================
 
 data class CuratorResult(
@@ -1375,14 +1416,3 @@ data class CuratorResult(
     val fallbackReason: String? = null,
     val rawResponse: String? = null
 )
-
-sealed interface CuratorOutcome {
-
-    data class Success(
-        val result: CuratorResult
-    ) : CuratorOutcome
-
-    data class Fallback(
-        val result: CuratorResult
-    ) : CuratorOutcome
-}
