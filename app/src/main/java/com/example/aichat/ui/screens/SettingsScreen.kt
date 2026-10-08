@@ -174,68 +174,12 @@ fun SettingsScreen(
         mutableStateOf(settings.memoryCuratorEnabled)
     }
 
-    var memoryCuratorModel by remember {
-        mutableStateOf(settings.memoryCuratorModel)
-    }
-
     var memoryCuratorProvider by remember {
         mutableStateOf(settings.memoryCuratorProvider)
     }
 
-    var memoryCuratorOllamaModel by remember {
-        mutableStateOf(settings.memoryCuratorOllamaModel)
-    }
-
     var mediatorIdentityText by remember {
         mutableStateOf(settings.mediatorIdentityText)
-    }
-
-    /*
-     * نماذج الوسيط الخاصة بكل مزود داخل الجلسة الحالية.
-     *
-     * السبب:
-     * AiSettings يحتوي حاليًا على memoryCuratorModel واحد،
-     * لذلك نحتفظ بالقيم الخاصة بالمزودين أثناء التنقل بينهم
-     * حتى لا تضيع قيمة Groq عند الانتقال إلى Gemini والعكس.
-     */
-    var curatorGeminiModel by remember {
-        mutableStateOf(
-            if (settings.memoryCuratorProvider == "gemini") {
-                settings.memoryCuratorModel
-            } else {
-                settings.geminiModel
-            }
-        )
-    }
-
-    var curatorGroqModel by remember {
-        mutableStateOf(
-            if (settings.memoryCuratorProvider == "groq") {
-                settings.memoryCuratorModel
-            } else {
-                settings.groqModel
-            }
-        )
-    }
-
-    var curatorMistralModel by remember {
-        mutableStateOf(
-            if (settings.memoryCuratorProvider == "mistral") {
-                settings.memoryCuratorModel
-            } else {
-                settings.mistralModel
-            }
-        )
-    }
-
-    var curatorCustomModel by remember {
-        mutableStateOf(
-            if (settings.memoryCuratorProvider == "custom") {
-                settings.memoryCuratorModel
-            } else {
-                settings.customModel
-            }
-        )
     }
 
     // ------------------------------------------------------------
@@ -435,79 +379,10 @@ fun SettingsScreen(
     // ------------------------------------------------------------
 
     fun selectCuratorProvider(newProvider: String) {
-
-        /*
-         * نحفظ قيمة المزود الحالي في متغيره المحلي قبل الانتقال.
-         */
-        when (memoryCuratorProvider) {
-
-            "gemini" -> {
-                curatorGeminiModel = memoryCuratorModel
-            }
-
-            "groq" -> {
-                curatorGroqModel = memoryCuratorModel
-            }
-
-            "mistral" -> {
-                curatorMistralModel = memoryCuratorModel
-            }
-
-            "custom" -> {
-                curatorCustomModel = memoryCuratorModel
-            }
+        if (memoryCuratorProvider != newProvider) {
+            memoryCuratorProvider = newProvider
+            saved = false
         }
-
-        memoryCuratorProvider = newProvider
-
-        /*
-         * عند اختيار مزود جديد، لا نترك نموذج المزود السابق.
-         * نستخدم نموذج المزود نفسه كقيمة ابتدائية صحيحة.
-         */
-        memoryCuratorModel = when (newProvider) {
-
-            "gemini" -> {
-                if (curatorGeminiModel.isBlank()) {
-                    geminiModel
-                } else {
-                    curatorGeminiModel
-                }
-            }
-
-            "groq" -> {
-                if (curatorGroqModel.isBlank()) {
-                    groqModel
-                } else {
-                    curatorGroqModel
-                }
-            }
-
-            "mistral" -> {
-                if (curatorMistralModel.isBlank()) {
-                    mistralModel
-                } else {
-                    curatorMistralModel
-                }
-            }
-
-            "custom" -> {
-                if (curatorCustomModel.isBlank()) {
-                    customModel
-                } else {
-                    curatorCustomModel
-                }
-            }
-
-            "ollama" -> {
-                memoryCuratorOllamaModel
-            }
-
-            else -> {
-                memoryCuratorModel
-            }
-        }
-
-        saved = false
     }
 
     // ------------------------------------------------------------
@@ -1289,18 +1164,8 @@ fun SettingsScreen(
                                 settings.memoryCuratorEnabled =
                                     memoryCuratorEnabled
 
-                                /*
-                                 * نحفظ نموذج الوسيط الخاص بالمزود
-                                 * الذي تم اختياره حاليًا.
-                                 */
-                                settings.memoryCuratorModel =
-                                    memoryCuratorModel
-
                                 settings.memoryCuratorProvider =
                                     memoryCuratorProvider
-
-                                settings.memoryCuratorOllamaModel =
-                                    memoryCuratorOllamaModel
 
                                 settings.mediatorIdentityText =
                                     mediatorIdentityText
@@ -1539,6 +1404,16 @@ fun SettingsScreen(
                                             FontWeight.Bold
                                     )
 
+                                    Text(
+                                        text =
+                                            "يستخدم الوسيط نموذج المزوّد المختار في إعدادات المزوّد أعلاه (تبويب 🤖 المحادثة). عند تغيير النموذج هناك، سيستخدم الوسيط النموذج الجديد تلقائيًا.",
+                                        style =
+                                            MaterialTheme.typography.bodySmall,
+                                        color =
+                                            MaterialTheme.colorScheme
+                                                .onSurfaceVariant
+                                    )
+
                                     /*
                                      * ------------------------------------------------
                                      * مزودو الوسيط — رأسي
@@ -1761,31 +1636,10 @@ fun SettingsScreen(
 
                                         "gemini" -> {
 
-                                            OutlinedTextField(
-                                                value =
-                                                    memoryCuratorModel,
-                                                onValueChange = {
-                                                    memoryCuratorModel =
-                                                        it
-                                                    curatorGeminiModel = it
-                                                    saved = false
-                                                },
-                                                modifier =
-                                                    Modifier.fillMaxWidth(),
-                                                label = {
-                                                    Text(
-                                                        "نموذج Gemini للوسيط"
-                                                    )
-                                                },
-                                                singleLine = true,
-                                                shape =
-                                                    RoundedCornerShape(
-                                                        12.dp
-                                                    )
-                                            )
-
                                             InfoCard(
-                                                "سيستخدم الوسيط مفتاح Gemini الموجود في إعدادات المحادثة أعلاه."
+                                                "سيستخدم الوسيط نموذج Gemini نفسه المستخدم في المحادثة" +
+                                                        (if (geminiModel.isNotBlank()) " ($geminiModel)" else "") +
+                                                        " ومفتاح API الخاص به."
                                             )
                                         }
 
@@ -1795,42 +1649,10 @@ fun SettingsScreen(
 
                                         "groq" -> {
 
-                                            OutlinedTextField(
-                                                value =
-                                                    memoryCuratorModel,
-                                                onValueChange = {
-                                                    memoryCuratorModel =
-                                                        it
-                                                    curatorGroqModel = it
-                                                    saved = false
-                                                },
-                                                modifier =
-                                                    Modifier.fillMaxWidth(),
-                                                label = {
-                                                    Text(
-                                                        "نموذج Groq للوسيط"
-                                                    )
-                                                },
-                                                singleLine = true,
-                                                shape =
-                                                    RoundedCornerShape(
-                                                        12.dp
-                                                    )
-                                            )
-
                                             InfoCard(
-                                                "سيستخدم الوسيط مفتاح Groq الموجود في إعدادات المحادثة أعلاه."
-                                            )
-
-                                            Text(
-                                                text =
-                                                    "النموذج الحالي للمحادثة: $groqModel",
-                                                style =
-                                                    MaterialTheme.typography
-                                                        .bodySmall,
-                                                color =
-                                                    MaterialTheme.colorScheme
-                                                        .onSurfaceVariant
+                                                "سيستخدم الوسيط نموذج Groq نفسه المستخدم في المحادثة" +
+                                                        (if (groqModel.isNotBlank()) " ($groqModel)" else "") +
+                                                        " ومفتاح API الخاص به."
                                             )
                                         }
 
@@ -1840,42 +1662,10 @@ fun SettingsScreen(
 
                                         "mistral" -> {
 
-                                            OutlinedTextField(
-                                                value =
-                                                    memoryCuratorModel,
-                                                onValueChange = {
-                                                    memoryCuratorModel =
-                                                        it
-                                                    curatorMistralModel = it
-                                                    saved = false
-                                                },
-                                                modifier =
-                                                    Modifier.fillMaxWidth(),
-                                                label = {
-                                                    Text(
-                                                        "نموذج Mistral للوسيط"
-                                                    )
-                                                },
-                                                singleLine = true,
-                                                shape =
-                                                    RoundedCornerShape(
-                                                        12.dp
-                                                    )
-                                            )
-
                                             InfoCard(
-                                                "سيستخدم الوسيط مفتاح Mistral الموجود في إعدادات المحادثة أعلاه."
-                                            )
-
-                                            Text(
-                                                text =
-                                                    "النموذج الحالي للمحادثة: $mistralModel",
-                                                style =
-                                                    MaterialTheme.typography
-                                                        .bodySmall,
-                                                color =
-                                                    MaterialTheme.colorScheme
-                                                        .onSurfaceVariant
+                                                "سيستخدم الوسيط نموذج Mistral نفسه المستخدم في المحادثة" +
+                                                        (if (mistralModel.isNotBlank()) " ($mistralModel)" else "") +
+                                                        " ومفتاح API الخاص به."
                                             )
                                         }
 
@@ -1885,52 +1675,17 @@ fun SettingsScreen(
 
                                         "ollama" -> {
 
-                                            OutlinedTextField(
-                                                value =
-                                                    memoryCuratorOllamaModel,
-                                                onValueChange = {
-                                                    memoryCuratorOllamaModel =
-                                                        it
-                                                    saved = false
-                                                },
-                                                modifier =
-                                                    Modifier.fillMaxWidth(),
-                                                label = {
-                                                    Text(
-                                                        "نموذج Ollama للوسيط"
-                                                    )
-                                                },
-                                                singleLine = true,
-                                                leadingIcon = {
-                                                    Icon(
-                                                        imageVector =
-                                                            Icons.Filled.Computer,
-                                                        contentDescription =
-                                                            null
-                                                    )
-                                                },
-                                                shape =
-                                                    RoundedCornerShape(
-                                                        12.dp
-                                                    )
-                                            )
-
                                             InfoCard(
-                                                "متطلبات Ollama:\n\n" +
+                                                "سيستخدم الوسيط نموذج Ollama نفسه المستخدم في المحادثة" +
+                                                        (if (ollamaModel.isNotBlank()) " ($ollamaModel)" else "") +
+                                                        ".\n\n" +
+                                                        "متطلبات Ollama:\n\n" +
                                                         "127.0.0.1:11434\n\n" +
                                                         "في Termux:\n" +
                                                         "ollama serve\n\n" +
                                                         "ثم:\n" +
                                                         "ollama pull qwen2.5:1.5b\n\n" +
                                                         "لا يحتاج API Key ولا اتصالًا بالإنترنت أثناء الاستخدام."
-                                            )
-
-                                            Text(
-                                                text =
-                                                    "نماذج مقترحة: qwen2.5:0.5b • qwen2.5:1.5b • qwen2.5:3b • gemma2:2b",
-                                                style =
-                                                    MaterialTheme.typography
-                                                        .bodySmall
                                             )
                                         }
 
@@ -1941,30 +1696,9 @@ fun SettingsScreen(
                                         "custom" -> {
 
                                             InfoCard(
-                                                "سيستخدم الوسيط إعدادات Custom الموجودة في تبويب المحادثة."
-                                            )
-
-                                            OutlinedTextField(
-                                                value =
-                                                    memoryCuratorModel,
-                                                onValueChange = {
-                                                    memoryCuratorModel =
-                                                        it
-                                                    curatorCustomModel = it
-                                                    saved = false
-                                                },
-                                                modifier =
-                                                    Modifier.fillMaxWidth(),
-                                                label = {
-                                                    Text(
-                                                        "نموذج Custom للوسيط"
-                                                    )
-                                                },
-                                                singleLine = true,
-                                                shape =
-                                                    RoundedCornerShape(
-                                                        12.dp
-                                                    )
+                                                "سيستخدم الوسيط إعدادات Custom نفسها الموجودة في تبويب المحادثة" +
+                                                        (if (customModel.isNotBlank()) " (النموذج: $customModel)" else "") +
+                                                        "."
                                             )
 
                                             if (
@@ -2090,14 +1824,8 @@ fun SettingsScreen(
                                 settings.memoryCuratorEnabled =
                                     memoryCuratorEnabled
 
-                                settings.memoryCuratorModel =
-                                    memoryCuratorModel
-
                                 settings.memoryCuratorProvider =
                                     memoryCuratorProvider
-
-                                settings.memoryCuratorOllamaModel =
-                                    memoryCuratorOllamaModel
 
                                 settings.mediatorIdentityText =
                                     mediatorIdentityText
