@@ -137,10 +137,13 @@ class MemoryCuratorService(
             candidates = candidates
         )
 
+        val provider = settings.memoryCuratorProvider
+        val model = settings.getMemoryCuratorModel()
+
         Log.d(
             TAG,
-            "NEW CURATE PROMPT | provider=${settings.memoryCuratorProvider} | " +
-                "model=${settings.memoryCuratorModel} | len=${prompt.length}"
+            "NEW CURATE PROMPT | provider=$provider | " +
+                "model=$model | len=${prompt.length}"
         )
 
         try {
@@ -179,12 +182,6 @@ class MemoryCuratorService(
                 "NEW CURATE EXCEPTION | " +
                     "${e::class.java.simpleName}: ${e.message}",
                 e
-            )
-
-            Log.w(
-                TAG,
-                "FALLBACK REASON | " +
-                    "${e::class.java.simpleName}: ${e.message}"
             )
 
             fallbackResult(
@@ -237,17 +234,7 @@ class MemoryCuratorService(
                 mediatorIdentityText = mediatorIdentityText
             )
 
-            Log.d(
-                TAG,
-                "🧠 ENHANCE PROMPT READY | len=${prompt.length}"
-            )
-
             val enhanced = callConfiguredProvider(prompt).trim()
-
-            Log.d(
-                TAG,
-                "🧠 ENHANCE RESPONSE RECEIVED | len=${enhanced.length}"
-            )
 
             val isValid =
                 enhanced.isNotBlank() &&
@@ -256,21 +243,13 @@ class MemoryCuratorService(
                     enhanced.length > userQuery.length / 2
 
             if (isValid) {
-
                 Log.d(
                     TAG,
                     "🧠 ENHANCE SUCCESS | resultLen=${enhanced.length}"
                 )
 
-                Log.d(
-                    TAG,
-                    "🧠 ENHANCE RESULT | ${enhanced.take(120)}"
-                )
-
                 enhanced
-
             } else {
-
                 Log.d(
                     TAG,
                     "🧠 ENHANCE INVALID | returning original query"
@@ -342,7 +321,10 @@ class MemoryCuratorService(
         forceJson: Boolean
     ): String {
 
-        return when (settings.memoryCuratorProvider.lowercase()) {
+        val provider = settings.memoryCuratorProvider.lowercase()
+        val model = settings.getMemoryCuratorModel()
+
+        return when (provider) {
 
             // ====================================================
             // Groq
@@ -350,7 +332,6 @@ class MemoryCuratorService(
 
             "groq" -> {
                 val apiKey = settings.groqKey
-                val model = settings.memoryCuratorModel.trim()
 
                 if (apiKey.isBlank()) {
                     throw Exception("Groq API key is blank")
@@ -383,7 +364,6 @@ class MemoryCuratorService(
 
             "mistral" -> {
                 val apiKey = settings.mistralKey
-                val model = settings.memoryCuratorModel.trim()
 
                 if (apiKey.isBlank()) {
                     throw Exception("Mistral API key is blank")
@@ -415,9 +395,6 @@ class MemoryCuratorService(
             // ====================================================
 
             "ollama" -> {
-                val model =
-                    settings.memoryCuratorOllamaModel.trim()
-
                 if (model.isBlank()) {
                     throw Exception(
                         "Ollama curator model is blank"
@@ -443,14 +420,13 @@ class MemoryCuratorService(
 
             "custom" -> {
                 val baseUrl = settings.customUrl.trim()
-                val model = settings.customModel.trim()
 
                 if (
                     baseUrl.isBlank() ||
                     model.isBlank()
                 ) {
                     throw Exception(
-                        "Custom provider not configured"
+                        "Custom curator provider not configured"
                     )
                 }
 
@@ -464,7 +440,8 @@ class MemoryCuratorService(
                     prompt = prompt,
                     baseUrl = baseUrl,
                     apiKey = settings.customKey,
-                    model = model
+                    model = model,
+                    forceJson = forceJson
                 )
             }
 
@@ -472,9 +449,8 @@ class MemoryCuratorService(
             // Gemini
             // ====================================================
 
-            else -> {
+            "gemini" -> {
                 val apiKey = settings.geminiKey
-                val model = settings.memoryCuratorModel.trim()
 
                 if (apiKey.isBlank()) {
                     throw Exception(
@@ -501,6 +477,12 @@ class MemoryCuratorService(
                     forceJson = forceJson
                 )
             }
+
+            else -> {
+                throw Exception(
+                    "Unsupported curator provider: $provider"
+                )
+            }
         }
     }
 
@@ -512,11 +494,13 @@ class MemoryCuratorService(
         prompt: String
     ): String {
 
-        return when (settings.memoryCuratorProvider.lowercase()) {
+        val provider = settings.memoryCuratorProvider.lowercase()
+        val model = settings.getMemoryCuratorModel()
+
+        return when (provider) {
 
             "groq" -> {
                 val apiKey = settings.groqKey
-                val model = settings.memoryCuratorModel.trim()
 
                 if (apiKey.isBlank()) {
                     throw Exception("Groq API key is blank")
@@ -525,11 +509,6 @@ class MemoryCuratorService(
                 if (model.isBlank()) {
                     throw Exception("Groq curator model is blank")
                 }
-
-                Log.d(
-                    TAG,
-                    "🧠 ENHANCE PROVIDER | Groq | model=$model"
-                )
 
                 callOpenAiCompatibleProvider(
                     providerName = "Groq",
@@ -544,7 +523,6 @@ class MemoryCuratorService(
 
             "mistral" -> {
                 val apiKey = settings.mistralKey
-                val model = settings.memoryCuratorModel.trim()
 
                 if (apiKey.isBlank()) {
                     throw Exception("Mistral API key is blank")
@@ -553,11 +531,6 @@ class MemoryCuratorService(
                 if (model.isBlank()) {
                     throw Exception("Mistral curator model is blank")
                 }
-
-                Log.d(
-                    TAG,
-                    "🧠 ENHANCE PROVIDER | Mistral | model=$model"
-                )
 
                 callOpenAiCompatibleProvider(
                     providerName = "Mistral",
@@ -571,19 +544,11 @@ class MemoryCuratorService(
             }
 
             "ollama" -> {
-                val model =
-                    settings.memoryCuratorOllamaModel.trim()
-
                 if (model.isBlank()) {
                     throw Exception(
                         "Ollama curator model is blank"
                     )
                 }
-
-                Log.d(
-                    TAG,
-                    "🧠 ENHANCE PROVIDER | Ollama | model=$model"
-                )
 
                 callOllama(
                     prompt = prompt,
@@ -594,31 +559,26 @@ class MemoryCuratorService(
 
             "custom" -> {
                 val baseUrl = settings.customUrl.trim()
-                val model = settings.customModel.trim()
 
                 if (
                     baseUrl.isBlank() ||
                     model.isBlank()
                 ) {
                     throw Exception(
-                        "Custom provider not configured"
+                        "Custom curator provider not configured"
                     )
                 }
-
-                Log.d(
-                    TAG,
-                    "🧠 ENHANCE PROVIDER | Custom | model=$model"
-                )
 
                 callCustomProvider(
                     prompt = prompt,
                     baseUrl = baseUrl,
                     apiKey = settings.customKey,
-                    model = model
+                    model = model,
+                    forceJson = false
                 )
             }
 
-            else -> {
+            "gemini" -> {
                 val apiKey = settings.geminiKey
 
                 if (apiKey.isBlank()) {
@@ -627,25 +587,23 @@ class MemoryCuratorService(
                     )
                 }
 
-                val model =
-                    settings.memoryCuratorModel.trim()
-
                 if (model.isBlank()) {
                     throw Exception(
                         "Gemini curator model is blank"
                     )
                 }
 
-                Log.d(
-                    TAG,
-                    "🧠 ENHANCE PROVIDER | Gemini | model=$model"
-                )
-
                 callGeminiFlash(
                     prompt = prompt,
                     apiKey = apiKey,
                     model = model,
                     forceJson = false
+                )
+            }
+
+            else -> {
+                throw Exception(
+                    "Unsupported curator provider: $provider"
                 )
             }
         }
@@ -661,12 +619,6 @@ class MemoryCuratorService(
         model: String,
         forceJson: Boolean
     ): String {
-
-        Log.d(
-            TAG,
-            "🧠 REQUEST SENT | Gemini | model=$model | " +
-                "promptLen=${prompt.length} | forceJson=$forceJson"
-        )
 
         val generationConfig = JSONObject().apply {
             put("temperature", 0.2)
@@ -739,13 +691,6 @@ class MemoryCuratorService(
                 val errorBody =
                     response.body?.string()
 
-                Log.w(
-                    TAG,
-                    "🧠 GEMINI HTTP ERROR | " +
-                        "code=${response.code} | " +
-                        "body=${errorBody?.take(500)}"
-                )
-
                 throw Exception(
                     "Gemini Flash failed: " +
                         "${response.code} - " +
@@ -759,28 +704,13 @@ class MemoryCuratorService(
                         "Empty response from Gemini Flash"
                     )
 
-            Log.d(
-                TAG,
-                "NEW CURATE GEMINI BODY | " +
-                    body.take(500)
-            )
-
-            val result =
-                JSONObject(body)
-                    .getJSONArray("candidates")
-                    .getJSONObject(0)
-                    .getJSONObject("content")
-                    .getJSONArray("parts")
-                    .getJSONObject(0)
-                    .getString("text")
-
-            Log.d(
-                TAG,
-                "🧠 GEMINI RESPONSE PARSED | " +
-                    "len=${result.length}"
-            )
-
-            return result
+            return JSONObject(body)
+                .getJSONArray("candidates")
+                .getJSONObject(0)
+                .getJSONObject("content")
+                .getJSONArray("parts")
+                .getJSONObject(0)
+                .getString("text")
         }
     }
 
@@ -796,13 +726,6 @@ class MemoryCuratorService(
         prompt: String,
         forceJson: Boolean
     ): String {
-
-        Log.d(
-            TAG,
-            "🧠 REQUEST SENT | $providerName | " +
-                "model=$model | promptLen=${prompt.length} | " +
-                "forceJson=$forceJson"
-        )
 
         val json = JSONObject().apply {
 
@@ -858,13 +781,6 @@ class MemoryCuratorService(
                 val errorBody =
                     response.body?.string()
 
-                Log.w(
-                    TAG,
-                    "🧠 $providerName HTTP ERROR | " +
-                        "code=${response.code} | " +
-                        "body=${errorBody?.take(500)}"
-                )
-
                 throw Exception(
                     "$providerName curator failed: " +
                         "${response.code} - " +
@@ -877,12 +793,6 @@ class MemoryCuratorService(
                     ?: throw Exception(
                         "Empty response from $providerName"
                     )
-
-            Log.d(
-                TAG,
-                "NEW CURATE $providerName BODY | " +
-                    body.take(500)
-            )
 
             val message =
                 JSONObject(body)
@@ -903,12 +813,6 @@ class MemoryCuratorService(
                 )
             }
 
-            Log.d(
-                TAG,
-                "🧠 $providerName RESPONSE PARSED | " +
-                    "len=${content.length}"
-            )
-
             return content
         }
     }
@@ -922,12 +826,6 @@ class MemoryCuratorService(
         model: String,
         forceJson: Boolean
     ): String {
-
-        Log.d(
-            TAG,
-            "🧠 REQUEST SENT | Ollama | model=$model | " +
-                "promptLen=${prompt.length} | forceJson=$forceJson"
-        )
 
         val json = JSONObject().apply {
 
@@ -981,13 +879,6 @@ class MemoryCuratorService(
                 val errorBody =
                     response.body?.string()
 
-                Log.w(
-                    TAG,
-                    "🧠 OLLAMA HTTP ERROR | " +
-                        "code=${response.code} | " +
-                        "body=${errorBody?.take(500)}"
-                )
-
                 throw Exception(
                     "Ollama curator failed: " +
                         "${response.code} - " +
@@ -1000,12 +891,6 @@ class MemoryCuratorService(
                     ?: throw Exception(
                         "Empty response from Ollama"
                     )
-
-            Log.d(
-                TAG,
-                "NEW CURATE OLLAMA BODY | " +
-                    body.take(500)
-            )
 
             val message =
                 JSONObject(body)
@@ -1024,12 +909,6 @@ class MemoryCuratorService(
                 )
             }
 
-            Log.d(
-                TAG,
-                "🧠 OLLAMA RESPONSE PARSED | " +
-                    "len=${content.length}"
-            )
-
             return content
         }
     }
@@ -1042,14 +921,9 @@ class MemoryCuratorService(
         prompt: String,
         baseUrl: String,
         apiKey: String,
-        model: String
+        model: String,
+        forceJson: Boolean
     ): String {
-
-        Log.d(
-            TAG,
-            "🧠 REQUEST SENT | Custom | " +
-                "model=$model | promptLen=${prompt.length}"
-        )
 
         val json = JSONObject().apply {
 
@@ -1069,6 +943,15 @@ class MemoryCuratorService(
 
             put("temperature", 0.2)
             put("max_tokens", 2000)
+
+            if (forceJson) {
+                put(
+                    "response_format",
+                    JSONObject().apply {
+                        put("type", "json_object")
+                    }
+                )
+            }
         }
 
         val requestBuilder =
@@ -1101,13 +984,6 @@ class MemoryCuratorService(
                 val errorBody =
                     response.body?.string()
 
-                Log.w(
-                    TAG,
-                    "🧠 CUSTOM HTTP ERROR | " +
-                        "code=${response.code} | " +
-                        "body=${errorBody?.take(500)}"
-                )
-
                 throw Exception(
                     "Custom curator failed: " +
                         "${response.code} - " +
@@ -1120,12 +996,6 @@ class MemoryCuratorService(
                     ?: throw Exception(
                         "Empty response from custom curator"
                     )
-
-            Log.d(
-                TAG,
-                "NEW CURATE CUSTOM BODY | " +
-                    body.take(500)
-            )
 
             val message =
                 JSONObject(body)
@@ -1143,13 +1013,6 @@ class MemoryCuratorService(
                 }
 
             if (content != null) {
-
-                Log.d(
-                    TAG,
-                    "🧠 CUSTOM RESPONSE PARSED | " +
-                        "len=${content.length}"
-                )
-
                 return content
             }
 
@@ -1163,13 +1026,6 @@ class MemoryCuratorService(
                 }
 
             if (reasoning != null) {
-
-                Log.d(
-                    TAG,
-                    "ℹ️ Custom curator: " +
-                        "using 'reasoning' field"
-                )
-
                 return reasoning
             }
 
@@ -1192,12 +1048,6 @@ class MemoryCuratorService(
         val jsonText =
             extractJsonObject(rawResponse)
 
-        Log.d(
-            TAG,
-            "NEW CURATE PARSER JSON | " +
-                jsonText.take(500)
-        )
-
         val json =
             JSONObject(jsonText)
 
@@ -1206,17 +1056,15 @@ class MemoryCuratorService(
                 .map { it.id }
                 .toSet()
 
-        val selectedRaw =
-            json.optJSONArray("selectedIds")
-
-        val irrelevantRaw =
-            json.optJSONArray("irrelevantIds")
-
         val selected =
-            jsonArrayToLongs(selectedRaw)
+            jsonArrayToLongs(
+                json.optJSONArray("selectedIds")
+            )
 
         val irrelevant =
-            jsonArrayToLongs(irrelevantRaw)
+            jsonArrayToLongs(
+                json.optJSONArray("irrelevantIds")
+            )
 
         val reasoning =
             json.optString(
@@ -1238,25 +1086,7 @@ class MemoryCuratorService(
                     it in sanitizedSelected
                 }
 
-        Log.d(
-            TAG,
-            "NEW CURATE PARSER SANITIZED | " +
-                "selected=$sanitizedSelected | " +
-                "irrelevant=$sanitizedIrrelevant | " +
-                "reasoning=${reasoning.take(200)}"
-        )
-
-        /*
-         * selectedIds=[] is a valid decision.
-         * The curator found no relevant memory.
-         */
         if (selected.isEmpty()) {
-
-            Log.d(
-                TAG,
-                "NEW CURATE PARSER | " +
-                    "valid empty selection"
-            )
 
             return CuratorResult(
                 selectedIds = emptyList(),
@@ -1273,17 +1103,7 @@ class MemoryCuratorService(
             )
         }
 
-        /*
-         * If the model returned IDs, but every one of them
-         * is invalid, fallback to the top candidates.
-         */
         if (sanitizedSelected.isEmpty()) {
-
-            Log.w(
-                TAG,
-                "NEW CURATE PARSER | " +
-                    "all selected IDs invalid"
-            )
 
             return fallbackResult(
                 candidates = candidates,
@@ -1354,9 +1174,9 @@ class MemoryCuratorService(
         val result = mutableListOf<Long>()
 
         for (i in 0 until array.length()) {
-            val value = array.opt(i)
 
-            when (value) {
+            when (val value = array.opt(i)) {
+
                 is Number -> {
                     result.add(value.toLong())
                 }
@@ -1389,8 +1209,7 @@ class MemoryCuratorService(
 
         Log.w(
             TAG,
-            "FALLBACK REASON | $reason | " +
-                "selected=$ids"
+            "FALLBACK REASON | $reason | selected=$ids"
         )
 
         return CuratorResult(
