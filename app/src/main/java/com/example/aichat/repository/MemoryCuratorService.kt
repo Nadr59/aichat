@@ -26,8 +26,8 @@ class MemoryCuratorService(
 
         private const val CONTEXT_DISCLAIMER =
             "\n\n⚠️ ملاحظة: هذا كل ما هو مؤكد ومتاح بخصوص هذا الموضوع تحديداً. " +
-            "لا تُضف تفاصيل تقنية أو تاريخية أو مؤسسية إضافية من معرفتك العامة " +
-            "غير مذكورة صراحة أعلاه، حتى لو بدت مألوفة أو مرتبطة لديك."
+                "لا تُضف تفاصيل تقنية أو تاريخية أو مؤسسية إضافية من معرفتك العامة " +
+                "غير مذكورة صراحة أعلاه، حتى لو بدت مألوفة أو مرتبطة لديك."
     }
 
     data class CuratorResult(
@@ -162,7 +162,7 @@ class MemoryCuratorService(
             Log.d(
                 TAG,
                 "🟢 NEW CURATE START | " +
-                    "queryLen=${userQuery.length} | " +
+                    "query=\"$userQuery\" | " +
                     "candidates=${candidates.size}"
             )
 
@@ -211,10 +211,11 @@ class MemoryCuratorService(
                     forceJson = true
                 )
 
+                // تشخيص محدود: نعرض أول جزء من الاستجابة فقط.
                 Log.d(
                     TAG,
-                    "🟢 NEW CURATE RESPONSE RECEIVED | " +
-                        "len=${rawResponse.length}"
+                    "🟢 NEW CURATE RAW RESPONSE | " +
+                        rawResponse.take(500)
                 )
 
                 val parsed = parseCuratorResponse(
@@ -230,6 +231,14 @@ class MemoryCuratorService(
                         "fallback=${parsed.isFallback}"
                 )
 
+                if (parsed.isFallback) {
+                    Log.w(
+                        TAG,
+                        "🟢 NEW CURATE FALLBACK REASON | " +
+                            "${parsed.fallbackReason}"
+                    )
+                }
+
                 Log.d(
                     TAG,
                     "🟢 NEW CURATE REASONING | " +
@@ -242,7 +251,8 @@ class MemoryCuratorService(
 
                 Log.w(
                     TAG,
-                    "🟢 NEW CURATE FAILED | ${e.message}",
+                    "🟢 NEW CURATE FAILED | " +
+                        "${e.javaClass.simpleName}: ${e.message}",
                     e
                 )
 
@@ -707,7 +717,8 @@ class MemoryCuratorService(
                     Log.w(
                         TAG,
                         "🟠 GEMINI HTTP ERROR | " +
-                            "code=${response.code}"
+                            "code=${response.code} | " +
+                            "body=${errorBody?.take(500)}"
                     )
 
                     throw Exception(
@@ -818,7 +829,8 @@ class MemoryCuratorService(
                     Log.w(
                         TAG,
                         "🟠 OLLAMA HTTP ERROR | " +
-                            "code=${response.code}"
+                            "code=${response.code} | " +
+                            "body=${errorBody?.take(500)}"
                     )
 
                     throw Exception(
@@ -948,7 +960,8 @@ class MemoryCuratorService(
                     Log.w(
                         TAG,
                         "🟠 CUSTOM HTTP ERROR | " +
-                            "code=${response.code}"
+                            "code=${response.code} | " +
+                            "body=${errorBody?.take(500)}"
                     )
 
                     throw Exception(
@@ -1038,6 +1051,11 @@ class MemoryCuratorService(
         val jsonText =
             extractJsonObject(rawResponse)
 
+        Log.d(
+            TAG,
+            "🟡 PARSE JSON | ${jsonText.take(500)}"
+        )
+
         val json =
             JSONObject(jsonText)
 
@@ -1091,7 +1109,8 @@ class MemoryCuratorService(
             TAG,
             "🟡 PARSE SANITIZED | " +
                 "selected=$sanitizedSelected | " +
-                "irrelevant=$sanitizedIrrelevant"
+                "irrelevant=$sanitizedIrrelevant | " +
+                "reasoning=${reasoning.take(200)}"
         )
 
         if (selected.isEmpty()) {
