@@ -67,7 +67,6 @@ fun GeckoTestScreen(
     val app = context.applicationContext as AichatApp
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val runtime = remember { app.getOrCreateGeckoRuntime() }
-    val scope = rememberCoroutineScope()
 
     if (runtime == null) {
         GeckoUnavailableDialog(
@@ -258,11 +257,11 @@ fun GeckoTestScreen(
 
                 if (success && text.isNotBlank()) {
                     vm.onWebAiResponse(
-    platformId = p.id,
-    platformName = p.name,
-    text = text,
-    forceSaveToMemory = true
-)
+                        platformId = p.id,
+                        platformName = p.name,
+                        text = text,
+                        forceSaveToMemory = true
+                    )
 
                     Toast.makeText(
                         context,
@@ -760,6 +759,7 @@ private fun DebugLogDialog(
         }
     )
 }
+
 @Composable
 private fun SendToWebDialog(
     chatViewModel: ChatViewModel,
@@ -772,12 +772,12 @@ private fun SendToWebDialog(
     var showStyleMenu by remember { mutableStateOf(false) }
     var includeContext by remember { mutableStateOf(false) }
 
-    // المرشحون الناتجون من البحث الهجين
+    // نتائج البحث الأولية: مرشحون فقط.
     var searchResults by remember {
         mutableStateOf(emptyList<MemoryItem>())
     }
 
-    // الذكريات التي اختارها الـ Curator فعليًا
+    // IDs التي اختارها الـ Curator.
     var selectedIds by remember {
         mutableStateOf(setOf<Long>())
     }
@@ -813,10 +813,15 @@ private fun SendToWebDialog(
      *   ↓
      * Curator
      *   ↓
-     * selectedIds فقط
+     * selectedIds
+     *   ↓
+     * الذاكرة الأصلية
+     *   ↓
+     * MemoryContextBuilder
      *
-     * الـ Curator لا يعيد ملخصًا للذاكرة.
+     * الـ Curator لا يعيد ملخصًا نصيًا للذاكرة.
      */
+
     LaunchedEffect(
         includeContext,
         displayedText
@@ -1260,21 +1265,63 @@ private fun SendToWebDialog(
                                         selectedIds.isNotEmpty()
                                     ) {
                                         /*
-                                         * مهم:
+                                         * لا نستخدم نصًا ناتجًا من الـ Curator.
                                          *
-                                         * هنا لا نستخدم ناتجًا نصيًا من الوسيط.
-                                         * نستخدم IDs التي اختارها الوسيط،
-                                         * ثم نستخرج الذاكرة الأصلية من المرشحين.
+                                         * الـ Curator أعاد IDs فقط.
+                                         * هنا نأخذ الذاكرة الأصلية المقابلة
+                                         * لهذه الـ IDs ونبني منها النافذة.
                                          */
                                         val selected =
                                             searchResults.filter {
-                
+                                                it.id in selectedIds
+                                            }
 
-    
-        
-         
-            
-                                            
+                                        val contextBuilder =
+                                            MemoryContextBuilder()
+
+                                        val ctx =
+                                            contextBuilder.build(
+                                                selected
+                                            )
+
+                                        buildString {
+                                            appendLine(
+                                                "السياق من محادثاتي السابقة:"
+                                            )
+
+                                            appendLine()
+
+                                            appendLine(ctx)
+
+                                            appendLine()
+
+                                            appendLine("───────────")
+
+                                            appendLine()
+
+                                            appendLine("السؤال:")
+
+                                            append(displayedText)
+                                        }
+                                    } else {
+                                        displayedText
+                                    }
+
+                                onSend(finalText)
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled =
+                            displayedText.isNotBlank() &&
+                                !isEnhancing
+                    ) {
+                        Text("📤 إرسال للمنصة")
+                    }
+                }
+            }
+        }
+    }
+}
 
 private fun openExternal(
     context: Context,
