@@ -969,6 +969,7 @@
         );
 
         var current =
+            logResponseElementDiagnostics();
             getCurrentAssistantText();
 
         log(
@@ -1026,42 +1027,58 @@
 
     function logResponseElementDiagnostics() {
 
-        var elements =
-            getPlatformResponseElements();
+    if (CURRENT_PLATFORM.id !== "arena") {
+        return;
+    }
+
+    var selectors = [
+        "main .prose",
+        ".prose.prose-base",
+        "div.prose",
+        "main textarea",
+        "main [contenteditable='true']"
+    ];
+
+    var candidates = [];
+    var seen = [];
+
+    for (var i = 0; i < selectors.length; i++) {
+        try {
+            var elements = document.querySelectorAll(selectors[i]);
+
+            for (var j = 0; j < elements.length; j++) {
+                var element = elements[j];
+
+                if (seen.indexOf(element) !== -1) {
+                    continue;
+                }
+
+                seen.push(element);
+                candidates.push(element);
+            }
+        } catch (e) {}
+    }
+
+    log("🔬 Arena DOM candidates=" + candidates.length);
+
+    var start = Math.max(0, candidates.length - 15);
+
+    for (var k = start; k < candidates.length; k++) {
+        var el = candidates[k];
+
+        var text = getElementText(el)
+            .replace(/\s+/g, " ")
+            .trim();
 
         log(
-            "🔬 " +
-            CURRENT_PLATFORM.name +
-            " response candidates=" +
-            elements.length
-        );
-
-        elements.slice(-10).forEach(
-            function (
-                el,
-                index
-            ) {
-
-                var text =
-                    (
-                        el.innerText ||
-                        el.textContent ||
-                        ""
-                    ).trim();
-
-                log(
-                    "🔎 candidate[" +
-                    index +
-                    "] " +
-                    el.tagName +
-                    " class=" +
-                    (el.className || "") +
-                    " len=" +
-                    text.length
-                );
-            }
+            "🔎 Arena candidate[" + k + "]" +
+            " tag=" + el.tagName +
+            " class=" + String(el.className || "").substring(0, 160) +
+            " len=" + text.length +
+            " text=" + text.substring(0, 220)
         );
     }
+        }
 
     // ============================================================
     // START CAPTURE
