@@ -49,11 +49,6 @@ object MemoryCuratorPrompt {
     /**
      * 🆕 المرحلة 2:
      * Prompt مخصص لاختيار الذكريات بواسطة ID الحقيقي.
-     *
-     * مهم جداً:
-     * - لا يستخدم رقم ترتيب الذاكرة.
-     * - لا يسمح للـ LLM بتلخيص المحتوى.
-     * - المخرج المطلوب JSON فقط.
      */
     fun buildSelectionPrompt(
         query: String,
@@ -94,62 +89,53 @@ object MemoryCuratorPrompt {
         }
 
         appendLine("أخرج JSON بهذا الشكل فقط:")
-        appendLine(
-            """{"selectedIds":[27,31],"reasoning":"سبب مختصر","irrelevantIds":[42]}"""
-        )
+        appendLine("""{"selectedIds":[27,31],"reasoning":"سبب مختصر","irrelevantIds":[42]}""")
     }
 
     /**
      * ✅ Enhancement (Identity-First):
-     * توسيع/تحسين الطلب بتقمّص الهوية "إلى أقصى حد" كمواصفات للطلب،
-     * وليس مجرد تغيير أسلوب الكتابة.
-     *
-     * مخرجات الدالة: نص الطلب المُحسّن فقط (بدون مقدمات).
+     * المطلوب: "سؤال + 5 نقاط توضيحية" وليس ميتا ولا شرح.
      */
     fun buildEnhancerPrompt(
-    userQuery: String,
-    mediatorIdentityText: String
-): String = buildString {
+        userQuery: String,
+        mediatorIdentityText: String
+    ): String = buildString {
 
-    appendLine("أنت Query Enhancer.")
-    appendLine("مهمتك الوحيدة: تحسين/توسيع طلب المستخدم بتقمّص الهوية التالية إلى أقصى حد.")
-    appendLine()
+        appendLine("أنت Query Enhancer.")
+        appendLine("مهمتك الوحيدة: تحسين/توسيع طلب المستخدم بتقمّص الهوية التالية إلى أقصى حد.")
+        appendLine()
 
-    appendLine("قاعدة أولوية صارمة:")
-    appendLine("اعتبر الهوية أعلى أولوية من أي قاعدة عامة،")
-    appendLine("إلا قاعدتين لا يمكن كسرهما إطلاقاً:")
-    appendLine("1) لا تُجب على السؤال.")
-    appendLine("2) لا تُغيّر موضوع السؤال أو نية المستخدم.")
-    appendLine()
+        appendLine("قاعدة أولوية صارمة:")
+        appendLine("اعتبر الهوية أعلى أولوية من أي قاعدة عامة،")
+        appendLine("إلا قاعدتين لا يمكن كسرهما إطلاقاً:")
+        appendLine("1) لا تُجب على السؤال.")
+        appendLine("2) لا تُغيّر موضوع السؤال أو نية المستخدم.")
+        appendLine()
 
-    appendLine("الهوية:")
-    appendLine(mediatorIdentityText.trim())
-    appendLine()
+        appendLine("الهوية (طبّقها كقواعد تصميم للطلب):")
+        appendLine(mediatorIdentityText.trim())
+        appendLine()
 
-    appendLine("طلب المستخدم الأصلي:")
-    appendLine(userQuery.trim())
-    appendLine()
+        appendLine("طلب المستخدم الأصلي:")
+        appendLine(userQuery.trim())
+        appendLine()
 
-    appendLine("قواعد عامة (تنطبق دائمًا ما لم تتعارض مع الهوية):")
-    appendLine("- ممنوع كتابة أي ميتا-كلام مثل: (كمساعد ذكاء اصطناعي / سأقوم / إليك الطلب المحسن / يتطلب توضيحًا إضافيًا...).")
-    appendLine("- لا تضع عناوين أو مقدمات. لا تشرح ما فعلته.")
-    appendLine("- أضف تفاصيل موضوعية قابلة للتنفيذ حسب الهوية، واطلب توضيحات مفيدة فقط.")
-    appendLine("- لا تذكر (لغة برمجة/ميزانية/وقت/أدوات) إلا إذا كان السؤال عنها أو الهوية تتطلبها صراحة.")
-    appendLine()
+        appendLine("قواعد عامة (تنطبق دائمًا ما لم تتعارض مع الهوية):")
+        appendLine("- ممنوع كتابة أي ميتا-كلام مثل: (كمساعد ذكاء اصطناعي / سأقوم / إليك الطلب المحسن / يتطلب توضيحًا إضافيًا...).")
+        appendLine("- لا تكتب مقدمات أو عناوين أو شرح لما فعلته. لا تكتب إلا القالب المطلوب.")
+        appendLine("- أضف تفاصيل موضوعية تساعد على إجابة أدق حسب الهوية والسؤال (توضيحات، شروط، أمثلة، حدود...).")
+        appendLine("- إذا كانت الهوية لا تنطبق منطقياً على السؤال، أعد صياغة الطلب بشكل بسيط دون افتعال.")
+        appendLine()
 
-    appendLine("صيغة الإخراج الإلزامية (اكتبها بهذا الشكل حرفيًا):")
-    appendLine("سؤال: <اكتب سؤال/طلب مُحسّن واحد فقط في سطر واحد>")
-    appendLine("- <نقطة توضيحية 1>")
-    appendLine("- <نقطة توضيحية 2>")
-    appendLine("- <نقطة توضيحية 3>")
-    appendLine("- <نقطة توضيحية 4>")
-    appendLine("- <نقطة توضيحية 5>")
-    appendLine()
-    appendLine("ملاحظات الإخراج:")
-    appendLine("- اكتب بالضبط 5 نقاط توضيحية قدر الإمكان.")
-    appendLine("- لا تكتب أي شيء خارج هذا القالب.")
-    appendLine("- لا تستخدم الترقيم 1/2/3، استخدم شرطة (-) فقط.")
+        appendLine("صيغة الإخراج الإلزامية (لا تكتب أي شيء خارجها):")
+        appendLine("سؤال: <سؤال/طلب مُحسّن واحد فقط>")
+        appendLine("- <نقطة توضيحية 1>")
+        appendLine("- <نقطة توضيحية 2>")
+        appendLine("- <نقطة توضيحية 3>")
+        appendLine("- <نقطة توضيحية 4>")
+        appendLine("- <نقطة توضيحية 5>")
     }
+
     /**
      * تحسين صياغة السؤال فقط.
      */
