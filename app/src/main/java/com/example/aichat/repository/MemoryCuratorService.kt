@@ -26,9 +26,13 @@ class MemoryCuratorService(
                 "لا تُضف تفاصيل تقنية أو تاريخية أو مؤسسية إضافية من معرفتك العامة " +
                 "غير مذكورة صراحة أعلاه، حتى لو بدت مألوفة أو مرتبطة لديك."
 
-        // Enhancement safety (بدون تقييد الهوية، فقط ضمان الارتباط)
-        private const val MAX_ENHANCED_LEN = 700
+        // Enhancement safety (بدون تقييد الهوية، فقط ضمان الارتباط + قابلية الإرسال للويب)
+        private const val MAX_ENHANCED_LEN = 900
         private const val MIN_KEYWORD_LEN = 3
+
+        // نريد "سؤال + نقاط"، نقبل 3..5 لتفادي رفض مفرط لو الموديل قصّر
+        private const val MIN_BULLETS = 3
+        private const val MAX_BULLETS = 5
     }
 
     private val client = OkHttpClient.Builder()
@@ -70,19 +74,13 @@ class MemoryCuratorService(
                 forceJson = false
             )
 
-            if (
-                result.isBlank() ||
-                result.trim().equals("NONE", ignoreCase = true)
-            ) {
+            if (result.isBlank() || result.trim().equals("NONE", ignoreCase = true)) {
                 Log.d(TAG, "⚪ Curator found nothing relevant")
                 ""
             } else {
                 val trimmedResult = result.trim()
 
-                Log.d(
-                    TAG,
-                    "✅ Curated: ${trimmedResult.take(80)}..."
-                )
+                Log.d(TAG, "✅ Curated: ${trimmedResult.take(80)}...")
 
                 if (candidates.isNotEmpty()) {
                     trimmedResult + CONTEXT_DISCLAIMER
@@ -112,15 +110,10 @@ class MemoryCuratorService(
         candidates: List<MemoryItem>
     ): CuratorResult = withContext(Dispatchers.IO) {
 
-        Log.d(
-            TAG,
-            "NEW CURATE START | query=$userQuery | " +
-                "candidates=${candidates.size}"
-        )
+        Log.d(TAG, "NEW CURATE START | query=$userQuery | candidates=${candidates.size}")
 
         if (candidates.isEmpty()) {
             Log.d(TAG, "NEW CURATE | no candidates")
-
             return@withContext CuratorResult(
                 selectedIds = emptyList(),
                 reasoning = "No candidates available."
@@ -129,7 +122,6 @@ class MemoryCuratorService(
 
         if (!settings.memoryCuratorEnabled) {
             Log.d(TAG, "NEW CURATE | curator disabled")
-
             return@withContext fallbackResult(
                 candidates = candidates,
                 reason = "Curator disabled by setting"
@@ -144,11 +136,7 @@ class MemoryCuratorService(
         val provider = settings.memoryCuratorProvider
         val model = settings.getMemoryCuratorModel()
 
-        Log.d(
-            TAG,
-            "NEW CURATE PROMPT | provider=$provider | " +
-                "model=$model | len=${prompt.length}"
-        )
+        Log.d(TAG, "NEW CURATE PROMPT | provider=$provider | model=$model | len=${prompt.length}")
 
         try {
             val rawResponse = callCuratorProvider(
@@ -156,18 +144,10 @@ class MemoryCuratorService(
                 forceJson = true
             )
 
-            Log.d(
-                TAG,
-                "NEW CURATE RAW RESPONSE | " +
-                    rawResponse.take(500)
-            )
+            Log.d(TAG, "NEW CURATE RAW RESPONSE | ${rawResponse.take(500)}")
 
             if (rawResponse.isBlank()) {
-                Log.w(
-                    TAG,
-                    "NEW CURATE EMPTY RESPONSE"
-                )
-
+                Log.w(TAG, "NEW CURATE EMPTY RESPONSE")
                 return@withContext fallbackResult(
                     candidates = candidates,
                     reason = "Empty curator response"
@@ -180,33 +160,23 @@ class MemoryCuratorService(
             )
 
         } catch (e: Exception) {
-
             Log.w(
                 TAG,
-                "NEW CURATE EXCEPTION | " +
-                    "${e::class.java.simpleName}: ${e.message}",
+                "NEW CURATE EXCEPTION | ${e::class.java.simpleName}: ${e.message}",
                 e
             )
 
             fallbackResult(
                 candidates = candidates,
-                reason =
-                    "Curator exception: " +
-                        "${e::class.java.simpleName}: ${e.message}"
+                reason = "Curator exception: ${e::class.java.simpleName}: ${e.message}"
             )
         }
     }
 
     // ============================================================
-    // Query enhancement (Identity-First)
+    // Query enhancement (Identity-First) — formatted: "سؤال: + 5 bullets"
     // ============================================================
 
-    /**
-     * Enhancement هدفه: توسيع الطلب بتقمّص الهوية بقوة.
-     *
-     * لا نقيّد الهوية هنا (حسب طلبك)، لكننا نضيف "تحقق ارتباط" فقط
-     * حتى لا يخرج النص بسؤال غير متعلق (نسخ أمثلة / انحراف موضوع).
-     */
     suspend fun enhanceQuery(
         userQuery: String,
         mediatorIdentityText: String,
@@ -222,18 +192,16 @@ class MemoryCuratorService(
                 "memoryCandidates=${memoryCandidates.size}"
         )
 
-        if (original.isBlank()) {
-            return@withContext userQuery
-        }
+        if (original.isBlank()) return@withContext userQuery
 
         if (mediatorIdentityText.isBlank()) {
             Log.d(TAG, "🧠 ENHANCE SKIPPED | identity text is blank")
             return@withContext original
         }
 
-
+        // enhancement يعمل حتى لو curator معطل (فصلنا السلوك)
         if (!settings.memoryCuratorEnabled) {
-    Log.d(TAG, "🧠 ENHANCE | curator disabled but enhancement is allowed (decoupled)")
+            Log.d(TAG, "🧠 ENHANCE | curator disabled but enhancement is allowed (decoupled)")
         }
 
         try {
@@ -242,45 +210,39 @@ class MemoryCuratorService(
                 mediatorIdentityText = mediatorIdentityText
             )
 
-            var enhanced = callConfiguredProvider(prompt).trim()
+            val raw = callConfiguredProvider(prompt).trim()
 
-            enhanced = cleanupEnhancedText(enhanced)
-
-            // cap length (مهم خصوصًا للويب)
-            if (enhanced.length > MAX_ENHANCED_LEN) {
-                enhanced = enhanced.take(MAX_ENHANCED_LEN).trimEnd()
-            }
+            val enhanced = cleanupEnhancedText(raw)
 
             // validity checks
+            val notNone =
+                enhanced.isNotBlank() &&
+                    !enhanced.equals("NONE", ignoreCase = true)
+
             val isDifferent =
                 !enhanced.equals(original, ignoreCase = true)
 
-            val notNone =
-                !enhanced.equals("NONE", ignoreCase = true) &&
-                    enhanced.isNotBlank()
-
-            // ✅ أهم حارس: الناتج لازم يظل متعلقًا بالأصل
             val related =
                 hasKeywordOverlap(original, enhanced)
+
+            val looksFormatted =
+                looksLikeQuestionWithBullets(enhanced)
 
             val isValid =
                 notNone &&
                     isDifferent &&
                     related &&
-                    // heuristic القديم (يبقى مفيدًا لكن ليس وحده)
-                    enhanced.length > original.length / 2
+                    looksFormatted
 
             if (isValid) {
-                Log.d(
-                    TAG,
-                    "🧠 ENHANCE SUCCESS | resultLen=${enhanced.length}"
-                )
+                Log.d(TAG, "🧠 ENHANCE SUCCESS | resultLen=${enhanced.length}")
                 enhanced
             } else {
                 Log.d(
                     TAG,
                     "🧠 ENHANCE INVALID | returning original | " +
-                        "different=$isDifferent related=$related len=${enhanced.length}"
+                        "different=$isDifferent related=$related formatted=$looksFormatted " +
+                        "rawLen=${raw.length} finalLen=${enhanced.length}"
                 )
                 original
             }
@@ -312,23 +274,14 @@ class MemoryCuratorService(
 
             val result = callConfiguredProvider(prompt).trim()
 
-            if (
-                result.isBlank() ||
-                result.equals("NONE", ignoreCase = true)
-            ) {
+            if (result.isBlank() || result.equals("NONE", ignoreCase = true)) {
                 userQuery
             } else {
                 result
             }
 
         } catch (e: Exception) {
-
-            Log.w(
-                TAG,
-                "🧠 STYLE REFINEMENT FAILED | ${e.message}",
-                e
-            )
-
+            Log.w(TAG, "🧠 STYLE REFINEMENT FAILED | ${e.message}", e)
             userQuery
         }
     }
@@ -338,46 +291,75 @@ class MemoryCuratorService(
     // ============================================================
 
     /**
-     * تنظيف خفيف فقط:
-     * - إزالة Markdown fences
-     * - إزالة مقدمات شائعة
-     * - إزالة علامات اقتباس خارجية
-     *
-     * لا نعيد صياغة ولا نختصر المعنى.
+     * Parser محافظ:
+     * - يستخرج من أول "سؤال:" إن وجد
+     * - يحافظ على الأسطر
+     * - يبقي حتى 5 نقاط فقط (يقبل • أو -)
+     * - يقص للطول الأقصى مع الحفاظ على الأسطر
      */
     private fun cleanupEnhancedText(text: String): String {
         var t = text.trim()
 
-        // remove markdown fences if any
+        // remove markdown fences
         t = t.replace("```", "").trim()
 
-        // remove common leading wrappers (Arabic/English)
-        val prefixes = listOf(
-            "إليك السؤال المُحسّن:",
-            "إليك السؤال المحسن:",
-            "السؤال المُحسّن:",
-            "السؤال المحسن:",
-            "الطلب المُحسّن:",
-            "الطلب المحسن:",
-            "Enhanced:",
-            "Enhanced Query:",
-            "Improved:",
-            "Improved Query:"
-        )
+        // split lines but keep meaningful newlines
+        val lines = t.lines()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
 
-        prefixes.forEach { p ->
-            if (t.startsWith(p, ignoreCase = true)) {
-                t = t.removePrefix(p).trim()
-            }
+        if (lines.isEmpty()) return ""
+
+        // find "سؤال:" line; إذا لم يوجد نرجع النص كما هو (سيفشل formatted check غالباً)
+        val qIndex = lines.indexOfFirst {
+            it.startsWith("سؤال:", ignoreCase = true) || it.startsWith("سؤال :", ignoreCase = true)
         }
 
-        // remove outer quotes
-        t = t.trim().trim('"').trim()
+        val usable = if (qIndex >= 0) lines.drop(qIndex) else lines
 
-        // normalize excessive whitespace
-        t = t.replace(Regex("\\s+"), " ").trim()
+        if (usable.isEmpty()) return ""
 
-        return t
+        val questionLineRaw = usable.first()
+        val questionLine = questionLineRaw
+            .replace(Regex("^سؤال\\s*:\\s*", RegexOption.IGNORE_CASE), "سؤال: ")
+            .trim()
+
+        // collect bullets
+        val bullets = usable.drop(1)
+            .map { line ->
+                when {
+                    line.startsWith("•") -> "- " + line.removePrefix("•").trim()
+                    line.startsWith("-") -> "- " + line.removePrefix("-").trim()
+                    else -> line
+                }
+            }
+            .filter { it.startsWith("- ") && it.length > 3 }
+            .take(MAX_BULLETS)
+
+        val built = buildString {
+            appendLine(questionLine)
+            bullets.forEach { appendLine(it) }
+        }.trim()
+
+        // قص الطول مع الحفاظ على الأسطر (لا نحول newlines لمسافات)
+        return if (built.length <= MAX_ENHANCED_LEN) {
+            built
+        } else {
+            built.take(MAX_ENHANCED_LEN).trimEnd()
+        }
+    }
+
+    private fun looksLikeQuestionWithBullets(text: String): Boolean {
+        if (text.isBlank()) return false
+
+        val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+        if (lines.isEmpty()) return false
+
+        val firstOk = lines.first().startsWith("سؤال:", ignoreCase = true)
+        if (!firstOk) return false
+
+        val bulletCount = lines.drop(1).count { it.startsWith("- ") }
+        return bulletCount >= MIN_BULLETS
     }
 
     /**
@@ -491,10 +473,7 @@ class MemoryCuratorService(
     // Configured provider — enhancement/refinement
     // ============================================================
 
-    private suspend fun callConfiguredProvider(
-        prompt: String
-    ): String {
-
+    private suspend fun callConfiguredProvider(prompt: String): String {
         val provider = settings.memoryCuratorProvider.lowercase()
         val model = settings.getMemoryCuratorModel()
 
@@ -609,15 +588,13 @@ class MemoryCuratorService(
             .build()
 
         client.newCall(request).execute().use { response ->
-
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string()
                 throw Exception("Gemini Flash failed: ${response.code} - $errorBody")
             }
 
-            val body =
-                response.body?.string()
-                    ?: throw Exception("Empty response from Gemini Flash")
+            val body = response.body?.string()
+                ?: throw Exception("Empty response from Gemini Flash")
 
             return JSONObject(body)
                 .getJSONArray("candidates")
@@ -674,15 +651,13 @@ class MemoryCuratorService(
             .build()
 
         client.newCall(request).execute().use { response ->
-
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string()
                 throw Exception("$providerName curator failed: ${response.code} - $errorBody")
             }
 
-            val body =
-                response.body?.string()
-                    ?: throw Exception("Empty response from $providerName")
+            val body = response.body?.string()
+                ?: throw Exception("Empty response from $providerName")
 
             val message =
                 JSONObject(body)
@@ -735,15 +710,13 @@ class MemoryCuratorService(
             .build()
 
         client.newCall(request).execute().use { response ->
-
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string()
                 throw Exception("Ollama curator failed: ${response.code} - $errorBody")
             }
 
-            val body =
-                response.body?.string()
-                    ?: throw Exception("Empty response from Ollama")
+            val body = response.body?.string()
+                ?: throw Exception("Empty response from Ollama")
 
             val message = JSONObject(body).getJSONObject("message")
             val content = message.optString("content", "")
@@ -803,15 +776,13 @@ class MemoryCuratorService(
         }
 
         client.newCall(requestBuilder.build()).execute().use { response ->
-
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string()
                 throw Exception("Custom curator failed: ${response.code} - $errorBody")
             }
 
-            val body =
-                response.body?.string()
-                    ?: throw Exception("Empty response from custom curator")
+            val body = response.body?.string()
+                ?: throw Exception("Empty response from custom curator")
 
             val message =
                 JSONObject(body)
@@ -819,21 +790,17 @@ class MemoryCuratorService(
                     .getJSONObject(0)
                     .getJSONObject("message")
 
-            val content =
-                message.optString("content", "")
-                    .takeIf { it.isNotBlank() && it != "null" }
+            val content = message.optString("content", "")
+                .takeIf { it.isNotBlank() && it != "null" }
 
             if (content != null) return content
 
-            val reasoning =
-                message.optString("reasoning", "")
-                    .takeIf { it.isNotBlank() && it != "null" }
+            val reasoning = message.optString("reasoning", "")
+                .takeIf { it.isNotBlank() && it != "null" }
 
             if (reasoning != null) return reasoning
 
-            throw Exception(
-                "Both 'content' and 'reasoning' fields are empty. Raw: ${body.take(300)}"
-            )
+            throw Exception("Both 'content' and 'reasoning' fields are empty. Raw: ${body.take(300)}")
         }
     }
 
@@ -849,45 +816,27 @@ class MemoryCuratorService(
         val jsonText = extractJsonObject(rawResponse)
         val json = JSONObject(jsonText)
 
-        val validIds =
-            candidates
-                .map { it.id }
-                .toSet()
+        val validIds = candidates.map { it.id }.toSet()
 
-        val selected =
-            jsonArrayToLongs(
-                json.optJSONArray("selectedIds")
-            )
+        val selected = jsonArrayToLongs(json.optJSONArray("selectedIds"))
+        val irrelevant = jsonArrayToLongs(json.optJSONArray("irrelevantIds"))
 
-        val irrelevant =
-            jsonArrayToLongs(
-                json.optJSONArray("irrelevantIds")
-            )
-
-        val reasoning =
-            json.optString(
-                "reasoning",
-                ""
-            ).trim()
+        val reasoning = json.optString("reasoning", "").trim()
 
         val sanitizedSelected =
-            selected
-                .filter { it in validIds }
+            selected.filter { it in validIds }
                 .distinct()
                 .take(5)
 
         val sanitizedIrrelevant =
-            irrelevant
-                .filter { it in validIds }
+            irrelevant.filter { it in validIds }
                 .distinct()
                 .filterNot { it in sanitizedSelected }
 
         if (selected.isEmpty()) {
             return CuratorResult(
                 selectedIds = emptyList(),
-                reasoning =
-                    if (reasoning.isNotBlank()) reasoning
-                    else "No directly relevant memory selected.",
+                reasoning = if (reasoning.isNotBlank()) reasoning else "No directly relevant memory selected.",
                 irrelevantIds = sanitizedIrrelevant,
                 isFallback = false,
                 fallbackReason = null,
@@ -905,9 +854,7 @@ class MemoryCuratorService(
 
         return CuratorResult(
             selectedIds = sanitizedSelected,
-            reasoning =
-                if (reasoning.isNotBlank()) reasoning
-                else "Selected relevant memories.",
+            reasoning = if (reasoning.isNotBlank()) reasoning else "Selected relevant memories.",
             irrelevantIds = sanitizedIrrelevant,
             isFallback = false,
             fallbackReason = null,
@@ -920,12 +867,9 @@ class MemoryCuratorService(
     // ============================================================
 
     private fun extractJsonObject(raw: String): String {
-
         val trimmed = raw.trim()
 
-        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-            return trimmed
-        }
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed
 
         val start = trimmed.indexOf('{')
         val end = trimmed.lastIndexOf('}')
@@ -934,27 +878,19 @@ class MemoryCuratorService(
             return trimmed.substring(start, end + 1)
         }
 
-        throw Exception(
-            "No JSON object found in curator response: " +
-                trimmed.take(500)
-        )
+        throw Exception("No JSON object found in curator response: ${trimmed.take(500)}")
     }
 
     private fun jsonArrayToLongs(array: JSONArray?): List<Long> {
-
-        if (array == null) {
-            return emptyList()
-        }
+        if (array == null) return emptyList()
 
         val result = mutableListOf<Long>()
-
         for (i in 0 until array.length()) {
             when (val value = array.opt(i)) {
                 is Number -> result.add(value.toLong())
                 is String -> value.toLongOrNull()?.let { result.add(it) }
             }
         }
-
         return result
     }
 
@@ -968,15 +904,9 @@ class MemoryCuratorService(
         rawResponse: String? = null
     ): CuratorResult {
 
-        val ids =
-            candidates
-                .take(5)
-                .map { it.id }
+        val ids = candidates.take(5).map { it.id }
 
-        Log.w(
-            TAG,
-            "FALLBACK REASON | $reason | selected=$ids"
-        )
+        Log.w(TAG, "FALLBACK REASON | $reason | selected=$ids")
 
         return CuratorResult(
             selectedIds = ids,
