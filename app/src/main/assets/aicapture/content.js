@@ -1,12 +1,12 @@
- (function () {
+(function () {
     "use strict";
 
     // ============================================================
     // AiChat — PLATFORM REGISTRY + ASSISTANT RESPONSE CAPTURE
-    // Version 1.0.33
+    // Version 1.0.34 (Arena guard: ignore injected prompt)
     // ============================================================
 
-    var VERSION = "1.0.33";
+    var VERSION = "1.0.34";
 
     // ============================================================
     // DEBUG LOG
@@ -37,7 +37,7 @@
 
             matches: function () {
                 return location.hostname === "chatgpt.com" ||
-                       location.hostname === "chat.openai.com";
+                    location.hostname === "chat.openai.com";
             },
 
             responseSelectors: [
@@ -48,7 +48,6 @@
             ],
 
             extractResponse: function (element) {
-
                 if (!element) {
                     return "";
                 }
@@ -56,9 +55,8 @@
                 var markdown = null;
 
                 try {
-                    markdown =
-                        element.querySelector(".markdown");
-                } catch (e) {}
+                    markdown = element.querySelector(".markdown");
+                } catch (e) { }
 
                 if (markdown) {
                     return getElementText(markdown);
@@ -107,30 +105,16 @@
                     ".response-container"
                 ];
 
-                for (
-                    var i = 0;
-                    i < contentSelectors.length;
-                    i++
-                ) {
-
+                for (var i = 0; i < contentSelectors.length; i++) {
                     try {
-
-                        var child =
-                            element.querySelector(
-                                contentSelectors[i]
-                            );
-
+                        var child = element.querySelector(contentSelectors[i]);
                         if (child) {
-
-                            var childText =
-                                getElementText(child);
-
+                            var childText = getElementText(child);
                             if (childText) {
                                 return childText;
                             }
                         }
-
-                    } catch (e) {}
+                    } catch (e) { }
                 }
 
                 return getElementText(element);
@@ -207,8 +191,7 @@
         return PLATFORMS.generic;
     }
 
-    var CURRENT_PLATFORM =
-        detectPlatform();
+    var CURRENT_PLATFORM = detectPlatform();
 
     log(
         "🌐 Platform detected: " +
@@ -244,34 +227,19 @@
 
     function findInput() {
 
-        for (
-            var i = 0;
-            i < INPUT_SELECTORS.length;
-            i++
-        ) {
-
+        for (var i = 0; i < INPUT_SELECTORS.length; i++) {
             try {
-
-                var element =
-                    document.querySelector(
-                        INPUT_SELECTORS[i]
-                    );
-
+                var element = document.querySelector(INPUT_SELECTORS[i]);
                 if (element) {
                     return element;
                 }
-
-            } catch (e) {}
+            } catch (e) { }
         }
 
         return null;
     }
 
-    function findInputWithRetry(
-        attempts,
-        delay,
-        callback
-    ) {
+    function findInputWithRetry(attempts, delay, callback) {
 
         var count = 0;
 
@@ -287,20 +255,11 @@
             count++;
 
             if (count >= attempts) {
-
-                log(
-                    "❌ " +
-                    CURRENT_PLATFORM.name +
-                    " input not found"
-                );
-
+                log("❌ " + CURRENT_PLATFORM.name + " input not found");
                 return;
             }
 
-            setTimeout(
-                attempt,
-                delay
-            );
+            setTimeout(attempt, delay);
         }
 
         attempt();
@@ -314,108 +273,56 @@
 
         try {
 
-            if (
-                input.tagName === "TEXTAREA" ||
-                input.tagName === "INPUT"
-            ) {
+            if (input.tagName === "TEXTAREA" || input.tagName === "INPUT") {
 
-                var prototype =
-                    Object.getPrototypeOf(input);
+                var prototype = Object.getPrototypeOf(input);
 
                 var descriptor =
-                    Object.getOwnPropertyDescriptor(
-                        prototype,
-                        "value"
-                    );
+                    Object.getOwnPropertyDescriptor(prototype, "value");
 
-                if (
-                    descriptor &&
-                    descriptor.set
-                ) {
-
-                    descriptor.set.call(
-                        input,
-                        text
-                    );
-
+                if (descriptor && descriptor.set) {
+                    descriptor.set.call(input, text);
                 } else {
-
                     input.value = text;
                 }
 
                 input.dispatchEvent(
-                    new Event(
-                        "input",
-                        {
-                            bubbles: true,
-                            composed: true
-                        }
-                    )
+                    new Event("input", { bubbles: true, composed: true })
                 );
 
                 input.dispatchEvent(
-                    new Event(
-                        "change",
-                        {
-                            bubbles: true,
-                            composed: true
-                        }
-                    )
+                    new Event("change", { bubbles: true, composed: true })
                 );
 
             } else {
 
                 input.focus();
 
-                try {
-
-                    document.execCommand(
-                        "selectAll",
-                        false,
-                        null
-                    );
-
-                } catch (e) {}
+                try { document.execCommand("selectAll", false, null); } catch (e) { }
 
                 try {
-
-                    document.execCommand(
-                        "insertText",
-                        false,
-                        text
-                    );
-
+                    document.execCommand("insertText", false, text);
                 } catch (e) {
 
                     input.textContent = text;
 
                     input.dispatchEvent(
-                        new InputEvent(
-                            "input",
-                            {
-                                bubbles: true,
-                                composed: true,
-                                inputType: "insertText",
-                                data: text
-                            }
-                        )
+                        new InputEvent("input", {
+                            bubbles: true,
+                            composed: true,
+                            inputType: "insertText",
+                            data: text
+                        })
                     );
                 }
             }
 
-            log(
-                "✅ Text injected successfully"
-            );
-
+            log("✅ Text injected successfully");
             return true;
 
         } catch (e) {
 
-            log(
-                "❌ Text injection failed: " +
-                e
-            );
-
+            log("❌ Text injection failed: " + e);
             return false;
         }
     }
@@ -440,41 +347,16 @@
                 composed: true
             };
 
-            input.dispatchEvent(
-                new KeyboardEvent(
-                    "keydown",
-                    options
-                )
-            );
+            input.dispatchEvent(new KeyboardEvent("keydown", options));
+            input.dispatchEvent(new KeyboardEvent("keypress", options));
+            input.dispatchEvent(new KeyboardEvent("keyup", options));
 
-            input.dispatchEvent(
-                new KeyboardEvent(
-                    "keypress",
-                    options
-                )
-            );
-
-            input.dispatchEvent(
-                new KeyboardEvent(
-                    "keyup",
-                    options
-                )
-            );
-
-            log(
-                "✅ Enter sent to " +
-                CURRENT_PLATFORM.name
-            );
-
+            log("✅ Enter sent to " + CURRENT_PLATFORM.name);
             return true;
 
         } catch (e) {
 
-            log(
-                "❌ Enter failed: " +
-                e
-            );
-
+            log("❌ Enter failed: " + e);
             return false;
         }
     }
@@ -487,11 +369,7 @@
 
         try {
 
-            return (
-                element.innerText ||
-                element.textContent ||
-                ""
-            )
+            return (element.innerText || element.textContent || "")
                 .replace(/\u00a0/g, " ")
                 .replace(/\r/g, "")
                 .trim();
@@ -513,44 +391,26 @@
         try {
 
             var sections =
-                document.querySelectorAll(
-                    'section[aria-label^="محادثة"]'
-                );
+                document.querySelectorAll('section[aria-label^="محادثة"]');
 
-            for (
-                var i = 0;
-                i < sections.length;
-                i++
-            ) {
-
-                result.push(
-                    sections[i]
-                );
+            for (var i = 0; i < sections.length; i++) {
+                result.push(sections[i]);
             }
 
-        } catch (e) {}
+        } catch (e) { }
 
         if (result.length === 0) {
 
             try {
 
                 var regions =
-                    document.querySelectorAll(
-                        '[role="region"][aria-label="محادثة"]'
-                    );
+                    document.querySelectorAll('[role="region"][aria-label="محادثة"]');
 
-                for (
-                    var j = 0;
-                    j < regions.length;
-                    j++
-                ) {
-
-                    result.push(
-                        regions[j]
-                    );
+                for (var j = 0; j < regions.length; j++) {
+                    result.push(regions[j]);
                 }
 
-            } catch (e) {}
+            } catch (e) { }
         }
 
         return result;
@@ -564,50 +424,26 @@
 
         var result = [];
 
-        if (
-            CURRENT_PLATFORM.id ===
-            "chatgpt" &&
-            CURRENT_PLATFORM.legacyContainerMode
-        ) {
-
+        if (CURRENT_PLATFORM.id === "chatgpt" && CURRENT_PLATFORM.legacyContainerMode) {
             return getChatGPTConversationContainers();
         }
 
-        var selectors =
-            CURRENT_PLATFORM.responseSelectors;
+        var selectors = CURRENT_PLATFORM.responseSelectors;
 
-        for (
-            var i = 0;
-            i < selectors.length;
-            i++
-        ) {
+        for (var i = 0; i < selectors.length; i++) {
 
             try {
 
-                var elements =
-                    document.querySelectorAll(
-                        selectors[i]
-                    );
+                var elements = document.querySelectorAll(selectors[i]);
 
-                for (
-                    var j = 0;
-                    j < elements.length;
-                    j++
-                ) {
+                for (var j = 0; j < elements.length; j++) {
 
-                    if (
-                        result.indexOf(
-                            elements[j]
-                        ) === -1
-                    ) {
-
-                        result.push(
-                            elements[j]
-                        );
+                    if (result.indexOf(elements[j]) === -1) {
+                        result.push(elements[j]);
                     }
                 }
 
-            } catch (e) {}
+            } catch (e) { }
         }
 
         return result;
@@ -629,19 +465,11 @@
             .replace(/\r\n/g, "\n")
             .replace(/\r/g, "\n");
 
-        var footer =
-            "ChatGPT هو نظام ذكاء اصطناعي وقد يخطئ.";
-
-        var footerIndex =
-            cleaned.indexOf(footer);
+        var footer = "ChatGPT هو نظام ذكاء اصطناعي وقد يخطئ.";
+        var footerIndex = cleaned.indexOf(footer);
 
         if (footerIndex !== -1) {
-
-            cleaned =
-                cleaned.substring(
-                    0,
-                    footerIndex
-                );
+            cleaned = cleaned.substring(0, footerIndex);
         }
 
         var sourceMarkers = [
@@ -652,36 +480,17 @@
 
         var sourceIndex = -1;
 
-        for (
-            var i = 0;
-            i < sourceMarkers.length;
-            i++
-        ) {
-
-            var index =
-                cleaned.indexOf(
-                    sourceMarkers[i]
-                );
-
+        for (var i = 0; i < sourceMarkers.length; i++) {
+            var index = cleaned.indexOf(sourceMarkers[i]);
             if (index !== -1) {
-
-                if (
-                    sourceIndex === -1 ||
-                    index < sourceIndex
-                ) {
-
+                if (sourceIndex === -1 || index < sourceIndex) {
                     sourceIndex = index;
                 }
             }
         }
 
         if (sourceIndex !== -1) {
-
-            cleaned =
-                cleaned.substring(
-                    0,
-                    sourceIndex
-                );
+            cleaned = cleaned.substring(0, sourceIndex);
         }
 
         var genericFooterMarkers = [
@@ -689,24 +498,10 @@
             "\nهل كانت هذه الإجابة مفيدة؟"
         ];
 
-        for (
-            var g = 0;
-            g < genericFooterMarkers.length;
-            g++
-        ) {
-
-            var genericIndex =
-                cleaned.indexOf(
-                    genericFooterMarkers[g]
-                );
-
+        for (var g = 0; g < genericFooterMarkers.length; g++) {
+            var genericIndex = cleaned.indexOf(genericFooterMarkers[g]);
             if (genericIndex !== -1) {
-
-                cleaned =
-                    cleaned.substring(
-                        0,
-                        genericIndex
-                    );
+                cleaned = cleaned.substring(0, genericIndex);
             }
         }
 
@@ -714,15 +509,8 @@
             .replace(/^\s+/, "")
             .replace(/\s+$/, "");
 
-        cleaned = cleaned.replace(
-            /\n[ \t]*\n[ \t]*\n+/g,
-            "\n\n"
-        );
-
-        cleaned = cleaned.replace(
-            /[ \t]+\n/g,
-            "\n"
-        );
+        cleaned = cleaned.replace(/\n[ \t]*\n[ \t]*\n+/g, "\n\n");
+        cleaned = cleaned.replace(/[ \t]+\n/g, "\n");
 
         return cleaned.trim();
     }
@@ -731,9 +519,7 @@
     // CHATGPT EXTRACTION
     // ============================================================
 
-    function extractChatGPTAssistantText(
-        conversationText
-    ) {
+    function extractChatGPTAssistantText(conversationText) {
 
         if (!conversationText) {
             return "";
@@ -749,27 +535,14 @@
         var position = -1;
         var markerLength = 0;
 
-        for (
-            var i = 0;
-            i < markers.length;
-            i++
-        ) {
+        for (var i = 0; i < markers.length; i++) {
 
             var currentPosition =
-                conversationText.lastIndexOf(
-                    markers[i]
-                );
+                conversationText.lastIndexOf(markers[i]);
 
-            if (
-                currentPosition >
-                position
-            ) {
-
-                position =
-                    currentPosition;
-
-                markerLength =
-                    markers[i].length;
+            if (currentPosition > position) {
+                position = currentPosition;
+                markerLength = markers[i].length;
             }
         }
 
@@ -779,60 +552,83 @@
 
         var answer =
             conversationText
-                .substring(
-                    position +
-                    markerLength
-                )
+                .substring(position + markerLength)
                 .trim();
 
-        return cleanAssistantResponse(
-            answer
-        );
+        return cleanAssistantResponse(answer);
     }
 
     // ============================================================
-    // GENERIC / GEMINI EXTRACTION
+    // Arena guard: ignore injected prompt (prevents false "assistant response")
+    // ============================================================
+
+    var lastInjectedText = "";
+    var lastInjectedSignature = "";
+    var lastInjectedAt = 0;
+
+    function normalizeOneLine(s) {
+        return (s || "")
+            .replace(/\u00a0/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    function makeSignature(s) {
+        return normalizeOneLine(s).substring(0, 220);
+    }
+
+    function looksLikeInjectedPrompt(text) {
+        if (!text) return false;
+
+        // Strong signals for AiChat injected prompt
+        if (text.indexOf("<shared_memories>") !== -1) return true;
+        if (text.indexOf("## السؤال") !== -1) return true;
+        if (text.indexOf("السؤال:") !== -1) return true;
+        if (text.indexOf("تعليمات مهمة") !== -1) return true;
+        if (text.indexOf("ملاحظات إضافية") !== -1) return true;
+
+        return false;
+    }
+
+    // ============================================================
+    // GENERIC / GEMINI / ARENA EXTRACTION
     // ============================================================
 
     function extractLatestPlatformResponse() {
 
-        var elements =
-            getPlatformResponseElements();
+        var elements = getPlatformResponseElements();
 
         if (elements.length === 0) {
             return "";
         }
 
-        for (
-            var i = elements.length - 1;
-            i >= 0;
-            i--
-        ) {
+        for (var i = elements.length - 1; i >= 0; i--) {
 
-            var element =
-                elements[i];
-
+            var element = elements[i];
             var text = "";
 
             try {
-
-                text =
-                    CURRENT_PLATFORM.extractResponse(
-                        element
-                    );
-
+                text = CURRENT_PLATFORM.extractResponse(element);
             } catch (e) {
-
-                text =
-                    getElementText(
-                        element
-                    );
+                text = getElementText(element);
             }
 
-            text =
-                cleanAssistantResponse(
-                    text
-                );
+            text = cleanAssistantResponse(text);
+
+            // ✅ Arena guard: ignore injected prompt / user prompt
+            if (CURRENT_PLATFORM.id === "arena") {
+
+                if (looksLikeInjectedPrompt(text)) {
+                    continue;
+                }
+
+                if (lastInjectedSignature) {
+                    var oneLine = normalizeOneLine(text);
+                    if (oneLine.indexOf(lastInjectedSignature) !== -1) {
+                        continue;
+                    }
+                }
+            }
 
             if (text) {
                 return text;
@@ -848,34 +644,18 @@
 
     function getCurrentAssistantText() {
 
-        if (
-            CURRENT_PLATFORM.id ===
-            "chatgpt"
-        ) {
+        if (CURRENT_PLATFORM.id === "chatgpt") {
 
-            var containers =
-                getChatGPTConversationContainers();
+            var containers = getChatGPTConversationContainers();
 
-            if (
-                containers.length === 0
-            ) {
-
+            if (containers.length === 0) {
                 return "";
             }
 
-            var lastContainer =
-                containers[
-                    containers.length - 1
-                ];
+            var lastContainer = containers[containers.length - 1];
+            var conversationText = getElementText(lastContainer);
 
-            var conversationText =
-                getElementText(
-                    lastContainer
-                );
-
-            return extractChatGPTAssistantText(
-                conversationText
-            );
+            return extractChatGPTAssistantText(conversationText);
         }
 
         return extractLatestPlatformResponse();
@@ -883,130 +663,62 @@
 
     // ============================================================
     // MANUAL CAPTURE
-    //
-    // IMPORTANT:
-    // This captures the response that is ALREADY visible.
-    //
-    // It does NOT use baselineAssistant because the user is
-    // explicitly asking to save the current response.
     // ============================================================
 
-    function sendManualCaptureResult(
-        success,
-        text,
-        reason
-    ) {
+    function sendManualCaptureResult(success, text, reason) {
 
-        var cleaned =
-            cleanAssistantResponse(
-                text || ""
-            );
+        var cleaned = cleanAssistantResponse(text || "");
 
         var debug = {
-            assistant:
-                cleaned ? 1 : 0,
-
-            articles:
-                0,
-
-            bodyLen:
-                cleaned.length,
-
-            platform:
-                CURRENT_PLATFORM.id,
-
-            reason:
-                reason || ""
+            assistant: cleaned ? 1 : 0,
+            articles: 0,
+            bodyLen: cleaned.length,
+            platform: CURRENT_PLATFORM.id,
+            reason: reason || ""
         };
 
         try {
 
             browser.runtime.sendMessage({
-
-                type:
-                    "CAPTURE_RESULT",
-
-                success:
-                    !!cleaned,
-
-                text:
-                    cleaned,
-
-                debug:
-                    debug,
-
-                source:
-                    CURRENT_PLATFORM.id,
-
-                timestamp:
-                    Date.now()
+                type: "CAPTURE_RESULT",
+                success: !!cleaned,
+                text: cleaned,
+                debug: debug,
+                source: CURRENT_PLATFORM.id,
+                timestamp: Date.now()
             });
 
             log(
                 cleaned
-                    ? "📤 CAPTURE_RESULT sent success len=" +
-                      cleaned.length
-                    : "📤 CAPTURE_RESULT sent failure reason=" +
-                      (reason || "empty")
+                    ? "📤 CAPTURE_RESULT sent success len=" + cleaned.length
+                    : "📤 CAPTURE_RESULT sent failure reason=" + (reason || "empty")
             );
 
         } catch (e) {
 
-            log(
-                "❌ CAPTURE_RESULT send failed: " +
-                e
-            );
+            log("❌ CAPTURE_RESULT send failed: " + e);
         }
     }
 
-
     function captureCurrentResponse() {
 
-        log(
-            "🎯 Manual capture requested " +
-            "platform=" +
-            CURRENT_PLATFORM.id
-        );
+        log("🎯 Manual capture requested platform=" + CURRENT_PLATFORM.id);
+
         logResponseElementDiagnostics();
-        
 
-        var current =
-             
-            getCurrentAssistantText();
-
-        log(
-            "🔎 Manual capture current response len=" +
-            current.length
-        );
+        var current = getCurrentAssistantText();
 
         if (!current) {
-
-            log(
-                "⚠️ Manual capture: no assistant response found"
-            );
-
-            sendManualCaptureResult(
-                false,
-                "",
-                "assistant_response_not_found"
-            );
-
+            log("⚠️ Manual capture: no assistant response found");
+            sendManualCaptureResult(false, "", "assistant_response_not_found");
             return;
         }
 
-        log(
-            "📝 Manual capture response: " +
-            current.substring(
-                0,
-                500
-            )
-        );
+        log("🔎 Manual capture current response len=" + current.length);
 
-        sendManualCaptureResult(
-            true,
-            current,
-            "current_response"
-        );
+        log("📝 Manual capture response: " + current.substring(0, 500));
+
+        sendManualCaptureResult(true, current, "current_response");
     }
 
     // ============================================================
@@ -1014,73 +726,74 @@
     // ============================================================
 
     var baselineAssistant = "";
-
     var captureActive = false;
-
     var captureFinished = false;
-
     var lastCandidate = "";
-
     var stableSince = 0;
 
     // ============================================================
-    // DEBUG RESPONSE ELEMENTS
+    // DEBUG RESPONSE ELEMENTS (Arena)
     // ============================================================
 
     function logResponseElementDiagnostics() {
 
-    if (CURRENT_PLATFORM.id !== "arena") {
-        return;
-    }
+        if (CURRENT_PLATFORM.id !== "arena") {
+            return;
+        }
 
-    var selectors = [
-        "main .prose",
-        ".prose.prose-base",
-        "div.prose",
-        "main textarea",
-        "main [contenteditable='true']"
-    ];
+        var selectors = [
+            "main .prose",
+            ".prose.prose-base",
+            "div.prose",
+            "main textarea",
+            "main [contenteditable='true']"
+        ];
 
-    var candidates = [];
-    var seen = [];
+        var candidates = [];
+        var seen = [];
 
-    for (var i = 0; i < selectors.length; i++) {
-        try {
-            var elements = document.querySelectorAll(selectors[i]);
+        for (var i = 0; i < selectors.length; i++) {
 
-            for (var j = 0; j < elements.length; j++) {
-                var element = elements[j];
+            try {
 
-                if (seen.indexOf(element) !== -1) {
-                    continue;
+                var elements = document.querySelectorAll(selectors[i]);
+
+                for (var j = 0; j < elements.length; j++) {
+
+                    var element = elements[j];
+
+                    if (seen.indexOf(element) !== -1) {
+                        continue;
+                    }
+
+                    seen.push(element);
+                    candidates.push(element);
                 }
 
-                seen.push(element);
-                candidates.push(element);
-            }
-        } catch (e) {}
-    }
-
-    log("🔬 Arena DOM candidates=" + candidates.length);
-
-    var start = Math.max(0, candidates.length - 15);
-
-    for (var k = start; k < candidates.length; k++) {
-        var el = candidates[k];
-
-        var text = getElementText(el)
-            .replace(/\s+/g, " ")
-            .trim();
-
-        log(
-            "🔎 Arena candidate[" + k + "]" +
-            " tag=" + el.tagName +
-            " class=" + String(el.className || "").substring(0, 160) +
-            " len=" + text.length +
-            " text=" + text.substring(0, 220)
-        );
-    }
+            } catch (e) { }
         }
+
+        log("🔬 Arena DOM candidates=" + candidates.length);
+
+        var start = Math.max(0, candidates.length - 15);
+
+        for (var k = start; k < candidates.length; k++) {
+
+            var el = candidates[k];
+
+            var text = getElementText(el)
+                .replace(/\s+/g, " ")
+                .trim();
+
+            log(
+                "🔎 Arena candidate[" + k + "]" +
+                " tag=" + el.tagName +
+                " class=" + String(el.className || "").substring(0, 160) +
+                " len=" + text.length +
+                " text=" + text.substring(0, 220)
+            );
+        }
+    }
 
     // ============================================================
     // START CAPTURE
@@ -1089,29 +802,19 @@
     function startResponseCapture() {
 
         captureActive = true;
-
         captureFinished = false;
-
         lastCandidate = "";
-
         stableSince = 0;
 
-        baselineAssistant =
-            getCurrentAssistantText();
+        baselineAssistant = getCurrentAssistantText();
 
         log(
             "🧪 Response capture started " +
-            "platform=" +
-            CURRENT_PLATFORM.id +
-            " baselineAssistant=" +
-            baselineAssistant.length
+            "platform=" + CURRENT_PLATFORM.id +
+            " baselineAssistant=" + baselineAssistant.length
         );
 
-        if (
-            CURRENT_PLATFORM.id ===
-            "gemini"
-        ) {
-
+        if (CURRENT_PLATFORM.id === "gemini") {
             logResponseElementDiagnostics();
         }
 
@@ -1129,64 +832,32 @@
         }
 
         captureFinished = true;
-
         captureActive = false;
 
-        answer =
-            cleanAssistantResponse(
-                answer || ""
-            );
+        answer = cleanAssistantResponse(answer || "");
 
         if (!answer) {
-
-            log(
-                "⚠️ Clean assistant response empty"
-            );
-
+            log("⚠️ Clean assistant response empty");
             return;
         }
 
-        log(
-            "🧹 Response cleaned len=" +
-            answer.length
-        );
-
-        log(
-            "📝 CLEAN RESPONSE: " +
-            answer.substring(
-                0,
-                1200
-            )
-        );
+        log("🧹 Response cleaned len=" + answer.length);
+        log("📝 CLEAN RESPONSE: " + answer.substring(0, 1200));
 
         try {
 
             browser.runtime.sendMessage({
-
-                type:
-                    "ASSISTANT_RESPONSE",
-
-                text:
-                    answer,
-
-                source:
-                    CURRENT_PLATFORM.id,
-
-                timestamp:
-                    Date.now()
+                type: "ASSISTANT_RESPONSE",
+                text: answer,
+                source: CURRENT_PLATFORM.id,
+                timestamp: Date.now()
             });
 
-            log(
-                "📤 CLEAN ASSISTANT_RESPONSE sent source=" +
-                CURRENT_PLATFORM.id
-            );
+            log("📤 CLEAN ASSISTANT_RESPONSE sent source=" + CURRENT_PLATFORM.id);
 
         } catch (e) {
 
-            log(
-                "❌ ASSISTANT_RESPONSE send failed: " +
-                e
-            );
+            log("❌ ASSISTANT_RESPONSE send failed: " + e);
         }
     }
 
@@ -1196,221 +867,145 @@
 
     function watchForResponse() {
 
-        if (
-            !captureActive ||
-            captureFinished
-        ) {
-
+        if (!captureActive || captureFinished) {
             return;
         }
 
-        var current =
-            getCurrentAssistantText();
+        var current = getCurrentAssistantText();
 
         if (!current) {
-
-            setTimeout(
-                watchForResponse,
-                1000
-            );
-
+            setTimeout(watchForResponse, 1000);
             return;
         }
 
-        if (
-            baselineAssistant &&
-            current ===
-            baselineAssistant
-        ) {
-
-            setTimeout(
-                watchForResponse,
-                1000
-            );
-
+        if (baselineAssistant && current === baselineAssistant) {
+            setTimeout(watchForResponse, 1000);
             return;
         }
 
-        if (
-            current !==
-            lastCandidate
-        ) {
+        if (current !== lastCandidate) {
 
-            lastCandidate =
-                current;
-
-            stableSince =
-                Date.now();
+            lastCandidate = current;
+            stableSince = Date.now();
 
             log(
-                "🔄 " +
-                CURRENT_PLATFORM.name +
-                " assistant response changed len=" +
-                current.length
+                "🔄 " + CURRENT_PLATFORM.name +
+                " assistant response changed len=" + current.length
             );
 
-            setTimeout(
-                watchForResponse,
-                1200
-            );
-
+            setTimeout(watchForResponse, 1200);
             return;
         }
 
-        if (
-            lastCandidate &&
-            stableSince > 0 &&
-            Date.now() -
-                stableSince >=
-                1800
-        ) {
-
-            finishCapture(
-                lastCandidate
-            );
-
+        if (lastCandidate && stableSince > 0 && (Date.now() - stableSince) >= 1800) {
+            finishCapture(lastCandidate);
             return;
         }
 
-        setTimeout(
-            watchForResponse,
-            800
-        );
+        setTimeout(watchForResponse, 800);
     }
 
     // ============================================================
     // MESSAGE FROM BACKGROUND
     // ============================================================
 
-    browser.runtime.onMessage.addListener(
-        function (message) {
+    browser.runtime.onMessage.addListener(function (message) {
 
-            if (!message) {
-                return;
-            }
+        if (!message) {
+            return;
+        }
 
-            // ----------------------------------------------------
-            // MANUAL_CAPTURE
-            // ----------------------------------------------------
+        // ----------------------------------------------------
+        // MANUAL_CAPTURE
+        // ----------------------------------------------------
 
-            if (
-                message.type ===
-                "MANUAL_CAPTURE"
-            ) {
+        if (message.type === "MANUAL_CAPTURE") {
 
-                log(
-                    "🎯 MANUAL_CAPTURE received from background"
-                );
+            log("🎯 MANUAL_CAPTURE received from background");
+            captureCurrentResponse();
 
-                captureCurrentResponse();
+            return Promise.resolve({
+                ok: true,
+                type: "MANUAL_CAPTURE"
+            });
+        }
+
+        // ----------------------------------------------------
+        // CONTEXT_TO_PAGE
+        // ----------------------------------------------------
+
+        if (message.type === "CONTEXT_TO_PAGE") {
+
+            var text = message.text || "";
+
+            log(
+                "📥 CONTEXT_TO_PAGE received len=" +
+                text.length +
+                " platform=" +
+                CURRENT_PLATFORM.id
+            );
+
+            if (!text) {
+
+                log("⚠️ CONTEXT_TO_PAGE text empty");
 
                 return Promise.resolve({
-                    ok: true,
-                    type: "MANUAL_CAPTURE"
+                    ok: false,
+                    reason: "empty_text"
                 });
             }
 
-            // ----------------------------------------------------
-            // CONTEXT_TO_PAGE
-            // ----------------------------------------------------
+            // ✅ Store injected prompt signature (Arena guard)
+            lastInjectedText = text;
+            lastInjectedSignature = makeSignature(text);
+            lastInjectedAt = Date.now();
 
-            if (
-                message.type ===
-                "CONTEXT_TO_PAGE"
-            ) {
+            /*
+             * Capture starts BEFORE sending the prompt.
+             */
+            startResponseCapture();
 
-                var text =
-                    message.text || "";
+            findInputWithRetry(
+                10,
+                500,
+                function (input) {
 
-                log(
-                    "📥 CONTEXT_TO_PAGE received len=" +
-                    text.length +
-                    " platform=" +
-                    CURRENT_PLATFORM.id
-                );
-
-                if (!text) {
+                    var selectorInfo =
+                        input.tagName +
+                        (input.id ? "#" + input.id : "") +
+                        (input.className
+                            ? "." + String(input.className)
+                                .split(/\s+/)
+                                .slice(0, 4)
+                                .join(".")
+                            : ""
+                        );
 
                     log(
-                        "⚠️ CONTEXT_TO_PAGE text empty"
+                        "🔎 " +
+                        CURRENT_PLATFORM.name +
+                        " input found: " +
+                        selectorInfo
                     );
 
-                    return Promise.resolve({
-                        ok: false,
-                        reason: "empty_text"
-                    });
-                }
+                    var injected = injectText(input, text);
 
-                /*
-                 * Capture starts BEFORE sending the prompt.
-                 */
-                startResponseCapture();
-
-                findInputWithRetry(
-                    10,
-                    500,
-                    function (input) {
-
-                        var selectorInfo =
-                            input.tagName +
-                            (
-                                input.id
-                                    ? "#" +
-                                      input.id
-                                    : ""
-                            ) +
-                            (
-                                input.className
-                                    ? "." +
-                                      String(
-                                          input.className
-                                      )
-                                        .split(/\s+/)
-                                        .slice(
-                                            0,
-                                            4
-                                        )
-                                        .join(".")
-                                    : ""
-                            );
-
-                        log(
-                            "🔎 " +
-                            CURRENT_PLATFORM.name +
-                            " input found: " +
-                            selectorInfo
-                        );
-
-                        var injected =
-                            injectText(
-                                input,
-                                text
-                            );
-
-                        if (!injected) {
-                            return;
-                        }
-
-                        setTimeout(
-                            function () {
-
-                                sendEnter(
-                                    input
-                                );
-
-                            },
-                            300
-                        );
+                    if (!injected) {
+                        return;
                     }
-                );
 
-                return Promise.resolve({
-                    ok: true,
-                    type: "CONTEXT_TO_PAGE"
-                });
-            }
+                    setTimeout(function () {
+                        sendEnter(input);
+                    }, 300);
+                }
+            );
+
+            return Promise.resolve({
+                ok: true,
+                type: "CONTEXT_TO_PAGE"
+            });
         }
-    );
+    });
 
     // ============================================================
     // READY
@@ -1419,27 +1014,16 @@
     try {
 
         browser.runtime.sendMessage({
-
-            type:
-                "CONTENT_READY",
-
-            version:
-                VERSION,
-
-            url:
-                location.href
+            type: "CONTENT_READY",
+            version: VERSION,
+            url: location.href
         });
 
-        log(
-            "📡 CONTENT_READY sent"
-        );
+        log("📡 CONTENT_READY sent");
 
     } catch (e) {
 
-        log(
-            "❌ CONTENT_READY failed: " +
-            e
-        );
+        log("❌ CONTENT_READY failed: " + e);
     }
 
 })();
