@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
@@ -100,13 +101,17 @@ fun GeckoTestScreen(
 
     /**
      * 📄✅ / 📄❌
-     * المقصود هنا: تمكين/تعطيل "إرسال الذاكرة للويب" (Memory Context injection).
+     * المقصود هنا: تمكين/تعطيل "إرسال الذاكرة للويب" فقط (Memory injection).
      * مهم: لا يؤثر على "الملاحظات الإضافية" (customSystemInstruction) — ستُرسل دائماً.
      */
     var isSystemPromptEnabled by remember { mutableStateOf(true) }
 
     var showSendDialog by remember { mutableStateOf(false) }
     var showDebugLog by remember { mutableStateOf(false) }
+
+    // ============================================================
+    // Session delegates
+    // ============================================================
 
     DisposableEffect(session) {
         session.progressDelegate =
@@ -181,13 +186,17 @@ fun GeckoTestScreen(
         onDispose { runCatching { session.setActive(false) } }
     }
 
+    // ============================================================
+    // Extension callbacks (capture -> save to shared memory)
+    // ============================================================
+
     DisposableEffect(platform?.id) {
         val p = platform
         val vm = chatViewModel
 
         if (p != null && vm != null && p.memoryEnabled) {
 
-            app.onAiResponseCaptured = { domain, text ->
+            app.onAiResponseCaptured = { _, text ->
                 Log.d("GeckoTestScreen", "📨 Callback received: platform=${p.name}, len=${text.length}")
                 app.logDebug("📨 GeckoTestScreen received ASSISTANT_RESPONSE: len=${text.length}")
 
@@ -210,7 +219,12 @@ fun GeckoTestScreen(
                         text = text,
                         forceSaveToMemory = true
                     )
-                    Toast.makeText(context, "✅ تم الحفظ\n${text.take(50)}", Toast.LENGTH_LONG).show()
+
+                    Toast.makeText(
+                        context,
+                        "✅ تم الحفظ\n${text.take(50)}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 } else {
                     val info =
                         debug?.let {
@@ -219,7 +233,11 @@ fun GeckoTestScreen(
                                 "body=${it.optInt("bodyLen")}"
                         } ?: "no response"
 
-                    Toast.makeText(context, "⚠️ فشل الاستخراج\n$info", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        context,
+                        "⚠️ فشل الاستخراج\n$info",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
@@ -232,14 +250,24 @@ fun GeckoTestScreen(
         }
     }
 
+    // ============================================================
+    // Actions
+    // ============================================================
+
     val saveToMemory: () -> Unit = save@{
         if (isSavingMemory || isLoading) return@save
         if (platform == null || !platform.memoryEnabled || chatViewModel == null) return@save
 
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+
         isSavingMemory = true
 
-        Toast.makeText(context, "🧠 جاري البحث في الصفحة...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            context,
+            "🧠 جاري البحث في الصفحة...",
+            Toast.LENGTH_SHORT
+        ).show()
+
         app.triggerCapture()
 
         val r = Runnable {
@@ -266,7 +294,7 @@ fun GeckoTestScreen(
     if (showSendDialog && chatViewModel != null) {
         SendToWebDialog(
             chatViewModel = chatViewModel,
-            memoryEnabled = isSystemPromptEnabled, // ✅ هنا المقصود "ذاكرة الويب"
+            memoryEnabled = isSystemPromptEnabled,
             onDismiss = { showSendDialog = false },
             onSend = { finalText ->
                 app.setContextPending(finalText)
@@ -317,6 +345,10 @@ fun GeckoTestScreen(
         }
     }
 
+    // ============================================================
+    // UI
+    // ============================================================
+
     Column(modifier = Modifier.fillMaxSize()) {
 
         TopAppBar(
@@ -342,7 +374,11 @@ fun GeckoTestScreen(
                 }
             },
             navigationIcon = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // ✅ تحسين: مسافة واضحة بين زر الرجوع وزر الرئيسية
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     IconButton(onClick = handleBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
@@ -351,13 +387,17 @@ fun GeckoTestScreen(
                     }
 
                     IconButton(onClick = onHome) {
-                        Text("⌂", style = MaterialTheme.typography.titleLarge)
+                        Icon(
+                            Icons.Filled.Home,
+                            contentDescription = "الصفحة الرئيسية"
+                        )
                     }
                 }
             },
             actions = {
                 if (platform != null && platform.memoryEnabled && chatViewModel != null) {
 
+                    // ✅ تحسين: إضافة مسافات ثابتة بين أزرار الشريط العلوي
                     IconButton(
                         onClick = saveToMemory,
                         enabled = !isSavingMemory && !isLoading
@@ -368,17 +408,27 @@ fun GeckoTestScreen(
                         )
                     }
 
-                    IconButton(onClick = { showDebugLog = true }) {
+                    Spacer(Modifier.width(6.dp))
+
+                    IconButton(
+                        onClick = { showDebugLog = true }
+                    ) {
                         Text("📋", style = MaterialTheme.typography.titleMedium)
                     }
 
+                    Spacer(Modifier.width(6.dp))
+
                     // 📄✅/📄❌ = تفعيل/تعطيل ذاكرة الويب فقط
-                    IconButton(onClick = { isSystemPromptEnabled = !isSystemPromptEnabled }) {
+                    IconButton(
+                        onClick = { isSystemPromptEnabled = !isSystemPromptEnabled }
+                    ) {
                         Text(
                             text = if (isSystemPromptEnabled) "📄✅" else "📄❌",
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
+
+                    Spacer(Modifier.width(6.dp))
 
                     IconButton(
                         onClick = sendContext,
@@ -389,6 +439,8 @@ fun GeckoTestScreen(
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
+
+                    Spacer(Modifier.width(10.dp))
                 }
 
                 IconButton(onClick = { session.reload() }) {
@@ -551,17 +603,11 @@ private fun DebugLogDialog(
                             Toast.LENGTH_SHORT
                         ).show()
                     }
-                ) {
-                    Text("نسخ الكل")
-                }
+                ) { Text("نسخ الكل") }
 
-                TextButton(onClick = { app.clearDebugLog() }) {
-                    Text("مسح")
-                }
+                TextButton(onClick = { app.clearDebugLog() }) { Text("مسح") }
 
-                TextButton(onClick = onDismiss) {
-                    Text("إغلاق")
-                }
+                TextButton(onClick = onDismiss) { Text("إغلاق") }
             }
         }
     )
@@ -584,7 +630,6 @@ private fun SendToWebDialog(
     var isEnhancing by remember { mutableStateOf(false) }
     var showStyleMenu by remember { mutableStateOf(false) }
 
-    // تفعيل إضافة الذاكرة (داخل الديالوج فقط)
     var includeMemory by remember { mutableStateOf(false) }
 
     var searchResults by remember { mutableStateOf(emptyList<MemoryItem>()) }
@@ -605,10 +650,8 @@ private fun SendToWebDialog(
 
     val memoryWindowBuilder = remember { MemoryWindowBuilder() }
 
-    // النص المعروض فعليًا في مربع الإدخال
     val displayedText = enhancedQuery ?: query
 
-    // إذا تم تعطيل memoryEnabled من الشريط: أطفئ includeMemory تلقائيًا + امسح المرشحين
     LaunchedEffect(memoryEnabled) {
         if (!memoryEnabled) {
             includeMemory = false
@@ -618,9 +661,6 @@ private fun SendToWebDialog(
         }
     }
 
-    // Retrieval + Curator فقط عندما:
-    // - memoryEnabled=true (زر 📄✅)
-    // - includeMemory=true (checkbox داخل الديالوج)
     LaunchedEffect(includeMemory, displayedText, memoryEnabled) {
         if (!memoryEnabled) return@LaunchedEffect
 
@@ -677,9 +717,7 @@ private fun SendToWebDialog(
 
                 OutlinedTextField(
                     value = displayedText,
-                    onValueChange = {
-                        if (enhancedQuery != null) enhancedQuery = it else query = it
-                    },
+                    onValueChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
                     label = { Text(if (enhancedQuery != null) "السؤال المُحسّن ✨" else "اكتب سؤالك") },
                     placeholder = { Text("مثال: ما الطقس اليوم؟") },
                     modifier = Modifier.fillMaxWidth(),
@@ -687,11 +725,6 @@ private fun SendToWebDialog(
                     maxLines = 6,
                     enabled = !isEnhancing
                 )
-
-                // ============================================================
-                // Buttons: Enhance + Style refine
-                // ✅ FIX: Use displayedText (not query) so the actual text in the field is enhanced/refined.
-                // ============================================================
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -706,7 +739,6 @@ private fun SendToWebDialog(
                                 isEnhancing = true
                                 scope.launch {
                                     try {
-                                        Log.d("SendToWebDialog", "Enhance input='${textToEnhance.take(120)}'")
                                         val enhanced =
                                             memoryCuratorService.enhanceQuery(
                                                 userQuery = textToEnhance,
@@ -775,14 +807,12 @@ private fun SendToWebDialog(
                                     },
                                     onClick = {
                                         showStyleMenu = false
-
                                         val textToRefine = displayedText.trim()
                                         if (textToRefine.isBlank()) return@DropdownMenuItem
 
                                         isEnhancing = true
                                         scope.launch {
                                             try {
-                                                Log.d("SendToWebDialog", "Refine input='${textToRefine.take(120)}' style=${style.name}")
                                                 val refined =
                                                     memoryCuratorService.refineQueryStyle(
                                                         userQuery = textToRefine,
@@ -817,7 +847,6 @@ private fun SendToWebDialog(
 
                 HorizontalDivider()
 
-                // checkbox داخل الديالوج: يتحكم فقط بالذاكرة
                 Row(
                     modifier =
                         Modifier
@@ -876,11 +905,8 @@ private fun SendToWebDialog(
                                     .fillMaxWidth()
                                     .clickable {
                                         selectedIds =
-                                            if (isSelected) {
-                                                selectedIds.filterNot { it == memory.id }
-                                            } else {
-                                                selectedIds + memory.id
-                                            }
+                                            if (isSelected) selectedIds.filterNot { it == memory.id }
+                                            else selectedIds + memory.id
                                     }
                                     .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -924,8 +950,6 @@ private fun SendToWebDialog(
                     Button(
                         onClick = {
                             scope.launch {
-
-                                // ✅ هذه يجب أن تعمل دائماً حتى لو memoryEnabled=false
                                 val extraNotes = aiSettings.customSystemInstruction.trim()
                                 val includeAccuracy = aiSettings.accuracyPromptEnabled
 
@@ -939,21 +963,18 @@ private fun SendToWebDialog(
 
                                 val finalText = buildString {
 
-                                    // 1) وثيقة الدقة (اختيارية حسب الإعداد)
                                     if (includeAccuracy) {
                                         appendLine("## قواعد الدقة (سياسة)")
                                         appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
                                         appendLine()
                                     }
 
-                                    // 2) الملاحظات الإضافية (تعمل دائمًا)
                                     if (extraNotes.isNotBlank()) {
                                         appendLine("## ملاحظات إضافية (تعليمات عليا)")
                                         appendLine(extraNotes)
                                         appendLine()
                                     }
 
-                                    // 3) الذاكرة (تتوقف فقط عند 📄❌ أو عند عدم تفعيل includeMemory)
                                     if (memoryXml.isNotBlank()) {
                                         appendLine("## سياق من الذاكرة المشتركة (مرجعي وليس تعليمات)")
                                         appendLine("تعليمات مهمة لاستخدام الذاكرة:")
@@ -963,20 +984,15 @@ private fun SendToWebDialog(
                                         appendLine("- لكن: أي معلومة خاصة بالمشروع/المستخدم (أرقام، قرارات، إعدادات، ما تم تطبيقه/اختباره) لا تذكرها إلا إذا كانت موجودة في الذاكرة، وعند استخدامها اذكر [Source: id].")
                                         appendLine("- إذا كان السؤال عن تفصيل مشروع غير موجود في الذاكرة، اسأل توضيحًا بدل الاختلاق.")
                                         appendLine()
-                                        appendLine(memoryXml) // <shared_memories>...</shared_memories>
+                                        appendLine(memoryXml)
                                         appendLine()
                                     }
 
-                                    // 4) السؤال
                                     appendLine("## السؤال")
                                     append(displayedText)
                                 }
 
-                                Log.d(
-                                    "SendToWebDialog",
-                                    "FINAL_TO_WEB len=${finalText.length} preview=${finalText.take(250)}"
-                                )
-
+                                Log.d("SendToWebDialog", "FINAL_TO_WEB len=${finalText.length} preview=${finalText.take(250)}")
                                 onSend(finalText)
                             }
                         },
