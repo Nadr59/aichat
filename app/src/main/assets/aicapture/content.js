@@ -3,10 +3,10 @@
 
     // ============================================================
     // AiChat — PLATFORM REGISTRY + ASSISTANT RESPONSE CAPTURE
-    // Version 1.0.34 (Arena guard: ignore injected prompt)
+    // Version 1.0.35 (Arena: prevent capturing injected/user prompt as assistant)
     // ============================================================
 
-    var VERSION = "1.0.34";
+    var VERSION = "1.0.35";
 
     // ============================================================
     // DEBUG LOG
@@ -30,7 +30,6 @@
     // ============================================================
 
     var PLATFORMS = {
-
         chatgpt: {
             id: "chatgpt",
             name: "ChatGPT",
@@ -48,20 +47,14 @@
             ],
 
             extractResponse: function (element) {
-                if (!element) {
-                    return "";
-                }
+                if (!element) return "";
 
                 var markdown = null;
-
                 try {
                     markdown = element.querySelector(".markdown");
                 } catch (e) { }
 
-                if (markdown) {
-                    return getElementText(markdown);
-                }
-
+                if (markdown) return getElementText(markdown);
                 return getElementText(element);
             },
 
@@ -92,10 +85,7 @@
             ],
 
             extractResponse: function (element) {
-
-                if (!element) {
-                    return "";
-                }
+                if (!element) return "";
 
                 var contentSelectors = [
                     ".model-response-text",
@@ -108,12 +98,11 @@
                 for (var i = 0; i < contentSelectors.length; i++) {
                     try {
                         var child = element.querySelector(contentSelectors[i]);
-                        if (child) {
-                            var childText = getElementText(child);
-                            if (childText) {
-                                return childText;
-                            }
-                        }
+                        if (!child) continue;
+
+                        var childText = getElementText(child);
+                        if (childText) return childText;
+
                     } catch (e) { }
                 }
 
@@ -175,31 +164,15 @@
     // ============================================================
 
     function detectPlatform() {
-
-        if (PLATFORMS.chatgpt.matches()) {
-            return PLATFORMS.chatgpt;
-        }
-
-        if (PLATFORMS.gemini.matches()) {
-            return PLATFORMS.gemini;
-        }
-
-        if (PLATFORMS.arena.matches()) {
-            return PLATFORMS.arena;
-        }
-
+        if (PLATFORMS.chatgpt.matches()) return PLATFORMS.chatgpt;
+        if (PLATFORMS.gemini.matches()) return PLATFORMS.gemini;
+        if (PLATFORMS.arena.matches()) return PLATFORMS.arena;
         return PLATFORMS.generic;
     }
 
     var CURRENT_PLATFORM = detectPlatform();
 
-    log(
-        "🌐 Platform detected: " +
-        CURRENT_PLATFORM.name +
-        " (" +
-        CURRENT_PLATFORM.id +
-        ")"
-    );
+    log("🌐 Platform detected: " + CURRENT_PLATFORM.name + " (" + CURRENT_PLATFORM.id + ")");
 
     // ============================================================
     // INPUT
@@ -226,34 +199,26 @@
     ];
 
     function findInput() {
-
         for (var i = 0; i < INPUT_SELECTORS.length; i++) {
             try {
                 var element = document.querySelector(INPUT_SELECTORS[i]);
-                if (element) {
-                    return element;
-                }
+                if (element) return element;
             } catch (e) { }
         }
-
         return null;
     }
 
     function findInputWithRetry(attempts, delay, callback) {
-
         var count = 0;
 
         function attempt() {
-
             var input = findInput();
-
             if (input) {
                 callback(input);
                 return;
             }
 
             count++;
-
             if (count >= attempts) {
                 log("❌ " + CURRENT_PLATFORM.name + " input not found");
                 return;
@@ -270,15 +235,11 @@
     // ============================================================
 
     function injectText(input, text) {
-
         try {
-
             if (input.tagName === "TEXTAREA" || input.tagName === "INPUT") {
 
                 var prototype = Object.getPrototypeOf(input);
-
-                var descriptor =
-                    Object.getOwnPropertyDescriptor(prototype, "value");
+                var descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
 
                 if (descriptor && descriptor.set) {
                     descriptor.set.call(input, text);
@@ -286,13 +247,8 @@
                     input.value = text;
                 }
 
-                input.dispatchEvent(
-                    new Event("input", { bubbles: true, composed: true })
-                );
-
-                input.dispatchEvent(
-                    new Event("change", { bubbles: true, composed: true })
-                );
+                input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+                input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
 
             } else {
 
@@ -321,7 +277,6 @@
             return true;
 
         } catch (e) {
-
             log("❌ Text injection failed: " + e);
             return false;
         }
@@ -332,9 +287,7 @@
     // ============================================================
 
     function sendEnter(input) {
-
         try {
-
             input.focus();
 
             var options = {
@@ -355,7 +308,6 @@
             return true;
 
         } catch (e) {
-
             log("❌ Enter failed: " + e);
             return false;
         }
@@ -366,16 +318,12 @@
     // ============================================================
 
     function getElementText(element) {
-
         try {
-
             return (element.innerText || element.textContent || "")
                 .replace(/\u00a0/g, " ")
                 .replace(/\r/g, "")
                 .trim();
-
         } catch (e) {
-
             return "";
         }
     }
@@ -385,31 +333,17 @@
     // ============================================================
 
     function getChatGPTConversationContainers() {
-
         var result = [];
 
         try {
-
-            var sections =
-                document.querySelectorAll('section[aria-label^="محادثة"]');
-
-            for (var i = 0; i < sections.length; i++) {
-                result.push(sections[i]);
-            }
-
+            var sections = document.querySelectorAll('section[aria-label^="محادثة"]');
+            for (var i = 0; i < sections.length; i++) result.push(sections[i]);
         } catch (e) { }
 
         if (result.length === 0) {
-
             try {
-
-                var regions =
-                    document.querySelectorAll('[role="region"][aria-label="محادثة"]');
-
-                for (var j = 0; j < regions.length; j++) {
-                    result.push(regions[j]);
-                }
-
+                var regions = document.querySelectorAll('[role="region"][aria-label="محادثة"]');
+                for (var j = 0; j < regions.length; j++) result.push(regions[j]);
             } catch (e) { }
         }
 
@@ -431,18 +365,11 @@
         var selectors = CURRENT_PLATFORM.responseSelectors;
 
         for (var i = 0; i < selectors.length; i++) {
-
             try {
-
                 var elements = document.querySelectorAll(selectors[i]);
-
                 for (var j = 0; j < elements.length; j++) {
-
-                    if (result.indexOf(elements[j]) === -1) {
-                        result.push(elements[j]);
-                    }
+                    if (result.indexOf(elements[j]) === -1) result.push(elements[j]);
                 }
-
             } catch (e) { }
         }
 
@@ -455,9 +382,7 @@
 
     function cleanAssistantResponse(text) {
 
-        if (!text) {
-            return "";
-        }
+        if (!text) return "";
 
         var cleaned = text;
 
@@ -467,48 +392,27 @@
 
         var footer = "ChatGPT هو نظام ذكاء اصطناعي وقد يخطئ.";
         var footerIndex = cleaned.indexOf(footer);
+        if (footerIndex !== -1) cleaned = cleaned.substring(0, footerIndex);
 
-        if (footerIndex !== -1) {
-            cleaned = cleaned.substring(0, footerIndex);
-        }
-
-        var sourceMarkers = [
-            "\nF المصادر",
-            "\nالمصادر",
-            "F المصادر"
-        ];
-
+        var sourceMarkers = ["\nF المصادر", "\nالمصادر", "F المصادر"];
         var sourceIndex = -1;
 
         for (var i = 0; i < sourceMarkers.length; i++) {
-            var index = cleaned.indexOf(sourceMarkers[i]);
-            if (index !== -1) {
-                if (sourceIndex === -1 || index < sourceIndex) {
-                    sourceIndex = index;
-                }
+            var idx = cleaned.indexOf(sourceMarkers[i]);
+            if (idx !== -1) {
+                if (sourceIndex === -1 || idx < sourceIndex) sourceIndex = idx;
             }
         }
 
-        if (sourceIndex !== -1) {
-            cleaned = cleaned.substring(0, sourceIndex);
-        }
+        if (sourceIndex !== -1) cleaned = cleaned.substring(0, sourceIndex);
 
-        var genericFooterMarkers = [
-            "\nWas this response helpful?",
-            "\nهل كانت هذه الإجابة مفيدة؟"
-        ];
-
+        var genericFooterMarkers = ["\nWas this response helpful?", "\nهل كانت هذه الإجابة مفيدة؟"];
         for (var g = 0; g < genericFooterMarkers.length; g++) {
-            var genericIndex = cleaned.indexOf(genericFooterMarkers[g]);
-            if (genericIndex !== -1) {
-                cleaned = cleaned.substring(0, genericIndex);
-            }
+            var gidx = cleaned.indexOf(genericFooterMarkers[g]);
+            if (gidx !== -1) cleaned = cleaned.substring(0, gidx);
         }
 
-        cleaned = cleaned
-            .replace(/^\s+/, "")
-            .replace(/\s+$/, "");
-
+        cleaned = cleaned.replace(/^\s+/, "").replace(/\s+$/, "");
         cleaned = cleaned.replace(/\n[ \t]*\n[ \t]*\n+/g, "\n\n");
         cleaned = cleaned.replace(/[ \t]+\n/g, "\n");
 
@@ -520,72 +424,89 @@
     // ============================================================
 
     function extractChatGPTAssistantText(conversationText) {
+        if (!conversationText) return "";
 
-        if (!conversationText) {
-            return "";
-        }
-
-        var markers = [
-            "قال ChatGPT:",
-            "قال ChatGPT :",
-            "ChatGPT قال:",
-            "ChatGPT:"
-        ];
-
+        var markers = ["قال ChatGPT:", "قال ChatGPT :", "ChatGPT قال:", "ChatGPT:"];
         var position = -1;
         var markerLength = 0;
 
         for (var i = 0; i < markers.length; i++) {
-
-            var currentPosition =
-                conversationText.lastIndexOf(markers[i]);
-
+            var currentPosition = conversationText.lastIndexOf(markers[i]);
             if (currentPosition > position) {
                 position = currentPosition;
                 markerLength = markers[i].length;
             }
         }
 
-        if (position === -1) {
-            return "";
-        }
+        if (position === -1) return "";
 
-        var answer =
-            conversationText
-                .substring(position + markerLength)
-                .trim();
-
+        var answer = conversationText.substring(position + markerLength).trim();
         return cleanAssistantResponse(answer);
     }
 
     // ============================================================
-    // Arena guard: ignore injected prompt (prevents false "assistant response")
+    // ARENA GUARD: prevent capturing injected/user prompt as assistant
     // ============================================================
 
     var lastInjectedText = "";
     var lastInjectedSignature = "";
     var lastInjectedAt = 0;
 
-    function normalizeOneLine(s) {
+    function normalizeForMatch(s) {
+        // collapse whitespace + remove simple punctuation that may disappear in DOM
         return (s || "")
             .replace(/\u00a0/g, " ")
             .replace(/\s+/g, " ")
-            .trim();
+            .replace(/[:：#*_\-\u2013\u2014\[\]\(\)<>]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
     }
 
     function makeSignature(s) {
-        return normalizeOneLine(s).substring(0, 220);
+        return normalizeForMatch(s).substring(0, 220);
     }
 
     function looksLikeInjectedPrompt(text) {
         if (!text) return false;
 
-        // Strong signals for AiChat injected prompt
+        // strong signals for AiChat injected prompt
         if (text.indexOf("<shared_memories>") !== -1) return true;
         if (text.indexOf("## السؤال") !== -1) return true;
         if (text.indexOf("السؤال:") !== -1) return true;
         if (text.indexOf("تعليمات مهمة") !== -1) return true;
         if (text.indexOf("ملاحظات إضافية") !== -1) return true;
+
+        // weaker but useful signal (when user prompt is only "السؤال\n\n...")
+        // apply only shortly after injection to avoid false positives
+        var trimmed = text.trim();
+        if (trimmed.startsWith("السؤال") && (Date.now() - lastInjectedAt) < 60000) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function isArenaRejectedCandidate(text) {
+        if (CURRENT_PLATFORM.id !== "arena") return false;
+        if (!text) return false;
+
+        if (looksLikeInjectedPrompt(text)) return true;
+
+        if (lastInjectedSignature) {
+            var sigText = normalizeForMatch(text);
+            // contains injected signature (or very close)
+            if (sigText.indexOf(lastInjectedSignature) !== -1) return true;
+
+            // also handle near-miss where DOM drops punctuation and signature becomes slightly different:
+            // if both are short, compare prefix overlap
+            if (sigText.length <= 260 && lastInjectedSignature.length <= 260) {
+                // if they share the first 120 chars, consider it injected
+                var a = sigText.substring(0, 120);
+                var b = lastInjectedSignature.substring(0, 120);
+                if (a && b && a === b) return true;
+            }
+        }
 
         return false;
     }
@@ -597,10 +518,7 @@
     function extractLatestPlatformResponse() {
 
         var elements = getPlatformResponseElements();
-
-        if (elements.length === 0) {
-            return "";
-        }
+        if (elements.length === 0) return "";
 
         for (var i = elements.length - 1; i >= 0; i--) {
 
@@ -615,24 +533,12 @@
 
             text = cleanAssistantResponse(text);
 
-            // ✅ Arena guard: ignore injected prompt / user prompt
-            if (CURRENT_PLATFORM.id === "arena") {
-
-                if (looksLikeInjectedPrompt(text)) {
-                    continue;
-                }
-
-                if (lastInjectedSignature) {
-                    var oneLine = normalizeOneLine(text);
-                    if (oneLine.indexOf(lastInjectedSignature) !== -1) {
-                        continue;
-                    }
-                }
+            // ✅ Arena: ignore injected/user prompt text
+            if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(text)) {
+                continue;
             }
 
-            if (text) {
-                return text;
-            }
+            if (text) return text;
         }
 
         return "";
@@ -645,16 +551,11 @@
     function getCurrentAssistantText() {
 
         if (CURRENT_PLATFORM.id === "chatgpt") {
-
             var containers = getChatGPTConversationContainers();
-
-            if (containers.length === 0) {
-                return "";
-            }
+            if (containers.length === 0) return "";
 
             var lastContainer = containers[containers.length - 1];
             var conversationText = getElementText(lastContainer);
-
             return extractChatGPTAssistantText(conversationText);
         }
 
@@ -695,7 +596,6 @@
             );
 
         } catch (e) {
-
             log("❌ CAPTURE_RESULT send failed: " + e);
         }
     }
@@ -714,8 +614,14 @@
             return;
         }
 
-        log("🔎 Manual capture current response len=" + current.length);
+        // Extra safety (Arena): if the "current" is rejected, treat as not found
+        if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(current)) {
+            log("⚠️ Manual capture: rejected candidate (looks like injected/user prompt)");
+            sendManualCaptureResult(false, "", "rejected_injected_prompt");
+            return;
+        }
 
+        log("🔎 Manual capture current response len=" + current.length);
         log("📝 Manual capture response: " + current.substring(0, 500));
 
         sendManualCaptureResult(true, current, "current_response");
@@ -737,9 +643,7 @@
 
     function logResponseElementDiagnostics() {
 
-        if (CURRENT_PLATFORM.id !== "arena") {
-            return;
-        }
+        if (CURRENT_PLATFORM.id !== "arena") return;
 
         var selectors = [
             "main .prose",
@@ -753,23 +657,15 @@
         var seen = [];
 
         for (var i = 0; i < selectors.length; i++) {
-
             try {
-
                 var elements = document.querySelectorAll(selectors[i]);
 
                 for (var j = 0; j < elements.length; j++) {
-
                     var element = elements[j];
-
-                    if (seen.indexOf(element) !== -1) {
-                        continue;
-                    }
-
+                    if (seen.indexOf(element) !== -1) continue;
                     seen.push(element);
                     candidates.push(element);
                 }
-
             } catch (e) { }
         }
 
@@ -778,12 +674,8 @@
         var start = Math.max(0, candidates.length - 15);
 
         for (var k = start; k < candidates.length; k++) {
-
             var el = candidates[k];
-
-            var text = getElementText(el)
-                .replace(/\s+/g, " ")
-                .trim();
+            var text = getElementText(el).replace(/\s+/g, " ").trim();
 
             log(
                 "🔎 Arena candidate[" + k + "]" +
@@ -792,6 +684,10 @@
                 " len=" + text.length +
                 " text=" + text.substring(0, 220)
             );
+        }
+
+        if (lastInjectedSignature) {
+            log("🧷 Arena lastInjectedSignature=" + lastInjectedSignature.substring(0, 120));
         }
     }
 
@@ -811,10 +707,11 @@
         log(
             "🧪 Response capture started " +
             "platform=" + CURRENT_PLATFORM.id +
-            " baselineAssistant=" + baselineAssistant.length
+            " baselineAssistant=" + (baselineAssistant ? baselineAssistant.length : 0)
         );
 
-        if (CURRENT_PLATFORM.id === "gemini") {
+        if (CURRENT_PLATFORM.id === "arena") {
+            // diagnostics helpful while tuning arena
             logResponseElementDiagnostics();
         }
 
@@ -827,7 +724,15 @@
 
     function finishCapture(answer) {
 
-        if (captureFinished) {
+        if (captureFinished) return;
+
+        // Final safety gate for Arena
+        if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(answer)) {
+            log("⚠️ FinishCapture blocked (Arena rejected candidate) — continue watching");
+            // keep capture active; reset stability and keep watching
+            lastCandidate = "";
+            stableSince = 0;
+            setTimeout(watchForResponse, 900);
             return;
         }
 
@@ -856,7 +761,6 @@
             log("📤 CLEAN ASSISTANT_RESPONSE sent source=" + CURRENT_PLATFORM.id);
 
         } catch (e) {
-
             log("❌ ASSISTANT_RESPONSE send failed: " + e);
         }
     }
@@ -867,11 +771,15 @@
 
     function watchForResponse() {
 
-        if (!captureActive || captureFinished) {
-            return;
-        }
+        if (!captureActive || captureFinished) return;
 
         var current = getCurrentAssistantText();
+
+        // Arena: if extraction returns user/injected prompt, ignore and keep waiting
+        if (CURRENT_PLATFORM.id === "arena" && current && isArenaRejectedCandidate(current)) {
+            setTimeout(watchForResponse, 900);
+            return;
+        }
 
         if (!current) {
             setTimeout(watchForResponse, 1000);
@@ -911,23 +819,17 @@
 
     browser.runtime.onMessage.addListener(function (message) {
 
-        if (!message) {
-            return;
-        }
+        if (!message) return;
 
         // ----------------------------------------------------
         // MANUAL_CAPTURE
         // ----------------------------------------------------
 
         if (message.type === "MANUAL_CAPTURE") {
-
             log("🎯 MANUAL_CAPTURE received from background");
             captureCurrentResponse();
 
-            return Promise.resolve({
-                ok: true,
-                type: "MANUAL_CAPTURE"
-            });
+            return Promise.resolve({ ok: true, type: "MANUAL_CAPTURE" });
         }
 
         // ----------------------------------------------------
@@ -938,21 +840,11 @@
 
             var text = message.text || "";
 
-            log(
-                "📥 CONTEXT_TO_PAGE received len=" +
-                text.length +
-                " platform=" +
-                CURRENT_PLATFORM.id
-            );
+            log("📥 CONTEXT_TO_PAGE received len=" + text.length + " platform=" + CURRENT_PLATFORM.id);
 
             if (!text) {
-
                 log("⚠️ CONTEXT_TO_PAGE text empty");
-
-                return Promise.resolve({
-                    ok: false,
-                    reason: "empty_text"
-                });
+                return Promise.resolve({ ok: false, reason: "empty_text" });
             }
 
             // ✅ Store injected prompt signature (Arena guard)
@@ -981,29 +873,16 @@
                             : ""
                         );
 
-                    log(
-                        "🔎 " +
-                        CURRENT_PLATFORM.name +
-                        " input found: " +
-                        selectorInfo
-                    );
+                    log("🔎 " + CURRENT_PLATFORM.name + " input found: " + selectorInfo);
 
                     var injected = injectText(input, text);
+                    if (!injected) return;
 
-                    if (!injected) {
-                        return;
-                    }
-
-                    setTimeout(function () {
-                        sendEnter(input);
-                    }, 300);
+                    setTimeout(function () { sendEnter(input); }, 300);
                 }
             );
 
-            return Promise.resolve({
-                ok: true,
-                type: "CONTEXT_TO_PAGE"
-            });
+            return Promise.resolve({ ok: true, type: "CONTEXT_TO_PAGE" });
         }
     });
 
@@ -1022,7 +901,6 @@
         log("📡 CONTENT_READY sent");
 
     } catch (e) {
-
         log("❌ CONTENT_READY failed: " + e);
     }
 
