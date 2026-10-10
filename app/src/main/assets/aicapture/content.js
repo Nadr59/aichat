@@ -1,4 +1,4 @@
-(function () {
+ (function () {
     "use strict";
 
     // ============================================================
@@ -967,9 +967,11 @@
             "platform=" +
             CURRENT_PLATFORM.id
         );
+        logResponseElementDiagnostics();
+        
 
         var current =
-            logResponseElementDiagnostics();
+             
             getCurrentAssistantText();
 
         log(
