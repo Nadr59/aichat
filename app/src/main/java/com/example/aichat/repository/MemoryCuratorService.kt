@@ -231,11 +231,9 @@ class MemoryCuratorService(
             return@withContext original
         }
 
-        // ملاحظة: حاليًا enhancement مربوط بنفس المفتاح settings.memoryCuratorEnabled
-        // حفاظًا على سلوك الإعدادات الحالي في التطبيق.
+
         if (!settings.memoryCuratorEnabled) {
-            Log.d(TAG, "🧠 ENHANCE SKIPPED | curator disabled")
-            return@withContext original
+    Log.d(TAG, "🧠 ENHANCE | curator disabled but enhancement is allowed (decoupled)")
         }
 
         try {
