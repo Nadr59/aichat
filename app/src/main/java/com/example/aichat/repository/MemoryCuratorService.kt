@@ -25,6 +25,10 @@ class MemoryCuratorService(
             "\n\n⚠️ ملاحظة: هذا كل ما هو مؤكد ومتاح بخصوص هذا الموضوع تحديداً. " +
                 "لا تُضف تفاصيل تقنية أو تاريخية أو مؤسسية إضافية من معرفتك العامة " +
                 "غير مذكورة صراحة أعلاه، حتى لو بدت مألوفة أو مرتبطة لديك."
+
+        // Enhancement safety (بدون تقييد الهوية، فقط ضمان الارتباط)
+        private const val MAX_ENHANCED_LEN = 700
+        private const val MIN_KEYWORD_LEN = 3
     }
 
     private val client = OkHttpClient.Builder()
@@ -194,79 +198,98 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // Query enhancement
+    // Query enhancement (Identity-First)
     // ============================================================
 
+    /**
+     * Enhancement هدفه: توسيع الطلب بتقمّص الهوية بقوة.
+     *
+     * لا نقيّد الهوية هنا (حسب طلبك)، لكننا نضيف "تحقق ارتباط" فقط
+     * حتى لا يخرج النص بسؤال غير متعلق (نسخ أمثلة / انحراف موضوع).
+     */
     suspend fun enhanceQuery(
         userQuery: String,
         mediatorIdentityText: String,
         memoryCandidates: List<MemoryItem> = emptyList()
     ): String = withContext(Dispatchers.IO) {
 
+        val original = userQuery.trim()
+
         Log.d(
             TAG,
-            "🧠 ENHANCE START | queryLen=${userQuery.length} | " +
+            "🧠 ENHANCE START | queryLen=${original.length} | " +
                 "identityLen=${mediatorIdentityText.length} | " +
                 "memoryCandidates=${memoryCandidates.size}"
         )
 
-        if (mediatorIdentityText.isBlank()) {
-            Log.d(
-                TAG,
-                "🧠 ENHANCE SKIPPED | identity text is blank"
-            )
-
+        if (original.isBlank()) {
             return@withContext userQuery
         }
 
-        if (!settings.memoryCuratorEnabled) {
-            Log.d(
-                TAG,
-                "🧠 ENHANCE SKIPPED | curator disabled"
-            )
+        if (mediatorIdentityText.isBlank()) {
+            Log.d(TAG, "🧠 ENHANCE SKIPPED | identity text is blank")
+            return@withContext original
+        }
 
-            return@withContext userQuery
+        // ملاحظة: حاليًا enhancement مربوط بنفس المفتاح settings.memoryCuratorEnabled
+        // حفاظًا على سلوك الإعدادات الحالي في التطبيق.
+        if (!settings.memoryCuratorEnabled) {
+            Log.d(TAG, "🧠 ENHANCE SKIPPED | curator disabled")
+            return@withContext original
         }
 
         try {
             val prompt = MemoryCuratorPrompt.buildEnhancerPrompt(
-                userQuery = userQuery,
+                userQuery = original,
                 mediatorIdentityText = mediatorIdentityText
             )
 
-            val enhanced = callConfiguredProvider(prompt).trim()
+            var enhanced = callConfiguredProvider(prompt).trim()
+
+            enhanced = cleanupEnhancedText(enhanced)
+
+            // cap length (مهم خصوصًا للويب)
+            if (enhanced.length > MAX_ENHANCED_LEN) {
+                enhanced = enhanced.take(MAX_ENHANCED_LEN).trimEnd()
+            }
+
+            // validity checks
+            val isDifferent =
+                !enhanced.equals(original, ignoreCase = true)
+
+            val notNone =
+                !enhanced.equals("NONE", ignoreCase = true) &&
+                    enhanced.isNotBlank()
+
+            // ✅ أهم حارس: الناتج لازم يظل متعلقًا بالأصل
+            val related =
+                hasKeywordOverlap(original, enhanced)
 
             val isValid =
-                enhanced.isNotBlank() &&
-                    enhanced != userQuery &&
-                    !enhanced.equals("NONE", ignoreCase = true) &&
-                    enhanced.length > userQuery.length / 2
+                notNone &&
+                    isDifferent &&
+                    related &&
+                    // heuristic القديم (يبقى مفيدًا لكن ليس وحده)
+                    enhanced.length > original.length / 2
 
             if (isValid) {
                 Log.d(
                     TAG,
                     "🧠 ENHANCE SUCCESS | resultLen=${enhanced.length}"
                 )
-
                 enhanced
             } else {
                 Log.d(
                     TAG,
-                    "🧠 ENHANCE INVALID | returning original query"
+                    "🧠 ENHANCE INVALID | returning original | " +
+                        "different=$isDifferent related=$related len=${enhanced.length}"
                 )
-
-                userQuery
+                original
             }
 
         } catch (e: Exception) {
-
-            Log.w(
-                TAG,
-                "🧠 ENHANCE FAILED | ${e.message}",
-                e
-            )
-
-            userQuery
+            Log.w(TAG, "🧠 ENHANCE FAILED | ${e.message}", e)
+            original
         }
     }
 
@@ -313,6 +336,73 @@ class MemoryCuratorService(
     }
 
     // ============================================================
+    // Enhancement helpers
+    // ============================================================
+
+    /**
+     * تنظيف خفيف فقط:
+     * - إزالة Markdown fences
+     * - إزالة مقدمات شائعة
+     * - إزالة علامات اقتباس خارجية
+     *
+     * لا نعيد صياغة ولا نختصر المعنى.
+     */
+    private fun cleanupEnhancedText(text: String): String {
+        var t = text.trim()
+
+        // remove markdown fences if any
+        t = t.replace("```", "").trim()
+
+        // remove common leading wrappers (Arabic/English)
+        val prefixes = listOf(
+            "إليك السؤال المُحسّن:",
+            "إليك السؤال المحسن:",
+            "السؤال المُحسّن:",
+            "السؤال المحسن:",
+            "الطلب المُحسّن:",
+            "الطلب المحسن:",
+            "Enhanced:",
+            "Enhanced Query:",
+            "Improved:",
+            "Improved Query:"
+        )
+
+        prefixes.forEach { p ->
+            if (t.startsWith(p, ignoreCase = true)) {
+                t = t.removePrefix(p).trim()
+            }
+        }
+
+        // remove outer quotes
+        t = t.trim().trim('"').trim()
+
+        // normalize excessive whitespace
+        t = t.replace(Regex("\\s+"), " ").trim()
+
+        return t
+    }
+
+    /**
+     * حارس ارتباط بسيط يمنع انحراف الموضوع/نسخ أمثلة:
+     * يكفي وجود كلمة مفتاحية واحدة مشتركة بطول >= MIN_KEYWORD_LEN.
+     */
+    private fun hasKeywordOverlap(original: String, enhanced: String): Boolean {
+        fun keywords(s: String): Set<String> =
+            s.lowercase()
+                .replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+                .split(Regex("\\s+"))
+                .map { it.trim() }
+                .filter { it.length >= MIN_KEYWORD_LEN }
+                .toSet()
+
+        val a = keywords(original)
+        val b = keywords(enhanced)
+
+        if (a.isEmpty() || b.isEmpty()) return false
+        return a.any { it in b }
+    }
+
+    // ============================================================
     // Curator provider dispatcher
     // ============================================================
 
@@ -326,63 +416,33 @@ class MemoryCuratorService(
 
         return when (provider) {
 
-            // ====================================================
-            // Groq
-            // ====================================================
-
             "groq" -> {
                 val apiKey = settings.groqKey
+                if (apiKey.isBlank()) throw Exception("Groq API key is blank")
+                if (model.isBlank()) throw Exception("Groq curator model is blank")
 
-                if (apiKey.isBlank()) {
-                    throw Exception("Groq API key is blank")
-                }
-
-                if (model.isBlank()) {
-                    throw Exception("Groq curator model is blank")
-                }
-
-                Log.d(
-                    TAG,
-                    "🧠 CURATOR PROVIDER | Groq | model=$model | " +
-                        "forceJson=$forceJson"
-                )
+                Log.d(TAG, "🧠 CURATOR PROVIDER | Groq | model=$model | forceJson=$forceJson")
 
                 callOpenAiCompatibleProvider(
                     providerName = "Groq",
-                    baseUrl =
-                        "https://api.groq.com/openai/v1/chat/completions",
+                    baseUrl = "https://api.groq.com/openai/v1/chat/completions",
                     apiKey = apiKey,
                     model = model,
                     prompt = prompt,
                     forceJson = forceJson
                 )
             }
-
-            // ====================================================
-            // Mistral
-            // ====================================================
 
             "mistral" -> {
                 val apiKey = settings.mistralKey
+                if (apiKey.isBlank()) throw Exception("Mistral API key is blank")
+                if (model.isBlank()) throw Exception("Mistral curator model is blank")
 
-                if (apiKey.isBlank()) {
-                    throw Exception("Mistral API key is blank")
-                }
-
-                if (model.isBlank()) {
-                    throw Exception("Mistral curator model is blank")
-                }
-
-                Log.d(
-                    TAG,
-                    "🧠 CURATOR PROVIDER | Mistral | model=$model | " +
-                        "forceJson=$forceJson"
-                )
+                Log.d(TAG, "🧠 CURATOR PROVIDER | Mistral | model=$model | forceJson=$forceJson")
 
                 callOpenAiCompatibleProvider(
                     providerName = "Mistral",
-                    baseUrl =
-                        "https://api.mistral.ai/v1/chat/completions",
+                    baseUrl = "https://api.mistral.ai/v1/chat/completions",
                     apiKey = apiKey,
                     model = model,
                     prompt = prompt,
@@ -390,51 +450,21 @@ class MemoryCuratorService(
                 )
             }
 
-            // ====================================================
-            // Ollama
-            // ====================================================
-
             "ollama" -> {
-                if (model.isBlank()) {
-                    throw Exception(
-                        "Ollama curator model is blank"
-                    )
-                }
+                if (model.isBlank()) throw Exception("Ollama curator model is blank")
 
-                Log.d(
-                    TAG,
-                    "🧠 CURATOR PROVIDER | Ollama | model=$model | " +
-                        "forceJson=$forceJson"
-                )
+                Log.d(TAG, "🧠 CURATOR PROVIDER | Ollama | model=$model | forceJson=$forceJson")
 
-                callOllama(
-                    prompt = prompt,
-                    model = model,
-                    forceJson = forceJson
-                )
+                callOllama(prompt = prompt, model = model, forceJson = forceJson)
             }
-
-            // ====================================================
-            // Custom
-            // ====================================================
 
             "custom" -> {
                 val baseUrl = settings.customUrl.trim()
-
-                if (
-                    baseUrl.isBlank() ||
-                    model.isBlank()
-                ) {
-                    throw Exception(
-                        "Custom curator provider not configured"
-                    )
+                if (baseUrl.isBlank() || model.isBlank()) {
+                    throw Exception("Custom curator provider not configured")
                 }
 
-                Log.d(
-                    TAG,
-                    "🧠 CURATOR PROVIDER | Custom | model=$model | " +
-                        "forceJson=$forceJson"
-                )
+                Log.d(TAG, "🧠 CURATOR PROVIDER | Custom | model=$model | forceJson=$forceJson")
 
                 callCustomProvider(
                     prompt = prompt,
@@ -445,44 +475,17 @@ class MemoryCuratorService(
                 )
             }
 
-            // ====================================================
-            // Gemini
-            // ====================================================
-
             "gemini" -> {
                 val apiKey = settings.geminiKey
+                if (apiKey.isBlank()) throw Exception("Gemini API key is blank")
+                if (model.isBlank()) throw Exception("Gemini curator model is blank")
 
-                if (apiKey.isBlank()) {
-                    throw Exception(
-                        "Gemini API key is blank"
-                    )
-                }
+                Log.d(TAG, "🧠 CURATOR PROVIDER | Gemini | model=$model | forceJson=$forceJson")
 
-                if (model.isBlank()) {
-                    throw Exception(
-                        "Gemini curator model is blank"
-                    )
-                }
-
-                Log.d(
-                    TAG,
-                    "🧠 CURATOR PROVIDER | Gemini | model=$model | " +
-                        "forceJson=$forceJson"
-                )
-
-                callGeminiFlash(
-                    prompt = prompt,
-                    apiKey = apiKey,
-                    model = model,
-                    forceJson = forceJson
-                )
+                callGeminiFlash(prompt = prompt, apiKey = apiKey, model = model, forceJson = forceJson)
             }
 
-            else -> {
-                throw Exception(
-                    "Unsupported curator provider: $provider"
-                )
-            }
+            else -> throw Exception("Unsupported curator provider: $provider")
         }
     }
 
@@ -501,19 +504,12 @@ class MemoryCuratorService(
 
             "groq" -> {
                 val apiKey = settings.groqKey
-
-                if (apiKey.isBlank()) {
-                    throw Exception("Groq API key is blank")
-                }
-
-                if (model.isBlank()) {
-                    throw Exception("Groq curator model is blank")
-                }
+                if (apiKey.isBlank()) throw Exception("Groq API key is blank")
+                if (model.isBlank()) throw Exception("Groq curator model is blank")
 
                 callOpenAiCompatibleProvider(
                     providerName = "Groq",
-                    baseUrl =
-                        "https://api.groq.com/openai/v1/chat/completions",
+                    baseUrl = "https://api.groq.com/openai/v1/chat/completions",
                     apiKey = apiKey,
                     model = model,
                     prompt = prompt,
@@ -523,19 +519,12 @@ class MemoryCuratorService(
 
             "mistral" -> {
                 val apiKey = settings.mistralKey
-
-                if (apiKey.isBlank()) {
-                    throw Exception("Mistral API key is blank")
-                }
-
-                if (model.isBlank()) {
-                    throw Exception("Mistral curator model is blank")
-                }
+                if (apiKey.isBlank()) throw Exception("Mistral API key is blank")
+                if (model.isBlank()) throw Exception("Mistral curator model is blank")
 
                 callOpenAiCompatibleProvider(
                     providerName = "Mistral",
-                    baseUrl =
-                        "https://api.mistral.ai/v1/chat/completions",
+                    baseUrl = "https://api.mistral.ai/v1/chat/completions",
                     apiKey = apiKey,
                     model = model,
                     prompt = prompt,
@@ -544,29 +533,14 @@ class MemoryCuratorService(
             }
 
             "ollama" -> {
-                if (model.isBlank()) {
-                    throw Exception(
-                        "Ollama curator model is blank"
-                    )
-                }
-
-                callOllama(
-                    prompt = prompt,
-                    model = model,
-                    forceJson = false
-                )
+                if (model.isBlank()) throw Exception("Ollama curator model is blank")
+                callOllama(prompt = prompt, model = model, forceJson = false)
             }
 
             "custom" -> {
                 val baseUrl = settings.customUrl.trim()
-
-                if (
-                    baseUrl.isBlank() ||
-                    model.isBlank()
-                ) {
-                    throw Exception(
-                        "Custom curator provider not configured"
-                    )
+                if (baseUrl.isBlank() || model.isBlank()) {
+                    throw Exception("Custom curator provider not configured")
                 }
 
                 callCustomProvider(
@@ -580,32 +554,13 @@ class MemoryCuratorService(
 
             "gemini" -> {
                 val apiKey = settings.geminiKey
+                if (apiKey.isBlank()) throw Exception("Gemini API key is blank")
+                if (model.isBlank()) throw Exception("Gemini curator model is blank")
 
-                if (apiKey.isBlank()) {
-                    throw Exception(
-                        "Gemini API key is blank"
-                    )
-                }
-
-                if (model.isBlank()) {
-                    throw Exception(
-                        "Gemini curator model is blank"
-                    )
-                }
-
-                callGeminiFlash(
-                    prompt = prompt,
-                    apiKey = apiKey,
-                    model = model,
-                    forceJson = false
-                )
+                callGeminiFlash(prompt = prompt, apiKey = apiKey, model = model, forceJson = false)
             }
 
-            else -> {
-                throw Exception(
-                    "Unsupported curator provider: $provider"
-                )
-            }
+            else -> throw Exception("Unsupported curator provider: $provider")
         }
     }
 
@@ -623,17 +578,10 @@ class MemoryCuratorService(
         val generationConfig = JSONObject().apply {
             put("temperature", 0.2)
             put("maxOutputTokens", 500)
-
-            if (forceJson) {
-                put(
-                    "responseMimeType",
-                    "application/json"
-                )
-            }
+            if (forceJson) put("responseMimeType", "application/json")
         }
 
         val json = JSONObject().apply {
-
             put(
                 "contents",
                 JSONArray().apply {
@@ -642,25 +590,14 @@ class MemoryCuratorService(
                             put(
                                 "parts",
                                 JSONArray().apply {
-                                    put(
-                                        JSONObject().apply {
-                                            put(
-                                                "text",
-                                                prompt
-                                            )
-                                        }
-                                    )
+                                    put(JSONObject().apply { put("text", prompt) })
                                 }
                             )
                         }
                     )
                 }
             )
-
-            put(
-                "generationConfig",
-                generationConfig
-            )
+            put("generationConfig", generationConfig)
         }
 
         val request = Request.Builder()
@@ -668,41 +605,21 @@ class MemoryCuratorService(
                 "https://generativelanguage.googleapis.com/" +
                     "v1beta/models/$model:generateContent"
             )
-            .addHeader(
-                "x-goog-api-key",
-                apiKey
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .post(
-                json.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
+            .addHeader("x-goog-api-key", apiKey)
+            .addHeader("Content-Type", "application/json")
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
         client.newCall(request).execute().use { response ->
 
             if (!response.isSuccessful) {
-
-                val errorBody =
-                    response.body?.string()
-
-                throw Exception(
-                    "Gemini Flash failed: " +
-                        "${response.code} - " +
-                        errorBody
-                )
+                val errorBody = response.body?.string()
+                throw Exception("Gemini Flash failed: ${response.code} - $errorBody")
             }
 
             val body =
                 response.body?.string()
-                    ?: throw Exception(
-                        "Empty response from Gemini Flash"
-                    )
+                    ?: throw Exception("Empty response from Gemini Flash")
 
             return JSONObject(body)
                 .getJSONArray("candidates")
@@ -728,9 +645,7 @@ class MemoryCuratorService(
     ): String {
 
         val json = JSONObject().apply {
-
             put("model", model)
-
             put(
                 "messages",
                 JSONArray().apply {
@@ -742,57 +657,34 @@ class MemoryCuratorService(
                     )
                 }
             )
-
             put("temperature", 0.2)
             put("max_tokens", 500)
 
             if (forceJson) {
                 put(
                     "response_format",
-                    JSONObject().apply {
-                        put("type", "json_object")
-                    }
+                    JSONObject().apply { put("type", "json_object") }
                 )
             }
         }
 
         val request = Request.Builder()
             .url(baseUrl)
-            .addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .post(
-                json.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
         client.newCall(request).execute().use { response ->
 
             if (!response.isSuccessful) {
-
-                val errorBody =
-                    response.body?.string()
-
-                throw Exception(
-                    "$providerName curator failed: " +
-                        "${response.code} - " +
-                        errorBody
-                )
+                val errorBody = response.body?.string()
+                throw Exception("$providerName curator failed: ${response.code} - $errorBody")
             }
 
             val body =
                 response.body?.string()
-                    ?: throw Exception(
-                        "Empty response from $providerName"
-                    )
+                    ?: throw Exception("Empty response from $providerName")
 
             val message =
                 JSONObject(body)
@@ -800,17 +692,10 @@ class MemoryCuratorService(
                     .getJSONObject(0)
                     .getJSONObject("message")
 
-            val content =
-                message.optString(
-                    "content",
-                    ""
-                )
+            val content = message.optString("content", "")
 
             if (content.isBlank()) {
-                throw Exception(
-                    "$providerName returned empty content. " +
-                        "Raw: ${body.take(500)}"
-                )
+                throw Exception("$providerName returned empty content. Raw: ${body.take(500)}")
             }
 
             return content
@@ -828,10 +713,8 @@ class MemoryCuratorService(
     ): String {
 
         val json = JSONObject().apply {
-
             put("model", model)
             put("stream", false)
-
             put(
                 "messages",
                 JSONArray().apply {
@@ -843,70 +726,32 @@ class MemoryCuratorService(
                     )
                 }
             )
-
-            put(
-                "options",
-                JSONObject().apply {
-                    put("temperature", 0.2)
-                }
-            )
-
-            if (forceJson) {
-                put("format", "json")
-            }
+            put("options", JSONObject().apply { put("temperature", 0.2) })
+            if (forceJson) put("format", "json")
         }
 
         val request = Request.Builder()
-            .url(
-                "http://127.0.0.1:11434/api/chat"
-            )
-            .addHeader(
-                "Content-Type",
-                "application/json"
-            )
-            .post(
-                json.toString()
-                    .toRequestBody(
-                        "application/json".toMediaType()
-                    )
-            )
+            .url("http://127.0.0.1:11434/api/chat")
+            .addHeader("Content-Type", "application/json")
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
         client.newCall(request).execute().use { response ->
 
             if (!response.isSuccessful) {
-
-                val errorBody =
-                    response.body?.string()
-
-                throw Exception(
-                    "Ollama curator failed: " +
-                        "${response.code} - " +
-                        errorBody
-                )
+                val errorBody = response.body?.string()
+                throw Exception("Ollama curator failed: ${response.code} - $errorBody")
             }
 
             val body =
                 response.body?.string()
-                    ?: throw Exception(
-                        "Empty response from Ollama"
-                    )
+                    ?: throw Exception("Empty response from Ollama")
 
-            val message =
-                JSONObject(body)
-                    .getJSONObject("message")
-
-            val content =
-                message.optString(
-                    "content",
-                    ""
-                )
+            val message = JSONObject(body).getJSONObject("message")
+            val content = message.optString("content", "")
 
             if (content.isBlank()) {
-                throw Exception(
-                    "Ollama returned empty content. " +
-                        "Raw: ${body.take(500)}"
-                )
+                throw Exception("Ollama returned empty content. Raw: ${body.take(500)}")
             }
 
             return content
@@ -926,9 +771,7 @@ class MemoryCuratorService(
     ): String {
 
         val json = JSONObject().apply {
-
             put("model", model)
-
             put(
                 "messages",
                 JSONArray().apply {
@@ -940,16 +783,13 @@ class MemoryCuratorService(
                     )
                 }
             )
-
             put("temperature", 0.2)
             put("max_tokens", 2000)
 
             if (forceJson) {
                 put(
                     "response_format",
-                    JSONObject().apply {
-                        put("type", "json_object")
-                    }
+                    JSONObject().apply { put("type", "json_object") }
                 )
             }
         }
@@ -957,45 +797,23 @@ class MemoryCuratorService(
         val requestBuilder =
             Request.Builder()
                 .url(baseUrl)
-                .addHeader(
-                    "Content-Type",
-                    "application/json"
-                )
-                .post(
-                    json.toString()
-                        .toRequestBody(
-                            "application/json".toMediaType()
-                        )
-                )
+                .addHeader("Content-Type", "application/json")
+                .post(json.toString().toRequestBody("application/json".toMediaType()))
 
         if (apiKey.isNotBlank()) {
-            requestBuilder.addHeader(
-                "Authorization",
-                "Bearer $apiKey"
-            )
+            requestBuilder.addHeader("Authorization", "Bearer $apiKey")
         }
 
-        client.newCall(
-            requestBuilder.build()
-        ).execute().use { response ->
+        client.newCall(requestBuilder.build()).execute().use { response ->
 
             if (!response.isSuccessful) {
-
-                val errorBody =
-                    response.body?.string()
-
-                throw Exception(
-                    "Custom curator failed: " +
-                        "${response.code} - " +
-                        errorBody
-                )
+                val errorBody = response.body?.string()
+                throw Exception("Custom curator failed: ${response.code} - $errorBody")
             }
 
             val body =
                 response.body?.string()
-                    ?: throw Exception(
-                        "Empty response from custom curator"
-                    )
+                    ?: throw Exception("Empty response from custom curator")
 
             val message =
                 JSONObject(body)
@@ -1004,34 +822,19 @@ class MemoryCuratorService(
                     .getJSONObject("message")
 
             val content =
-                message.optString(
-                    "content",
-                    ""
-                ).takeIf {
-                    it.isNotBlank() &&
-                        it != "null"
-                }
+                message.optString("content", "")
+                    .takeIf { it.isNotBlank() && it != "null" }
 
-            if (content != null) {
-                return content
-            }
+            if (content != null) return content
 
             val reasoning =
-                message.optString(
-                    "reasoning",
-                    ""
-                ).takeIf {
-                    it.isNotBlank() &&
-                        it != "null"
-                }
+                message.optString("reasoning", "")
+                    .takeIf { it.isNotBlank() && it != "null" }
 
-            if (reasoning != null) {
-                return reasoning
-            }
+            if (reasoning != null) return reasoning
 
             throw Exception(
-                "Both 'content' and 'reasoning' fields " +
-                    "are empty. Raw: ${body.take(300)}"
+                "Both 'content' and 'reasoning' fields are empty. Raw: ${body.take(300)}"
             )
         }
     }
@@ -1045,11 +848,8 @@ class MemoryCuratorService(
         candidates: List<MemoryItem>
     ): CuratorResult {
 
-        val jsonText =
-            extractJsonObject(rawResponse)
-
-        val json =
-            JSONObject(jsonText)
+        val jsonText = extractJsonObject(rawResponse)
+        val json = JSONObject(jsonText)
 
         val validIds =
             candidates
@@ -1082,20 +882,14 @@ class MemoryCuratorService(
             irrelevant
                 .filter { it in validIds }
                 .distinct()
-                .filterNot {
-                    it in sanitizedSelected
-                }
+                .filterNot { it in sanitizedSelected }
 
         if (selected.isEmpty()) {
-
             return CuratorResult(
                 selectedIds = emptyList(),
                 reasoning =
-                    if (reasoning.isNotBlank()) {
-                        reasoning
-                    } else {
-                        "No directly relevant memory selected."
-                    },
+                    if (reasoning.isNotBlank()) reasoning
+                    else "No directly relevant memory selected.",
                 irrelevantIds = sanitizedIrrelevant,
                 isFallback = false,
                 fallbackReason = null,
@@ -1104,7 +898,6 @@ class MemoryCuratorService(
         }
 
         if (sanitizedSelected.isEmpty()) {
-
             return fallbackResult(
                 candidates = candidates,
                 reason = "All selected IDs were invalid",
@@ -1115,11 +908,8 @@ class MemoryCuratorService(
         return CuratorResult(
             selectedIds = sanitizedSelected,
             reasoning =
-                if (reasoning.isNotBlank()) {
-                    reasoning
-                } else {
-                    "Selected relevant memories."
-                },
+                if (reasoning.isNotBlank()) reasoning
+                else "Selected relevant memories.",
             irrelevantIds = sanitizedIrrelevant,
             isFallback = false,
             fallbackReason = null,
@@ -1131,30 +921,19 @@ class MemoryCuratorService(
     // JSON helpers
     // ============================================================
 
-    private fun extractJsonObject(
-        raw: String
-    ): String {
+    private fun extractJsonObject(raw: String): String {
 
         val trimmed = raw.trim()
 
-        if (
-            trimmed.startsWith("{") &&
-            trimmed.endsWith("}")
-        ) {
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             return trimmed
         }
 
         val start = trimmed.indexOf('{')
         val end = trimmed.lastIndexOf('}')
 
-        if (
-            start >= 0 &&
-            end > start
-        ) {
-            return trimmed.substring(
-                start,
-                end + 1
-            )
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1)
         }
 
         throw Exception(
@@ -1163,9 +942,7 @@ class MemoryCuratorService(
         )
     }
 
-    private fun jsonArrayToLongs(
-        array: JSONArray?
-    ): List<Long> {
+    private fun jsonArrayToLongs(array: JSONArray?): List<Long> {
 
         if (array == null) {
             return emptyList()
@@ -1174,18 +951,9 @@ class MemoryCuratorService(
         val result = mutableListOf<Long>()
 
         for (i in 0 until array.length()) {
-
             when (val value = array.opt(i)) {
-
-                is Number -> {
-                    result.add(value.toLong())
-                }
-
-                is String -> {
-                    value.toLongOrNull()?.let {
-                        result.add(it)
-                    }
-                }
+                is Number -> result.add(value.toLong())
+                is String -> value.toLongOrNull()?.let { result.add(it) }
             }
         }
 
