@@ -88,9 +88,10 @@ object MemoryCuratorPrompt {
     }
 
     /**
-     * ✅ Prompt محسن للـ Query Enhancer
-     * - يعالج مشكلة اللغة: القالب (Labels) يصبح عربي/إنجليزي حسب لغة سؤال المستخدم.
-     * - يلزم شكل bullets واضح "- " لتسهيل الـ parsing.
+     * ✅ Query Enhancer (JSON minimal)
+     * - لا نقاط، لا قالب "سؤال:".
+     * - المخرجات JSON فقط لتفادي فشل الالتقاط.
+     * - مرونة الهوية عالية: المستخدم يكتب قواعد التحويل كما يريد.
      */
     fun buildEnhancerPrompt(
         userQuery: String,
@@ -99,53 +100,27 @@ object MemoryCuratorPrompt {
 
         val trimmedQuery = userQuery.trim()
         val isArabic = containsArabic(trimmedQuery)
-
-        val alertLabel = if (isArabic) "تنبيه" else "Alert"
-        val questionLabel = if (isArabic) "سؤال" else "Question"
-
         fun a(ar: String, en: String) = if (isArabic) ar else en
 
-        appendLine(a("أنت Query Enhancer محترف.", "You are a professional Query Enhancer."))
-        appendLine(a("مهمتك الوحيدة: تحسين وإثراء طلب المستخدم.", "Your only task: refine and enrich the user's request."))
+        appendLine(a(
+            "أنت Query Enhancer. مهمتك الوحيدة: إعادة صياغة طلب المستخدم ليصبح أدق وأكثر قابلية للإجابة (بدون الإجابة عليه).",
+            "You are a Query Enhancer. Your only task: rewrite the user's request to be clearer and more answerable (without answering it)."
+        ))
         appendLine()
 
-        // Identity handling
         if (mediatorIdentityText.isBlank()) {
-            appendLine(a("حالة الهوية: لا توجد هوية مخصصة.", "Identity status: no custom identity is provided."))
             appendLine(a(
-                "المطلوب: حسّن السؤال بشكل محايد بقواعد عامة فقط، ولا تخترع هوية من عندك.",
-                "Requirement: enhance neutrally using general rules only; do NOT invent an identity."
+                "لا توجد هوية مخصصة. حسّن الطلب بقواعد عامة فقط.",
+                "No custom identity provided. Enhance using general rules only."
             ))
         } else {
             appendLine(a(
-                "قاعدة الأولوية القصوى (Identity-First):",
-                "Highest priority rule (Identity-First):"
+                "هوية/قواعد التحويل (تعليمات عليا يجب الالتزام بها قدر الإمكان دون تغيير نية المستخدم):",
+                "Identity / transformation rules (high-priority instructions; follow as much as possible without changing intent):"
             ))
-            appendLine(a(
-                "يجب التقيد بالهوية التالية كقواعد إلزامية لتحسين الطلب.",
-                "You must follow the identity below as mandatory design rules for the enhancement."
-            ))
-            appendLine(a(
-                "اعتبر كل كلمة في الهوية أمراً واجب التنفيذ ما أمكن دون تحريف سؤال المستخدم.",
-                "Treat every identity instruction as mandatory whenever it doesn't distort the user's intent."
-            ))
-            appendLine(a("الهوية المعتمدة:", "Approved identity:"))
             appendLine("---")
             appendLine(mediatorIdentityText.trim())
             appendLine("---")
-            appendLine()
-            appendLine(a(
-                "منطق التقيد:",
-                "Compliance logic:"
-            ))
-            appendLine(a(
-                "أ) إذا كان السؤال مرتبطاً بالهوية: طبّق الهوية بصرامة في صياغة السؤال والنقاط.",
-                "A) If the query is related to the identity: apply it strictly in the question and bullets."
-            ))
-            appendLine(a(
-                "ب) إذا كان السؤال بعيداً تماماً عن الهوية: حسّن بقواعد عامة محايدة، وابدأ بتنبيه واضح أن الطلب لا ينتمي للهوية.",
-                "B) If the query is completely unrelated: enhance with neutral general rules, and start with a clear alert that it doesn't belong to the identity."
-            ))
         }
         appendLine()
 
@@ -153,45 +128,32 @@ object MemoryCuratorPrompt {
         appendLine("\"$trimmedQuery\"")
         appendLine()
 
-        appendLine(a("قواعد لا يمكن كسرها:", "Unbreakable rules:"))
-        appendLine(a("1) ممنوع الإجابة على السؤال. حسّن صياغته فقط.", "1) Do NOT answer the question. Only rewrite/enhance the query."))
-        appendLine(a("2) ممنوع تغيير موضوع السؤال أو نية المستخدم.", "2) Do NOT change the topic or the user's intent."))
-        appendLine(a("3) لا تكتب أي مقدمة/شرح/ميتا-كلام.", "3) No preface/explanation/meta talk."))
-        appendLine(a("4) لا تستخدم Markdown أو ```.", "4) No Markdown and no code fences."))
-        appendLine()
-
-        appendLine(a("قواعد التنسيق الإلزامية:", "Mandatory formatting rules:"))
-        appendLine(a("- استخدم نفس لغة المستخدم تماماً.", "- Use the exact same language as the user."))
-        appendLine(a("- استخدم الوسمين حرفياً حسب اللغة:", "- Use these labels literally depending on the language:"))
-        appendLine(a("  - عربي: \"$questionLabel:\" و \"$alertLabel:\"", "  - English: \"$questionLabel:\" and \"$alertLabel:\""))
-        appendLine(a("- كل نقطة يجب أن تبدأ حرفياً بـ \"- \" (شرطة ثم مسافة).", "- Every bullet MUST start with \"- \" (hyphen then space)."))
-        appendLine()
-
-        appendLine(a("صيغة الإخراج الإلزامية (اختر حالة واحدة فقط):", "Required output format (choose exactly one case):"))
-        appendLine()
-
-        appendLine(a("الحالة 1 (مرتبط بالهوية):", "Case 1 (related to identity):"))
-        appendLine("$questionLabel: <${a("سؤال/طلب مُحسّن واحد فقط", "one single improved question/request")}>")
-        appendLine("- <${a("نقطة توضيحية 1", "bullet 1")}>")
-        appendLine("- <${a("نقطة توضيحية 2", "bullet 2")}>")
-        appendLine("- <${a("نقطة توضيحية 3", "bullet 3")}>")
-        appendLine("- <${a("نقطة توضيحية 4", "bullet 4")}>")
-        appendLine("- <${a("نقطة توضيحية 5", "bullet 5")}>")
-        appendLine()
-
-        appendLine(a("الحالة 2 (بعيد عن الهوية):", "Case 2 (unrelated to identity):"))
-        appendLine("$alertLabel: ${a("هذا الطلب لا ينتمي إلى مجال الهوية المحددة، تم تحسينه بقواعد عامة.", "This request does not belong to the provided identity domain; it was enhanced using general rules.")}")
-        appendLine("$questionLabel: <${a("سؤال/طلب مُحسّن واحد فقط", "one single improved question/request")}>")
-        appendLine("- <${a("نقطة توضيحية 1", "bullet 1")}>")
-        appendLine("- <${a("نقطة توضيحية 2", "bullet 2")}>")
-        appendLine("- <${a("نقطة توضيحية 3", "bullet 3")}>")
-        appendLine("- <${a("نقطة توضيحية 4", "bullet 4")}>")
-        appendLine("- <${a("نقطة توضيحية 5", "bullet 5")}>")
+        appendLine(a("قواعد صارمة:", "Strict rules:"))
+        appendLine(a("1) ممنوع الإجابة على الطلب. فقط أعد صياغته.", "1) Do NOT answer. Only rewrite the query."))
+        appendLine(a("2) لا تغيّر موضوع الطلب أو نية المستخدم.", "2) Do NOT change the topic or intent."))
+        appendLine(a("3) لا تخترع حقائق/أرقام/مدة زمنية غير مذكورة. إذا احتجت معلومة غير موجودة، اجعلها شرطاً/placeholder داخل نفس العبارة بدل الافتراض.",
+            "3) Do NOT invent facts/numbers/time ranges not stated. If missing info is needed, include it as a condition/placeholder in the same sentence instead of assuming."))
+        appendLine(a("4) لا تستخدم Markdown أو ```.", "4) No Markdown or code fences."))
         appendLine()
 
         appendLine(a(
-            "مهم جداً: أخرج 5 نقاط بالضبط ولا تكتب أي نص خارج القالب.",
-            "Very important: output exactly 5 bullets and no text outside the template."
+            "أخرج JSON فقط بدون أي نص آخر. الشكل الإلزامي (مفتاحان فقط):",
+            "Output JSON only with no extra text. Required schema (exactly two keys):"
+        ))
+        appendLine("""{"rewritten":"...","outOfDomain":false}""")
+        appendLine()
+
+        appendLine(a(
+            "شرح الحقول:",
+            "Field rules:"
+        ))
+        appendLine(a(
+            "- rewritten: جملة واحدة (أو جملتين كحد أقصى) تمثل الطلب بعد التحسين.",
+            "- rewritten: one sentence (max two) representing the improved query."
+        ))
+        appendLine(a(
+            "- outOfDomain: true إذا كان الطلب خارج نطاق الهوية تماماً ولا يمكن تطبيقها منطقياً، وإلا false.",
+            "- outOfDomain: true if the request is completely outside the identity domain, otherwise false."
         ))
     }
 
@@ -204,7 +166,6 @@ object MemoryCuratorPrompt {
     ): String = style.buildPrompt(userQuery)
 
     private fun containsArabic(text: String): Boolean {
-        // Simple heuristic: any Arabic-range char => treat as Arabic
         return Regex("[\\u0600-\\u06FF]").containsMatchIn(text)
     }
 }
