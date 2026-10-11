@@ -27,14 +27,8 @@ class MemoryCuratorService(
                 "لا تُضف تفاصيل تقنية أو تاريخية أو مؤسسية إضافية من معرفتك العامة " +
                 "غير مذكورة صراحة أعلاه، حتى لو بدت مألوفة أو مرتبطة لديك."
 
-        // Enhancement safety
-        private const val MAX_ENHANCED_LEN = 900
+        private const val MAX_REWRITE_LEN = 700
         private const val MIN_KEYWORD_LEN = 2
-        private const val MIN_BULLETS = 0
-        private const val MAX_BULLETS = 5
-
-        private val ALERT_LABELS = listOf("تنبيه", "alert")
-        private val QUESTION_LABELS = listOf("سؤال", "question")
     }
 
     private val client = OkHttpClient.Builder()
@@ -71,10 +65,7 @@ class MemoryCuratorService(
         val curatorProvider = settings.memoryCuratorProvider
 
         try {
-            val result = callCuratorProvider(
-                prompt = prompt,
-                forceJson = false
-            )
+            val result = callCuratorProvider(prompt = prompt, forceJson = false)
 
             if (result.isBlank() || result.trim().equals("NONE", ignoreCase = true)) {
                 Log.d(TAG, "⚪ Curator found nothing relevant")
@@ -86,11 +77,7 @@ class MemoryCuratorService(
             }
 
         } catch (e: Exception) {
-            Log.w(
-                TAG,
-                "⚠️ Curator ($curatorProvider) EXCEPTION: ${e::class.java.simpleName}: ${e.message}",
-                e
-            )
+            Log.w(TAG, "⚠️ Curator ($curatorProvider) EXCEPTION: ${e::class.java.simpleName}: ${e.message}", e)
             fallbackBuilder.build(candidates)
         }
     }
@@ -107,10 +94,7 @@ class MemoryCuratorService(
         Log.d(TAG, "NEW CURATE START | query=$userQuery | candidates=${candidates.size}")
 
         if (candidates.isEmpty()) {
-            return@withContext CuratorResult(
-                selectedIds = emptyList(),
-                reasoning = "No candidates available."
-            )
+            return@withContext CuratorResult(selectedIds = emptyList(), reasoning = "No candidates available.")
         }
 
         if (!settings.memoryCuratorEnabled) {
@@ -138,7 +122,7 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // Query enhancement
+    // Query enhancement (JSON minimal)
     // ============================================================
 
     suspend fun enhanceQuery(
@@ -148,10 +132,7 @@ class MemoryCuratorService(
     ): String = withContext(Dispatchers.IO) {
 
         val original = userQuery.trim()
-        Log.d(
-            TAG,
-            "🧠 ENHANCE START | queryLen=${original.length} | identityLen=${mediatorIdentityText.length} | memoryCandidates=${memoryCandidates.size}"
-        )
+        Log.d(TAG, "🧠 ENHANCE START | queryLen=${original.length} | identityLen=${mediatorIdentityText.length} | memoryCandidates=${memoryCandidates.size}")
 
         if (original.isBlank()) return@withContext userQuery
 
@@ -161,26 +142,24 @@ class MemoryCuratorService(
                 mediatorIdentityText = mediatorIdentityText
             )
 
-            val raw = callCuratorProvider(prompt = prompt, forceJson = false).trim()
+            // ✅ forceJson=true لأننا نريد JSON minimal دائماً
+            val raw = callCuratorProvider(prompt = prompt, forceJson = true).trim()
             Log.d(TAG, "🧠 ENHANCE RAW | ${raw.take(500)}")
 
-            val enhanced = cleanupEnhancedText(raw)
-            Log.d(TAG, "🧠 ENHANCE CLEAN | len=${enhanced.length} | ${enhanced.take(300)}")
+            val rewritten = parseEnhancerJson(raw)?.let { cleanupRewrittenText(it) }.orEmpty()
 
-            val notNone = enhanced.isNotBlank() && !enhanced.equals("NONE", ignoreCase = true)
-            val related = hasKeywordOverlap(original, enhanced)
-            val looksFormatted = looksLikeQuestionWithBullets(enhanced)
-
-            val isValid = notNone && related && looksFormatted
+            val isValid =
+                rewritten.isNotBlank() &&
+                    !rewritten.equals("NONE", ignoreCase = true) &&
+                    rewritten.length >= 4 &&
+                    rewritten.length <= MAX_REWRITE_LEN &&
+                    hasKeywordOverlap(original, rewritten)
 
             if (isValid) {
-                Log.d(TAG, "🧠 ENHANCE SUCCESS | resultLen=${enhanced.length}")
-                enhanced
+                Log.d(TAG, "🧠 ENHANCE SUCCESS | len=${rewritten.length} | ${rewritten.take(200)}")
+                rewritten
             } else {
-                Log.d(
-                    TAG,
-                    "🧠 ENHANCE INVALID | returning original | related=$related formatted=$looksFormatted rawLen=${raw.length} finalLen=${enhanced.length}"
-                )
+                Log.d(TAG, "🧠 ENHANCE INVALID -> original | rewrittenLen=${rewritten.length}")
                 original
             }
 
@@ -191,7 +170,7 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // Style refinement
+    // Style refinement (كما هو)
     // ============================================================
 
     suspend fun refineQueryStyle(
@@ -210,134 +189,29 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // Enhancement helpers
+    // Enhancer JSON parser + cleanup
     // ============================================================
 
-    private fun cleanupEnhancedText(text: String): String {
-        var t = text.trim().replace("```", "").trim()
-        val rawLines = t.lines().map { it.trim() }.filter { it.isNotBlank() }
-        if (rawLines.isEmpty()) return ""
+    private fun parseEnhancerJson(rawResponse: String): String? {
+        val jsonText = extractJsonObject(rawResponse)
+        val obj = JSONObject(jsonText)
 
-        // Remove common meta lines (Arabic + English)
-        val metaPatterns = listOf(
-            Regex("^كمساعد", RegexOption.IGNORE_CASE),
-            Regex("^ك(ـ|)مساعد", RegexOption.IGNORE_CASE),
-            Regex("إليك\\s+(الطلب|السؤال)\\s+المحس", RegexOption.IGNORE_CASE),
-            Regex("سأقوم\\s+ب", RegexOption.IGNORE_CASE),
-            Regex("يتطلب\\s+توضيح", RegexOption.IGNORE_CASE),
-            Regex("^as an ai", RegexOption.IGNORE_CASE),
-            Regex("^i will", RegexOption.IGNORE_CASE),
-            Regex("^here(?:'s| is)\\s+(the\\s+)?(improved|enhanced)", RegexOption.IGNORE_CASE)
-        )
-
-        val lines = rawLines
-            .filterNot { line -> metaPatterns.any { it.containsMatchIn(line) } }
-            .ifEmpty { rawLines }
-
-        // Detect optional alert line (Arabic/English)
-        val firstLine = lines.firstOrNull() ?: return ""
-        val isAlertLine = isLabeledLine(firstLine, ALERT_LABELS)
-        val alertLine = if (isAlertLine) normalizeLabelLine(firstLine) else null
-
-        // Find question line (Arabic/English)
-        val startIndex = if (isAlertLine) 1 else 0
-        val qIndex = lines.drop(startIndex).indexOfFirst { isLabeledLine(it, QUESTION_LABELS) }
-            .let { if (it >= 0) it + startIndex else -1 }
-
-        // Fallback: if model didn't write "سؤال:"/"Question:", treat the first non-alert line as question.
-        val actualQIndex = if (qIndex >= 0) qIndex else startIndex
-        val qLine = lines.getOrNull(actualQIndex) ?: return ""
-
-        // Decide language style based on label used, otherwise by text content
-        val usesEnglishLabel = qLine.trimStart().startsWith("Question", ignoreCase = true)
-        val questionLabel = if (usesEnglishLabel) "Question" else "سؤال"
-        val alertLabel = if (usesEnglishLabel) "Alert" else "تنبيه"
-
-        val questionText = if (isLabeledLine(qLine, QUESTION_LABELS)) {
-            stripAnyLabel(qLine).trim().trim('"').trim()
-        } else {
-            qLine.trim().trim('"').trim()
-        }
-        if (questionText.length < 4) return ""
-
-        fun toBullet(line: String): String? {
-            val s = line.trim()
-            if (s.isBlank()) return null
-            if (isLabeledLine(s, ALERT_LABELS) || isLabeledLine(s, QUESTION_LABELS)) return null
-
-            val normalized = when {
-                s.startsWith("•") -> s.removePrefix("•").trim()
-                s.startsWith("-") -> s.removePrefix("-").trim()
-                s.startsWith("*") -> s.removePrefix("*").trim()
-                s.startsWith("—") -> s.removePrefix("—").trim()
-                s.startsWith("–") -> s.removePrefix("–").trim()
-                // numeric bullets: 1) / ١) / 1. / ١. / 1- ...
-                Regex("^[0-9٠-٩]+\\s*[.)-]\\s+").containsMatchIn(s) ->
-                    s.replace(Regex("^[0-9٠-٩]+\\s*[.)-]\\s+"), "").trim()
-                else -> return null
-            }
-            return normalized.takeIf { it.length >= 2 }?.let { "- $it" }
-        }
-
-        val afterQ = lines.drop(actualQIndex + 1)
-
-        val bullets = mutableListOf<String>()
-        afterQ.forEach { line -> toBullet(line)?.let { bullets.add(it) } }
-
-        // Soft fallback: if no bullets were recognized, convert normal lines to bullets
-        if (bullets.isEmpty()) {
-            afterQ.take(MAX_BULLETS).forEach { line ->
-                val s = line.trim()
-                if (s.isNotBlank() && !isLabeledLine(s, ALERT_LABELS) && !isLabeledLine(s, QUESTION_LABELS)) {
-                    bullets.add("- $s")
-                }
-            }
-        }
-
-        val finalBullets = bullets
-            .map { it.replace(Regex("\\s+"), " ").trim() }
-            .distinct()
-            .filter { it.length >= 4 }
-            .take(MAX_BULLETS)
-
-        // Normalize alert line label if present
-        val normalizedAlert = alertLine?.let {
-            // If the model used English output but alert came Arabic, or vice versa, normalize to chosen alertLabel
-            val msg = stripAnyLabel(it).trim()
-            "$alertLabel: $msg"
-        }
-
-        val built = buildString {
-            if (!normalizedAlert.isNullOrBlank()) appendLine(normalizedAlert)
-            appendLine("$questionLabel: $questionText")
-            finalBullets.forEach { appendLine(it) }
-        }.trim()
-
-        return if (built.length <= MAX_ENHANCED_LEN) built else built.take(MAX_ENHANCED_LEN).trimEnd()
+        // مفاتيحنا الرسمية: rewritten + outOfDomain
+        val rewritten = obj.optString("rewritten", "").trim()
+        if (rewritten.isBlank()) return null
+        return rewritten
     }
 
-    private fun looksLikeQuestionWithBullets(text: String): Boolean {
-        if (text.isBlank()) return false
-        val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
-        if (lines.isEmpty()) return false
-
-        var idx = 0
-        if (isLabeledLine(lines[0], ALERT_LABELS)) {
-            if (lines.size < 2) return false
-            idx = 1
-        }
-
-        val qLine = lines.getOrNull(idx) ?: return false
-        if (!isLabeledLine(qLine, QUESTION_LABELS)) return false
-
-        val q = stripAnyLabel(qLine).trim()
-        if (q.length < 4) return false
-
-        val bulletCount = lines.drop(idx + 1).count { it.startsWith("- ") }
-        return bulletCount in MIN_BULLETS..MAX_BULLETS
+    private fun cleanupRewrittenText(text: String): String {
+        var t = text.trim()
+        t = t.replace("```", "").trim()
+        t = t.trim().trim('"').trim()
+        // توحيد المسافات والأسطر (نريد عبارة “يلعب بها المستخدم” بدون فوضى)
+        t = t.replace(Regex("\\s+"), " ").trim()
+        return if (t.length <= MAX_REWRITE_LEN) t else t.take(MAX_REWRITE_LEN).trimEnd()
     }
 
-    private fun hasKeywordOverlap(original: String, enhanced: String): Boolean {
+    private fun hasKeywordOverlap(original: String, rewritten: String): Boolean {
         fun keywords(s: String): Set<String> =
             s.lowercase()
                 .replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
@@ -346,46 +220,14 @@ class MemoryCuratorService(
                 .filter { it.length >= MIN_KEYWORD_LEN }
                 .toSet()
 
-        val cleanEnhanced = enhanced.lines()
-            .filterNot { isLabeledLine(it, ALERT_LABELS) }
-            .joinToString(" ")
-
         val a = keywords(original)
-        val b = keywords(cleanEnhanced)
+        val b = keywords(rewritten)
 
-        // If original is too short / yields no keywords, don't block enhancement.
+        // إذا السؤال قصير جداً، لا نمنع التحسين بسبب overlap
         if (a.isEmpty()) return true
         if (b.isEmpty()) return false
 
         return a.any { it in b }
-    }
-
-    private fun isLabeledLine(line: String, labels: List<String>): Boolean {
-        val t = line.trimStart()
-        return labels.any { lbl ->
-            t.startsWith("$lbl:", ignoreCase = true) || t.startsWith("$lbl :", ignoreCase = true)
-        }
-    }
-
-    private fun stripAnyLabel(line: String): String {
-        val t = line.trimStart()
-        // Removes "سؤال:" / "Question:" / "تنبيه:" / "Alert:" generically
-        val idx = t.indexOf(':')
-        if (idx <= 0) return t
-        val head = t.substring(0, idx).trim()
-        val tail = t.substring(idx + 1)
-        val isKnown = (QUESTION_LABELS + ALERT_LABELS).any { it.equals(head, ignoreCase = true) }
-        return if (isKnown) tail else t
-    }
-
-    private fun normalizeLabelLine(line: String): String {
-        // Just normalize spaces around ":" for label lines
-        val t = line.trim()
-        val idx = t.indexOf(':')
-        if (idx < 0) return t
-        val head = t.substring(0, idx).trim()
-        val tail = t.substring(idx + 1).trim()
-        return "$head: $tail"
     }
 
     // ============================================================
@@ -401,7 +243,7 @@ class MemoryCuratorService(
                 val apiKey = settings.groqKey
                 if (apiKey.isBlank()) throw Exception("Groq API key is blank")
                 if (model.isBlank()) throw Exception("Groq curator model is blank")
-                callOpenAiCompatibleProvider(
+                callOpenAiCompatibleProviderWithJsonRetry(
                     providerName = "Groq",
                     baseUrl = "https://api.groq.com/openai/v1/chat/completions",
                     apiKey = apiKey,
@@ -415,7 +257,7 @@ class MemoryCuratorService(
                 val apiKey = settings.mistralKey
                 if (apiKey.isBlank()) throw Exception("Mistral API key is blank")
                 if (model.isBlank()) throw Exception("Mistral curator model is blank")
-                callOpenAiCompatibleProvider(
+                callOpenAiCompatibleProviderWithJsonRetry(
                     providerName = "Mistral",
                     baseUrl = "https://api.mistral.ai/v1/chat/completions",
                     apiKey = apiKey,
@@ -433,7 +275,7 @@ class MemoryCuratorService(
             "custom" -> {
                 val baseUrl = settings.customUrl.trim()
                 if (baseUrl.isBlank() || model.isBlank()) throw Exception("Custom curator provider not configured")
-                callCustomProvider(prompt, baseUrl, settings.customKey, model, forceJson)
+                callCustomProviderWithJsonRetry(prompt, baseUrl, settings.customKey, model, forceJson)
             }
 
             "gemini" -> {
@@ -454,26 +296,18 @@ class MemoryCuratorService(
     private fun callGeminiFlash(prompt: String, apiKey: String, model: String, forceJson: Boolean): String {
         val generationConfig = JSONObject().apply {
             put("temperature", 0.2)
-            put("maxOutputTokens", 500)
+            put("maxOutputTokens", 600)
             if (forceJson) put("responseMimeType", "application/json")
         }
 
         val json = JSONObject().apply {
-            put(
-                "contents",
-                JSONArray().apply {
-                    put(
-                        JSONObject().apply {
-                            put(
-                                "parts",
-                                JSONArray().apply {
-                                    put(JSONObject().apply { put("text", prompt) })
-                                }
-                            )
-                        }
-                    )
-                }
-            )
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().apply { put("text", prompt) })
+                    })
+                })
+            })
             put("generationConfig", generationConfig)
         }
 
@@ -485,9 +319,7 @@ class MemoryCuratorService(
             .build()
 
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw Exception("Gemini failed: ${response.code} - ${response.body?.string()}")
-            }
+            if (!response.isSuccessful) throw Exception("Gemini failed: ${response.code} - ${response.body?.string()}")
             val body = response.body?.string() ?: throw Exception("Empty response from Gemini")
             return JSONObject(body)
                 .getJSONArray("candidates")
@@ -499,7 +331,11 @@ class MemoryCuratorService(
         }
     }
 
-    private fun callOpenAiCompatibleProvider(
+    /**
+     * ✅ مهم: بعض المزودين OpenAI-compatible قد لا يدعمون response_format.
+     * لذلك إذا forceJson وفشل الطلب، نعيد المحاولة بدون response_format ونثق بالـ prompt.
+     */
+    private fun callOpenAiCompatibleProviderWithJsonRetry(
         providerName: String,
         baseUrl: String,
         apiKey: String,
@@ -507,44 +343,53 @@ class MemoryCuratorService(
         prompt: String,
         forceJson: Boolean
     ): String {
-        val json = JSONObject().apply {
-            put("model", model)
-            put(
-                "messages",
-                JSONArray().apply {
+        fun buildBody(useResponseFormat: Boolean): String {
+            val json = JSONObject().apply {
+                put("model", model)
+                put("messages", JSONArray().apply {
                     put(JSONObject().apply {
                         put("role", "user")
                         put("content", prompt)
                     })
+                })
+                put("temperature", 0.2)
+                put("max_tokens", 700)
+                if (forceJson && useResponseFormat) {
+                    put("response_format", JSONObject().apply { put("type", "json_object") })
                 }
-            )
-            put("temperature", 0.2)
-            put("max_tokens", 500)
-            if (forceJson) {
-                put("response_format", JSONObject().apply { put("type", "json_object") })
+            }
+            return json.toString()
+        }
+
+        fun execute(bodyJson: String): String {
+            val request = Request.Builder()
+                .url(baseUrl)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(bodyJson.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string()
+                if (!response.isSuccessful) throw HttpLikeException(response.code, body ?: "")
+                val raw = body ?: throw Exception("Empty response from $providerName")
+                val content = JSONObject(raw)
+                    .getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .optString("content", "")
+                if (content.isBlank()) throw Exception("$providerName returned empty content. Raw: ${raw.take(500)}")
+                return content
             }
         }
 
-        val request = Request.Builder()
-            .url(baseUrl)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
-            .post(json.toString().toRequestBody("application/json".toMediaType()))
-            .build()
-
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw Exception("$providerName failed: ${response.code} - ${response.body?.string()}")
-            }
-            val body = response.body?.string() ?: throw Exception("Empty response from $providerName")
-            val content = JSONObject(body)
-                .getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .optString("content", "")
-
-            if (content.isBlank()) throw Exception("$providerName returned empty content. Raw: ${body.take(500)}")
-            return content
+        return try {
+            execute(buildBody(useResponseFormat = true))
+        } catch (e: HttpLikeException) {
+            if (!forceJson) throw e
+            // retry without response_format
+            Log.w(TAG, "⚠️ $providerName forceJson failed (maybe response_format unsupported). Retrying without response_format. code=${e.code} body=${e.body.take(200)}")
+            execute(buildBody(useResponseFormat = false))
         }
     }
 
@@ -552,15 +397,12 @@ class MemoryCuratorService(
         val json = JSONObject().apply {
             put("model", model)
             put("stream", false)
-            put(
-                "messages",
-                JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", prompt)
-                    })
-                }
-            )
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", prompt)
+                })
+            })
             put("options", JSONObject().apply { put("temperature", 0.2) })
             if (forceJson) put("format", "json")
         }
@@ -580,58 +422,70 @@ class MemoryCuratorService(
         }
     }
 
-    private fun callCustomProvider(prompt: String, baseUrl: String, apiKey: String, model: String, forceJson: Boolean): String {
-        val json = JSONObject().apply {
-            put("model", model)
-            put(
-                "messages",
-                JSONArray().apply {
+    private fun callCustomProviderWithJsonRetry(prompt: String, baseUrl: String, apiKey: String, model: String, forceJson: Boolean): String {
+        fun buildBody(useResponseFormat: Boolean): String {
+            val json = JSONObject().apply {
+                put("model", model)
+                put("messages", JSONArray().apply {
                     put(JSONObject().apply {
                         put("role", "user")
                         put("content", prompt)
                     })
+                })
+                put("temperature", 0.2)
+                put("max_tokens", 2000)
+                if (forceJson && useResponseFormat) {
+                    put("response_format", JSONObject().apply { put("type", "json_object") })
                 }
-            )
-            put("temperature", 0.2)
-            put("max_tokens", 2000)
-            if (forceJson) {
-                put("response_format", JSONObject().apply { put("type", "json_object") })
+            }
+            return json.toString()
+        }
+
+        fun execute(bodyJson: String): String {
+            val builder = Request.Builder()
+                .url(baseUrl)
+                .addHeader("Content-Type", "application/json")
+                .post(bodyJson.toRequestBody("application/json".toMediaType()))
+            if (apiKey.isNotBlank()) builder.addHeader("Authorization", "Bearer $apiKey")
+
+            client.newCall(builder.build()).execute().use { response ->
+                val body = response.body?.string()
+                if (!response.isSuccessful) throw HttpLikeException(response.code, body ?: "")
+                val raw = body ?: throw Exception("Empty response from custom")
+                val message = JSONObject(raw).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+
+                message.optString("content", "")
+                    .takeIf { it.isNotBlank() && it != "null" }
+                    ?.let { return it }
+
+                message.optString("reasoning", "")
+                    .takeIf { it.isNotBlank() && it != "null" }
+                    ?.let { return it }
+
+                throw Exception("Both 'content' and 'reasoning' are empty. Raw: ${raw.take(300)}")
             }
         }
 
-        val builder = Request.Builder()
-            .url(baseUrl)
-            .addHeader("Content-Type", "application/json")
-            .post(json.toString().toRequestBody("application/json".toMediaType()))
-
-        if (apiKey.isNotBlank()) builder.addHeader("Authorization", "Bearer $apiKey")
-
-        client.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Custom failed: ${response.code} - ${response.body?.string()}")
-            val body = response.body?.string() ?: throw Exception("Empty response from custom")
-            val message = JSONObject(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
-
-            message.optString("content", "")
-                .takeIf { it.isNotBlank() && it != "null" }
-                ?.let { return it }
-
-            message.optString("reasoning", "")
-                .takeIf { it.isNotBlank() && it != "null" }
-                ?.let { return it }
-
-            throw Exception("Both 'content' and 'reasoning' are empty. Raw: ${body.take(300)}")
+        return try {
+            execute(buildBody(useResponseFormat = true))
+        } catch (e: HttpLikeException) {
+            if (!forceJson) throw e
+            Log.w(TAG, "⚠️ Custom forceJson failed (maybe response_format unsupported). Retrying without response_format. code=${e.code} body=${e.body.take(200)}")
+            execute(buildBody(useResponseFormat = false))
         }
     }
 
+    private class HttpLikeException(val code: Int, val body: String) : Exception("HTTP $code")
+
     // ============================================================
-    // Parser
+    // Parser (Selection)
     // ============================================================
 
     private fun parseCuratorResponse(rawResponse: String, candidates: List<MemoryItem>): CuratorResult {
         val jsonText = extractJsonObject(rawResponse)
         val json = JSONObject(jsonText)
-
         val validIds = candidates.map { it.id }.toSet()
+
         val selected = jsonArrayToLongs(json.optJSONArray("selectedIds"))
         val irrelevant = jsonArrayToLongs(json.optJSONArray("irrelevantIds"))
         val reasoning = json.optString("reasoning", "").trim()
@@ -641,26 +495,24 @@ class MemoryCuratorService(
 
         if (selected.isEmpty()) {
             return CuratorResult(
-                selectedIds = emptyList(),
-                reasoning = if (reasoning.isNotBlank()) reasoning else "No directly relevant memory selected.",
-                irrelevantIds = sanitizedIrrelevant,
-                isFallback = false,
-                fallbackReason = null,
-                rawResponse = rawResponse
+                emptyList(),
+                if (reasoning.isNotBlank()) reasoning else "No directly relevant memory selected.",
+                sanitizedIrrelevant,
+                false,
+                null,
+                rawResponse
             )
         }
-
         if (sanitizedSelected.isEmpty()) {
             return fallbackResult(candidates, "All selected IDs were invalid", rawResponse)
         }
-
         return CuratorResult(
-            selectedIds = sanitizedSelected,
-            reasoning = if (reasoning.isNotBlank()) reasoning else "Selected relevant memories.",
-            irrelevantIds = sanitizedIrrelevant,
-            isFallback = false,
-            fallbackReason = null,
-            rawResponse = rawResponse
+            sanitizedSelected,
+            if (reasoning.isNotBlank()) reasoning else "Selected relevant memories.",
+            sanitizedIrrelevant,
+            false,
+            null,
+            rawResponse
         )
     }
 
@@ -670,7 +522,7 @@ class MemoryCuratorService(
         val start = trimmed.indexOf('{')
         val end = trimmed.lastIndexOf('}')
         if (start >= 0 && end > start) return trimmed.substring(start, end + 1)
-        throw Exception("No JSON object found in curator response: ${trimmed.take(500)}")
+        throw Exception("No JSON object found in response: ${trimmed.take(500)}")
     }
 
     private fun jsonArrayToLongs(array: JSONArray?): List<Long> {
@@ -688,14 +540,7 @@ class MemoryCuratorService(
     private fun fallbackResult(candidates: List<MemoryItem>, reason: String, rawResponse: String? = null): CuratorResult {
         val ids = candidates.take(5).map { it.id }
         Log.w(TAG, "FALLBACK REASON | $reason | selected=$ids")
-        return CuratorResult(
-            selectedIds = ids,
-            reasoning = "Fallback to top candidates",
-            irrelevantIds = emptyList(),
-            isFallback = true,
-            fallbackReason = reason,
-            rawResponse = rawResponse
-        )
+        return CuratorResult(ids, "Fallback to top candidates", emptyList(), true, reason, rawResponse)
     }
 }
 
