@@ -1,9 +1,9 @@
-
 package com.example.aichat.repository
 
 import android.util.Log
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.MemoryItem
+import com.example.aichat.data.model.QueryStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -29,9 +29,12 @@ class MemoryCuratorService(
 
         // Enhancement safety
         private const val MAX_ENHANCED_LEN = 900
-        private const val MIN_KEYWORD_LEN = 3
+        private const val MIN_KEYWORD_LEN = 2
         private const val MIN_BULLETS = 0
         private const val MAX_BULLETS = 5
+
+        private val ALERT_LABELS = listOf("تنبيه", "alert")
+        private val QUESTION_LABELS = listOf("سؤال", "question")
     }
 
     private val client = OkHttpClient.Builder()
@@ -83,7 +86,11 @@ class MemoryCuratorService(
             }
 
         } catch (e: Exception) {
-            Log.w(TAG, "⚠️ Curator ($curatorProvider) EXCEPTION: ${e::class.java.simpleName}: ${e.message}", e)
+            Log.w(
+                TAG,
+                "⚠️ Curator ($curatorProvider) EXCEPTION: ${e::class.java.simpleName}: ${e.message}",
+                e
+            )
             fallbackBuilder.build(candidates)
         }
     }
@@ -100,7 +107,10 @@ class MemoryCuratorService(
         Log.d(TAG, "NEW CURATE START | query=$userQuery | candidates=${candidates.size}")
 
         if (candidates.isEmpty()) {
-            return@withContext CuratorResult(selectedIds = emptyList(), reasoning = "No candidates available.")
+            return@withContext CuratorResult(
+                selectedIds = emptyList(),
+                reasoning = "No candidates available."
+            )
         }
 
         if (!settings.memoryCuratorEnabled) {
@@ -128,8 +138,7 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // Query enhancement (Identity-First + Generic Fallback)
-    // ✅ تم التصحيح: أصبح يتقيد بالهوية لأبعد حد + يتعامل مع حالة السؤال البعيد
+    // Query enhancement
     // ============================================================
 
     suspend fun enhanceQuery(
@@ -139,20 +148,12 @@ class MemoryCuratorService(
     ): String = withContext(Dispatchers.IO) {
 
         val original = userQuery.trim()
-        Log.d(TAG, "🧠 ENHANCE START | queryLen=${original.length} | identityLen=${mediatorIdentityText.length} | memoryCandidates=${memoryCandidates.size}")
+        Log.d(
+            TAG,
+            "🧠 ENHANCE START | queryLen=${original.length} | identityLen=${mediatorIdentityText.length} | memoryCandidates=${memoryCandidates.size}"
+        )
 
         if (original.isBlank()) return@withContext userQuery
-
-        // ❌ تم الحذف: الإلغاء المبكر عند فراغ الهوية
-        // الآن نسمح بتحسين محايد بقواعد عامة حتى لو الهوية فارغة
-        // لأن MemoryCuratorPrompt الجديد يعالج هذه الحالة داخلياً
-        if (mediatorIdentityText.isBlank()) {
-            Log.d(TAG, "🧠 ENHANCE | identity blank -> will do neutral enhancement with general rules")
-        }
-
-        if (!settings.memoryCuratorEnabled) {
-            Log.d(TAG, "🧠 ENHANCE | curator disabled but enhancement is allowed (decoupled)")
-        }
 
         try {
             val prompt = MemoryCuratorPrompt.buildEnhancerPrompt(
@@ -160,8 +161,11 @@ class MemoryCuratorService(
                 mediatorIdentityText = mediatorIdentityText
             )
 
-            val raw = callConfiguredProvider(prompt).trim()
+            val raw = callCuratorProvider(prompt = prompt, forceJson = false).trim()
+            Log.d(TAG, "🧠 ENHANCE RAW | ${raw.take(500)}")
+
             val enhanced = cleanupEnhancedText(raw)
+            Log.d(TAG, "🧠 ENHANCE CLEAN | len=${enhanced.length} | ${enhanced.take(300)}")
 
             val notNone = enhanced.isNotBlank() && !enhanced.equals("NONE", ignoreCase = true)
             val related = hasKeywordOverlap(original, enhanced)
@@ -170,15 +174,18 @@ class MemoryCuratorService(
             val isValid = notNone && related && looksFormatted
 
             if (isValid) {
-                Log.d(TAG, "🧠 ENHANCE SUCCESS | resultLen=${enhanced.length} | hasAlert=${enhanced.startsWith("تنبيه:")}")
+                Log.d(TAG, "🧠 ENHANCE SUCCESS | resultLen=${enhanced.length}")
                 enhanced
             } else {
-                Log.d(TAG, "🧠 ENHANCE INVALID | returning original | related=$related formatted=$looksFormatted rawLen=${raw.length} finalLen=${enhanced.length}")
+                Log.d(
+                    TAG,
+                    "🧠 ENHANCE INVALID | returning original | related=$related formatted=$looksFormatted rawLen=${raw.length} finalLen=${enhanced.length}"
+                )
                 original
             }
 
         } catch (e: Exception) {
-            Log.w(TAG, "🧠 ENHANCE FAILED | ${e.message}", e)
+            Log.w(TAG, "🧠 ENHANCE FAILED | ${e::class.java.simpleName}: ${e.message}", e)
             original
         }
     }
@@ -189,12 +196,12 @@ class MemoryCuratorService(
 
     suspend fun refineQueryStyle(
         userQuery: String,
-        style: com.example.aichat.data.model.QueryStyle
+        style: QueryStyle
     ): String = withContext(Dispatchers.IO) {
         if (!settings.memoryCuratorEnabled) return@withContext userQuery
         try {
             val prompt = MemoryCuratorPrompt.buildStyleRefinementPrompt(userQuery, style)
-            val result = callConfiguredProvider(prompt).trim()
+            val result = callCuratorProvider(prompt = prompt, forceJson = false).trim()
             if (result.isBlank() || result.equals("NONE", ignoreCase = true)) userQuery else result
         } catch (e: Exception) {
             Log.w(TAG, "🧠 STYLE REFINEMENT FAILED | ${e.message}", e)
@@ -203,7 +210,7 @@ class MemoryCuratorService(
     }
 
     // ============================================================
-    // Enhancement helpers - ✅ مصحح ليدعم حالة "تنبيه: لا ينتمي للهوية"
+    // Enhancement helpers
     // ============================================================
 
     private fun cleanupEnhancedText(text: String): String {
@@ -211,60 +218,98 @@ class MemoryCuratorService(
         val rawLines = t.lines().map { it.trim() }.filter { it.isNotBlank() }
         if (rawLines.isEmpty()) return ""
 
+        // Remove common meta lines (Arabic + English)
         val metaPatterns = listOf(
             Regex("^كمساعد", RegexOption.IGNORE_CASE),
             Regex("^ك(ـ|)مساعد", RegexOption.IGNORE_CASE),
             Regex("إليك\\s+(الطلب|السؤال)\\s+المحس", RegexOption.IGNORE_CASE),
             Regex("سأقوم\\s+ب", RegexOption.IGNORE_CASE),
-            Regex("يتطلب\\s+توضيح", RegexOption.IGNORE_CASE)
+            Regex("يتطلب\\s+توضيح", RegexOption.IGNORE_CASE),
+            Regex("^as an ai", RegexOption.IGNORE_CASE),
+            Regex("^i will", RegexOption.IGNORE_CASE),
+            Regex("^here(?:'s| is)\\s+(the\\s+)?(improved|enhanced)", RegexOption.IGNORE_CASE)
         )
 
-        val lines = rawLines.filterNot { line -> metaPatterns.any { it.containsMatchIn(line) } }.ifEmpty { rawLines }
+        val lines = rawLines
+            .filterNot { line -> metaPatterns.any { it.containsMatchIn(line) } }
+            .ifEmpty { rawLines }
 
-        // حفظ سطر التنبيه إن وجد (يجب أن يكون أول سطر)
-        var alertLine: String? = null
-        if (lines.firstOrNull()?.startsWith("تنبيه:", ignoreCase = true) == true) {
-            alertLine = lines.first().trim()
+        // Detect optional alert line (Arabic/English)
+        val firstLine = lines.firstOrNull() ?: return ""
+        val isAlertLine = isLabeledLine(firstLine, ALERT_LABELS)
+        val alertLine = if (isAlertLine) normalizeLabelLine(firstLine) else null
+
+        // Find question line (Arabic/English)
+        val startIndex = if (isAlertLine) 1 else 0
+        val qIndex = lines.drop(startIndex).indexOfFirst { isLabeledLine(it, QUESTION_LABELS) }
+            .let { if (it >= 0) it + startIndex else -1 }
+
+        // Fallback: if model didn't write "سؤال:"/"Question:", treat the first non-alert line as question.
+        val actualQIndex = if (qIndex >= 0) qIndex else startIndex
+        val qLine = lines.getOrNull(actualQIndex) ?: return ""
+
+        // Decide language style based on label used, otherwise by text content
+        val usesEnglishLabel = qLine.trimStart().startsWith("Question", ignoreCase = true)
+        val questionLabel = if (usesEnglishLabel) "Question" else "سؤال"
+        val alertLabel = if (usesEnglishLabel) "Alert" else "تنبيه"
+
+        val questionText = if (isLabeledLine(qLine, QUESTION_LABELS)) {
+            stripAnyLabel(qLine).trim().trim('"').trim()
+        } else {
+            qLine.trim().trim('"').trim()
         }
-
-        // ابحث عن سطر "سؤال:"
-        val qIndex = lines.indexOfFirst { it.startsWith("سؤال:", ignoreCase = true) || it.startsWith("سؤال :", ignoreCase = true) }
-        if (qIndex < 0) return ""
-
-        val usable = lines.drop(qIndex)
-        if (usable.isEmpty()) return ""
-
-        val first = usable.first()
-        val q = first.replace(Regex("^سؤال\\s*:\\s*", RegexOption.IGNORE_CASE), "").trim().trim('"').trim()
-        if (q.length < 4) return ""
+        if (questionText.length < 4) return ""
 
         fun toBullet(line: String): String? {
             val s = line.trim()
             if (s.isBlank()) return null
-            return when {
-                s.startsWith("•") -> "- " + s.removePrefix("•").trim()
-                s.startsWith("-") -> "- " + s.removePrefix("-").trim()
-                Regex("^\\d+\\s*[.)-]\\s+").containsMatchIn(s) -> "- " + s.replace(Regex("^\\d+\\s*[.)-]\\s+"), "").trim()
-                else -> null
+            if (isLabeledLine(s, ALERT_LABELS) || isLabeledLine(s, QUESTION_LABELS)) return null
+
+            val normalized = when {
+                s.startsWith("•") -> s.removePrefix("•").trim()
+                s.startsWith("-") -> s.removePrefix("-").trim()
+                s.startsWith("*") -> s.removePrefix("*").trim()
+                s.startsWith("—") -> s.removePrefix("—").trim()
+                s.startsWith("–") -> s.removePrefix("–").trim()
+                // numeric bullets: 1) / ١) / 1. / ١. / 1- ...
+                Regex("^[0-9٠-٩]+\\s*[.)-]\\s+").containsMatchIn(s) ->
+                    s.replace(Regex("^[0-9٠-٩]+\\s*[.)-]\\s+"), "").trim()
+                else -> return null
             }
+            return normalized.takeIf { it.length >= 2 }?.let { "- $it" }
         }
+
+        val afterQ = lines.drop(actualQIndex + 1)
 
         val bullets = mutableListOf<String>()
-        usable.drop(1).forEach { line -> toBullet(line)?.let { bullets.add(it) } }
+        afterQ.forEach { line -> toBullet(line)?.let { bullets.add(it) } }
 
-        // Soft fallback: إذا لم يعط bullets صريحة، حول الأسطر العادية إلى bullets
+        // Soft fallback: if no bullets were recognized, convert normal lines to bullets
         if (bullets.isEmpty()) {
-            usable.drop(1).take(MAX_BULLETS).forEach { line ->
+            afterQ.take(MAX_BULLETS).forEach { line ->
                 val s = line.trim()
-                if (s.isNotBlank() && !s.startsWith("تنبيه:")) bullets.add("- $s")
+                if (s.isNotBlank() && !isLabeledLine(s, ALERT_LABELS) && !isLabeledLine(s, QUESTION_LABELS)) {
+                    bullets.add("- $s")
+                }
             }
         }
 
-        val finalBullets = bullets.map { it.replace(Regex("\\s+"), " ").trim() }.distinct().filter { it.length >= 4 }.take(MAX_BULLETS)
+        val finalBullets = bullets
+            .map { it.replace(Regex("\\s+"), " ").trim() }
+            .distinct()
+            .filter { it.length >= 4 }
+            .take(MAX_BULLETS)
+
+        // Normalize alert line label if present
+        val normalizedAlert = alertLine?.let {
+            // If the model used English output but alert came Arabic, or vice versa, normalize to chosen alertLabel
+            val msg = stripAnyLabel(it).trim()
+            "$alertLabel: $msg"
+        }
 
         val built = buildString {
-            if (alertLine != null) appendLine(alertLine)
-            appendLine("سؤال: $q")
+            if (!normalizedAlert.isNullOrBlank()) appendLine(normalizedAlert)
+            appendLine("$questionLabel: $questionText")
             finalBullets.forEach { appendLine(it) }
         }.trim()
 
@@ -276,32 +321,71 @@ class MemoryCuratorService(
         val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
         if (lines.isEmpty()) return false
 
-        // دعم الحالة الثانية: أول سطر تنبيه
-        var qLineIndex = 0
-        if (lines[0].startsWith("تنبيه:", ignoreCase = true)) {
+        var idx = 0
+        if (isLabeledLine(lines[0], ALERT_LABELS)) {
             if (lines.size < 2) return false
-            qLineIndex = 1
+            idx = 1
         }
 
-        val qLine = lines.getOrNull(qLineIndex) ?: return false
-        if (!qLine.startsWith("سؤال:", ignoreCase = true)) return false
+        val qLine = lines.getOrNull(idx) ?: return false
+        if (!isLabeledLine(qLine, QUESTION_LABELS)) return false
 
-        val q = qLine.removePrefix("سؤال:").trim()
+        val q = stripAnyLabel(qLine).trim()
         if (q.length < 4) return false
 
-        val bulletCount = lines.drop(qLineIndex + 1).count { it.startsWith("- ") }
+        val bulletCount = lines.drop(idx + 1).count { it.startsWith("- ") }
         return bulletCount in MIN_BULLETS..MAX_BULLETS
     }
 
     private fun hasKeywordOverlap(original: String, enhanced: String): Boolean {
         fun keywords(s: String): Set<String> =
-            s.lowercase().replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ").split(Regex("\\s+")).map { it.trim() }.filter { it.length >= MIN_KEYWORD_LEN }.toSet()
-        // تجاهل سطر التنبيه عند فحص التداخل
-        val cleanEnhanced = enhanced.lines().filterNot { it.startsWith("تنبيه:", ignoreCase = true) }.joinToString(" ")
+            s.lowercase()
+                .replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+                .split(Regex("\\s+"))
+                .map { it.trim() }
+                .filter { it.length >= MIN_KEYWORD_LEN }
+                .toSet()
+
+        val cleanEnhanced = enhanced.lines()
+            .filterNot { isLabeledLine(it, ALERT_LABELS) }
+            .joinToString(" ")
+
         val a = keywords(original)
         val b = keywords(cleanEnhanced)
-        if (a.isEmpty() || b.isEmpty()) return false
+
+        // If original is too short / yields no keywords, don't block enhancement.
+        if (a.isEmpty()) return true
+        if (b.isEmpty()) return false
+
         return a.any { it in b }
+    }
+
+    private fun isLabeledLine(line: String, labels: List<String>): Boolean {
+        val t = line.trimStart()
+        return labels.any { lbl ->
+            t.startsWith("$lbl:", ignoreCase = true) || t.startsWith("$lbl :", ignoreCase = true)
+        }
+    }
+
+    private fun stripAnyLabel(line: String): String {
+        val t = line.trimStart()
+        // Removes "سؤال:" / "Question:" / "تنبيه:" / "Alert:" generically
+        val idx = t.indexOf(':')
+        if (idx <= 0) return t
+        val head = t.substring(0, idx).trim()
+        val tail = t.substring(idx + 1)
+        val isKnown = (QUESTION_LABELS + ALERT_LABELS).any { it.equals(head, ignoreCase = true) }
+        return if (isKnown) tail else t
+    }
+
+    private fun normalizeLabelLine(line: String): String {
+        // Just normalize spaces around ":" for label lines
+        val t = line.trim()
+        val idx = t.indexOf(':')
+        if (idx < 0) return t
+        val head = t.substring(0, idx).trim()
+        val tail = t.substring(idx + 1).trim()
+        return "$head: $tail"
     }
 
     // ============================================================
@@ -311,61 +395,60 @@ class MemoryCuratorService(
     private suspend fun callCuratorProvider(prompt: String, forceJson: Boolean): String {
         val provider = settings.memoryCuratorProvider.lowercase()
         val model = settings.getMemoryCuratorModel()
+
         return when (provider) {
             "groq" -> {
                 val apiKey = settings.groqKey
                 if (apiKey.isBlank()) throw Exception("Groq API key is blank")
                 if (model.isBlank()) throw Exception("Groq curator model is blank")
-                callOpenAiCompatibleProvider("Groq", "https://api.groq.com/openai/v1/chat/completions", apiKey, model, prompt, forceJson)
+                callOpenAiCompatibleProvider(
+                    providerName = "Groq",
+                    baseUrl = "https://api.groq.com/openai/v1/chat/completions",
+                    apiKey = apiKey,
+                    model = model,
+                    prompt = prompt,
+                    forceJson = forceJson
+                )
             }
+
             "mistral" -> {
                 val apiKey = settings.mistralKey
                 if (apiKey.isBlank()) throw Exception("Mistral API key is blank")
                 if (model.isBlank()) throw Exception("Mistral curator model is blank")
-                callOpenAiCompatibleProvider("Mistral", "https://api.mistral.ai/v1/chat/completions", apiKey, model, prompt, forceJson)
+                callOpenAiCompatibleProvider(
+                    providerName = "Mistral",
+                    baseUrl = "https://api.mistral.ai/v1/chat/completions",
+                    apiKey = apiKey,
+                    model = model,
+                    prompt = prompt,
+                    forceJson = forceJson
+                )
             }
+
             "ollama" -> {
                 if (model.isBlank()) throw Exception("Ollama curator model is blank")
                 callOllama(prompt, model, forceJson)
             }
+
             "custom" -> {
                 val baseUrl = settings.customUrl.trim()
                 if (baseUrl.isBlank() || model.isBlank()) throw Exception("Custom curator provider not configured")
                 callCustomProvider(prompt, baseUrl, settings.customKey, model, forceJson)
             }
+
             "gemini" -> {
                 val apiKey = settings.geminiKey
                 if (apiKey.isBlank()) throw Exception("Gemini API key is blank")
                 if (model.isBlank()) throw Exception("Gemini curator model is blank")
                 callGeminiFlash(prompt, apiKey, model, forceJson)
             }
-            else -> throw Exception("Unsupported curator provider: $provider")
-        }
-    }
 
-    private suspend fun callConfiguredProvider(prompt: String): String {
-        val provider = settings.memoryCuratorProvider.lowercase()
-        val model = settings.getMemoryCuratorModel()
-        return when (provider) {
-            "groq" -> {
-                val apiKey = settings.groqKey
-                if (apiKey.isBlank()) throw Exception("Groq API key is blank")
-                callOpenAiCompatibleProvider("Groq", "https://api.groq.com/openai/v1/chat/completions", apiKey, model, prompt, false)
-            }
-            "mistral" -> {
-                val apiKey = settings.mistralKey
-                if (apiKey.isBlank()) throw Exception("Mistral API key is blank")
-                callOpenAiCompatibleProvider("Mistral", "https://api.mistral.ai/v1/chat/completions", apiKey, model, prompt, false)
-            }
-            "ollama" -> callOllama(prompt, model, false)
-            "custom" -> callCustomProvider(prompt, settings.customUrl.trim(), settings.customKey, model, false)
-            "gemini" -> callGeminiFlash(prompt, settings.geminiKey, model, false)
             else -> throw Exception("Unsupported curator provider: $provider")
         }
     }
 
     // ============================================================
-    // Gemini / OpenAI / Ollama / Custom (بدون تغيير)
+    // Gemini / OpenAI / Ollama / Custom
     // ============================================================
 
     private fun callGeminiFlash(prompt: String, apiKey: String, model: String, forceJson: Boolean): String {
@@ -374,33 +457,92 @@ class MemoryCuratorService(
             put("maxOutputTokens", 500)
             if (forceJson) put("responseMimeType", "application/json")
         }
+
         val json = JSONObject().apply {
-            put("contents", JSONArray().apply {
-                put(JSONObject().apply { put("parts", JSONArray().apply { put(JSONObject().apply { put("text", prompt) }) }) })
-            })
+            put(
+                "contents",
+                JSONArray().apply {
+                    put(
+                        JSONObject().apply {
+                            put(
+                                "parts",
+                                JSONArray().apply {
+                                    put(JSONObject().apply { put("text", prompt) })
+                                }
+                            )
+                        }
+                    )
+                }
+            )
             put("generationConfig", generationConfig)
         }
-        val request = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent").addHeader("x-goog-api-key", apiKey).addHeader("Content-Type", "application/json").post(json.toString().toRequestBody("application/json".toMediaType())).build()
+
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Content-Type", "application/json")
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Gemini Flash failed: ${response.code} - ${response.body?.string()}")
-            val body = response.body?.string() ?: throw Exception("Empty response from Gemini Flash")
-            return JSONObject(body).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+            if (!response.isSuccessful) {
+                throw Exception("Gemini failed: ${response.code} - ${response.body?.string()}")
+            }
+            val body = response.body?.string() ?: throw Exception("Empty response from Gemini")
+            return JSONObject(body)
+                .getJSONArray("candidates")
+                .getJSONObject(0)
+                .getJSONObject("content")
+                .getJSONArray("parts")
+                .getJSONObject(0)
+                .getString("text")
         }
     }
 
-    private fun callOpenAiCompatibleProvider(providerName: String, baseUrl: String, apiKey: String, model: String, prompt: String, forceJson: Boolean): String {
+    private fun callOpenAiCompatibleProvider(
+        providerName: String,
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        prompt: String,
+        forceJson: Boolean
+    ): String {
         val json = JSONObject().apply {
             put("model", model)
-            put("messages", JSONArray().apply { put(JSONObject().apply { put("role", "user"); put("content", prompt) }) })
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", prompt)
+                    })
+                }
+            )
             put("temperature", 0.2)
             put("max_tokens", 500)
-            if (forceJson) put("response_format", JSONObject().apply { put("type", "json_object") })
+            if (forceJson) {
+                put("response_format", JSONObject().apply { put("type", "json_object") })
+            }
         }
-        val request = Request.Builder().url(baseUrl).addHeader("Authorization", "Bearer $apiKey").addHeader("Content-Type", "application/json").post(json.toString().toRequestBody("application/json".toMediaType())).build()
+
+        val request = Request.Builder()
+            .url(baseUrl)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("$providerName curator failed: ${response.code} - ${response.body?.string()}")
+            if (!response.isSuccessful) {
+                throw Exception("$providerName failed: ${response.code} - ${response.body?.string()}")
+            }
             val body = response.body?.string() ?: throw Exception("Empty response from $providerName")
-            val content = JSONObject(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content", "")
+            val content = JSONObject(body)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .optString("content", "")
+
             if (content.isBlank()) throw Exception("$providerName returned empty content. Raw: ${body.take(500)}")
             return content
         }
@@ -408,14 +550,29 @@ class MemoryCuratorService(
 
     private fun callOllama(prompt: String, model: String, forceJson: Boolean): String {
         val json = JSONObject().apply {
-            put("model", model); put("stream", false)
-            put("messages", JSONArray().apply { put(JSONObject().apply { put("role", "user"); put("content", prompt) }) })
+            put("model", model)
+            put("stream", false)
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", prompt)
+                    })
+                }
+            )
             put("options", JSONObject().apply { put("temperature", 0.2) })
             if (forceJson) put("format", "json")
         }
-        val request = Request.Builder().url("http://127.0.0.1:11434/api/chat").addHeader("Content-Type", "application/json").post(json.toString().toRequestBody("application/json".toMediaType())).build()
+
+        val request = Request.Builder()
+            .url("http://127.0.0.1:11434/api/chat")
+            .addHeader("Content-Type", "application/json")
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Ollama curator failed: ${response.code} - ${response.body?.string()}")
+            if (!response.isSuccessful) throw Exception("Ollama failed: ${response.code} - ${response.body?.string()}")
             val body = response.body?.string() ?: throw Exception("Empty response from Ollama")
             val content = JSONObject(body).getJSONObject("message").optString("content", "")
             if (content.isBlank()) throw Exception("Ollama returned empty content. Raw: ${body.take(500)}")
@@ -426,19 +583,43 @@ class MemoryCuratorService(
     private fun callCustomProvider(prompt: String, baseUrl: String, apiKey: String, model: String, forceJson: Boolean): String {
         val json = JSONObject().apply {
             put("model", model)
-            put("messages", JSONArray().apply { put(JSONObject().apply { put("role", "user"); put("content", prompt) }) })
-            put("temperature", 0.2); put("max_tokens", 2000)
-            if (forceJson) put("response_format", JSONObject().apply { put("type", "json_object") })
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", prompt)
+                    })
+                }
+            )
+            put("temperature", 0.2)
+            put("max_tokens", 2000)
+            if (forceJson) {
+                put("response_format", JSONObject().apply { put("type", "json_object") })
+            }
         }
-        val builder = Request.Builder().url(baseUrl).addHeader("Content-Type", "application/json").post(json.toString().toRequestBody("application/json".toMediaType()))
+
+        val builder = Request.Builder()
+            .url(baseUrl)
+            .addHeader("Content-Type", "application/json")
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
+
         if (apiKey.isNotBlank()) builder.addHeader("Authorization", "Bearer $apiKey")
+
         client.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Custom curator failed: ${response.code} - ${response.body?.string()}")
-            val body = response.body?.string() ?: throw Exception("Empty response from custom curator")
+            if (!response.isSuccessful) throw Exception("Custom failed: ${response.code} - ${response.body?.string()}")
+            val body = response.body?.string() ?: throw Exception("Empty response from custom")
             val message = JSONObject(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
-            message.optString("content", "").takeIf { it.isNotBlank() && it != "null" }?.let { return it }
-            message.optString("reasoning", "").takeIf { it.isNotBlank() && it != "null" }?.let { return it }
-            throw Exception("Both 'content' and 'reasoning' fields are empty. Raw: ${body.take(300)}")
+
+            message.optString("content", "")
+                .takeIf { it.isNotBlank() && it != "null" }
+                ?.let { return it }
+
+            message.optString("reasoning", "")
+                .takeIf { it.isNotBlank() && it != "null" }
+                ?.let { return it }
+
+            throw Exception("Both 'content' and 'reasoning' are empty. Raw: ${body.take(300)}")
         }
     }
 
@@ -449,23 +630,42 @@ class MemoryCuratorService(
     private fun parseCuratorResponse(rawResponse: String, candidates: List<MemoryItem>): CuratorResult {
         val jsonText = extractJsonObject(rawResponse)
         val json = JSONObject(jsonText)
+
         val validIds = candidates.map { it.id }.toSet()
         val selected = jsonArrayToLongs(json.optJSONArray("selectedIds"))
         val irrelevant = jsonArrayToLongs(json.optJSONArray("irrelevantIds"))
         val reasoning = json.optString("reasoning", "").trim()
+
         val sanitizedSelected = selected.filter { it in validIds }.distinct().take(5)
         val sanitizedIrrelevant = irrelevant.filter { it in validIds }.distinct().filterNot { it in sanitizedSelected }
+
         if (selected.isEmpty()) {
-            return CuratorResult(emptyList(), if (reasoning.isNotBlank()) reasoning else "No directly relevant memory selected.", sanitizedIrrelevant, false, null, rawResponse)
+            return CuratorResult(
+                selectedIds = emptyList(),
+                reasoning = if (reasoning.isNotBlank()) reasoning else "No directly relevant memory selected.",
+                irrelevantIds = sanitizedIrrelevant,
+                isFallback = false,
+                fallbackReason = null,
+                rawResponse = rawResponse
+            )
         }
+
         if (sanitizedSelected.isEmpty()) {
             return fallbackResult(candidates, "All selected IDs were invalid", rawResponse)
         }
-        return CuratorResult(sanitizedSelected, if (reasoning.isNotBlank()) reasoning else "Selected relevant memories.", sanitizedIrrelevant, false, null, rawResponse)
+
+        return CuratorResult(
+            selectedIds = sanitizedSelected,
+            reasoning = if (reasoning.isNotBlank()) reasoning else "Selected relevant memories.",
+            irrelevantIds = sanitizedIrrelevant,
+            isFallback = false,
+            fallbackReason = null,
+            rawResponse = rawResponse
+        )
     }
 
     private fun extractJsonObject(raw: String): String {
-        val trimmed = raw.trim()
+        val trimmed = raw.trim().replace("```", "").trim()
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed
         val start = trimmed.indexOf('{')
         val end = trimmed.lastIndexOf('}')
@@ -488,7 +688,14 @@ class MemoryCuratorService(
     private fun fallbackResult(candidates: List<MemoryItem>, reason: String, rawResponse: String? = null): CuratorResult {
         val ids = candidates.take(5).map { it.id }
         Log.w(TAG, "FALLBACK REASON | $reason | selected=$ids")
-        return CuratorResult(ids, "Fallback to top candidates", emptyList(), true, reason, rawResponse)
+        return CuratorResult(
+            selectedIds = ids,
+            reasoning = "Fallback to top candidates",
+            irrelevantIds = emptyList(),
+            isFallback = true,
+            fallbackReason = reason,
+            rawResponse = rawResponse
+        )
     }
 }
 
