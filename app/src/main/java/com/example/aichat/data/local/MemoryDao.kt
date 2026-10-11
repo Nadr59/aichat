@@ -13,11 +13,18 @@ import kotlinx.coroutines.flow.Flow
 interface MemoryDao {
 
     // ============================================================
-    // إضافة ذاكرة
+    // إضافة ذاكرة (واحدة)
     // ============================================================
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMemory(memory: MemoryItem): Long
+
+    // ============================================================
+    // ✅ إضافة عدة ذكريات دفعة واحدة (مفيد جداً مع chunking)
+    // ============================================================
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMemories(memories: List<MemoryItem>): List<Long>
 
     // ============================================================
     // تعديل ذاكرة
@@ -34,7 +41,7 @@ interface MemoryDao {
     suspend fun deleteMemory(memory: MemoryItem)
 
     // ============================================================
-    // جميع الذكريات المشتركة
+    // جميع الذكريات المشتركة (Flow)
     // ============================================================
 
     @Query(
@@ -60,7 +67,7 @@ interface MemoryDao {
     suspend fun getAllSharedMemories(): List<MemoryItem>
 
     // ============================================================
-    // البحث بالـ Hash لمنع التكرار
+    // البحث بالـ Hash لمنع التكرار (واحد)
     // ============================================================
 
     @Query(
@@ -71,6 +78,18 @@ interface MemoryDao {
         """
     )
     suspend fun getByHash(hash: String): MemoryItem?
+
+    // ============================================================
+    // ✅ البحث بمجموعة Hashes (مفيد لتسريع dedup مع chunking)
+    // ============================================================
+
+    @Query(
+        """
+        SELECT * FROM memory_items
+        WHERE contentHash IN (:hashes)
+        """
+    )
+    suspend fun getByHashes(hashes: List<String>): List<MemoryItem>
 
     // ============================================================
     // البحث النصي المباشر في المحتوى
@@ -91,10 +110,7 @@ interface MemoryDao {
     ): List<MemoryItem>
 
     // ============================================================
-    // ذكريات محادثة محددة
-    //
-    // الذكريات المشتركة لا تظهر هنا.
-    // تظهر في قسم "الذكريات المشتركة" فقط.
+    // ذكريات محادثة محددة (غير مشتركة فقط)
     // ============================================================
 
     @Query(
@@ -105,9 +121,7 @@ interface MemoryDao {
         ORDER BY updatedAt DESC
         """
     )
-    fun getConversationMemories(
-        conversationId: Long
-    ): Flow<List<MemoryItem>>
+    fun getConversationMemories(conversationId: Long): Flow<List<MemoryItem>>
 
     // ============================================================
     // الحصول على ذاكرة محددة بالـ ID
@@ -123,13 +137,15 @@ interface MemoryDao {
     suspend fun getMemoryById(memoryId: Long): MemoryItem?
 
     // ============================================================
-    // حذف جميع ذكريات محادثة محددة
+    // ✅ حذف جميع ذكريات محادثة محددة (غير مشتركة فقط)
+    // (تصحيح لمنع حذف shared بالخطأ إذا كانت مربوطة بمحادثة)
     // ============================================================
 
     @Query(
         """
         DELETE FROM memory_items
         WHERE sourceConversationId = :conversationId
+        AND isShared = 0
         """
     )
     suspend fun deleteConversationMemories(conversationId: Long)
