@@ -45,6 +45,9 @@ class MemoryRepository(
 
         // نافذة بحث عن "حد قطع طبيعي" قبل نهاية القطعة
         private const val BREAK_LOOKBACK_WINDOW = 120
+
+        // SQLite bind limit غالباً 999
+        private const val SQLITE_IN_CLAUSE_BATCH = 900
     }
 
     private val aiSettings = AiSettings(context)
@@ -70,8 +73,10 @@ class MemoryRepository(
                 .digest(content.toByteArray(Charsets.UTF_8))
                 .joinToString("") { "%02x".format(it) }
         } catch (e: Exception) {
-            Log.e(TAG, "Hash calculation failed: ${e.message}")
-            ""
+            // مهم: لا نرجع "" بسبب unique index على contentHash
+            val fallback = "nohash-${content.hashCode().toString(16)}-${content.length}"
+            Log.e(TAG, "Hash calculation failed: ${e.message} -> fallback=$fallback")
+            fallback
         }
     }
 
@@ -100,7 +105,6 @@ class MemoryRepository(
                 Log.w(TAG, "Empty embedding returned")
                 ""
             }
-
         } catch (e: Exception) {
             Log.e(TAG, "Embedding extraction failed: ${e.message}")
             ""
@@ -112,9 +116,6 @@ class MemoryRepository(
     // ============================================================
 
     private fun normalizeForStorage(text: String): String {
-        // تنظيف بسيط بدون تغيير المعنى:
-        // - trim
-        // - إزالة null chars
         return text.replace("\u0000", "").trim()
     }
 
@@ -136,33 +137,26 @@ class MemoryRepository(
             val targetEnd = min(start + CHUNK_SIZE, n)
             var end = targetEnd
 
-            // حاول إيجاد نقطة قطع طبيعية قبل النهاية
             val minEnd = (start + MIN_CHUNK_LEN).coerceAtMost(n)
             val lookbackStart = (targetEnd - BREAK_LOOKBACK_WINDOW).coerceAtLeast(minEnd)
 
             if (lookbackStart < targetEnd) {
                 val slice = t.substring(lookbackStart, targetEnd)
                 val cut = findBestCutIndex(slice)
-                if (cut >= 0) {
-                    end = lookbackStart + cut
-                }
+                if (cut >= 0) end = lookbackStart + cut
             }
 
             if (end <= start) end = targetEnd
 
             val chunk = normalizeForStorage(t.substring(start, end))
-            if (chunk.isNotBlank()) {
-                chunks.add(chunk)
-            }
+            if (chunk.isNotBlank()) chunks.add(chunk)
 
             if (end >= n) break
 
-            // overlap
             val nextStart = (end - CHUNK_OVERLAP).coerceAtLeast(start + 1)
             start = nextStart
         }
 
-        // دمج القطعة الأخيرة إن كانت قصيرة جداً
         if (chunks.size >= 2 && chunks.last().length < (MIN_CHUNK_LEN / 2)) {
             val last = chunks.removeAt(chunks.lastIndex)
             chunks[chunks.lastIndex] = normalizeForStorage(chunks.last() + "\n" + last)
@@ -171,10 +165,6 @@ class MemoryRepository(
         return chunks
     }
 
-    /**
-     * يرجّع index داخل slice حيث نقطع.
-     * نفضّل: "\n\n" ثم "\n" ثم ". " ثم "،" ثم "," ثم " " ثم أي محرف.
-     */
     private fun findBestCutIndex(slice: String): Int {
         if (slice.isBlank()) return -1
 
@@ -191,18 +181,13 @@ class MemoryRepository(
 
         for (token in priorities) {
             val idx = slice.lastIndexOf(token)
-            if (idx > 0) {
-                // نقطع بعد التوكن كي لا نخسر الفاصل
-                return idx + token.length
-            }
+            if (idx > 0) return idx + token.length
         }
-
-        // لا يوجد حد طبيعي
         return -1
     }
 
     // ============================================================
-    // إضافة ذاكرة (يدعم chunking)
+    // ✅ إضافة ذاكرة (chunking + batch dedup + batch insert)
     // ============================================================
 
     suspend fun addMemory(
@@ -214,62 +199,104 @@ class MemoryRepository(
     ): Long {
 
         val cleanContent = normalizeForStorage(content)
-
         if (cleanContent.isBlank()) {
             Log.w(TAG, "Skipping empty content")
             return 0
         }
 
-        // ✅ إذا النص طويل -> chunking
         val chunks = splitIntoChunksFixed(cleanContent)
+        if (chunks.isEmpty()) return 0
 
-        if (chunks.size == 1) {
-            // المسار القديم (قطعة واحدة)
-            return insertSingleMemoryIfNotDuplicate(
-                cleanContent = chunks.first(),
-                sourceConversationId = sourceConversationId,
-                sourceMessageId = sourceMessageId,
-                category = category,
-                isShared = isShared
-            )
+        // 1) hashes لكل chunk (بنفس ترتيب chunks)
+        val hashes = chunks.map { calculateHash(it) }
+        val hashKeys = hashes.filter { it.isNotBlank() }.distinct()
+
+        // 2) getByHashes() على دفعات لتفادي حد 999
+        val existingByHash = HashMap<String, MemoryItem>(hashKeys.size)
+        if (hashKeys.isNotEmpty()) {
+            hashKeys.chunked(SQLITE_IN_CLAUSE_BATCH).forEach { batch ->
+                val found = memoryDao.getByHashes(batch)
+                found.forEach { item ->
+                    if (item.contentHash.isNotBlank()) {
+                        existingByHash[item.contentHash] = item
+                    }
+                }
+            }
         }
 
-        // إدخال عدة قطع
-        Log.d(TAG, "Chunking content: len=${cleanContent.length} -> chunks=${chunks.size}")
+        // 3) جهّز الإدخال الجديد فقط + حفظ IDs الموجودة مسبقاً
+        val idsInOrder = ArrayList<Long?>(chunks.size).apply {
+            repeat(chunks.size) { add(null) }
+        }
 
-        val ids = mutableListOf<Long>()
-        for (chunk in chunks) {
-            val id = insertSingleMemoryIfNotDuplicate(
+        val toInsert = ArrayList<MemoryItem>(chunks.size)
+        val toInsertHashes = ArrayList<String>(chunks.size)
+
+        for (i in chunks.indices) {
+            val chunk = chunks[i]
+            val hash = hashes[i]
+
+            val existing = existingByHash[hash]
+            if (existing != null) {
+                idsInOrder[i] = existing.id
+                continue
+            }
+
+            val mem = buildMemoryItemForInsert(
                 cleanContent = chunk,
+                hash = hash,
                 sourceConversationId = sourceConversationId,
                 sourceMessageId = sourceMessageId,
                 category = category,
                 isShared = isShared
             )
-            if (id > 0) ids.add(id)
+
+            toInsert.add(mem)
+            toInsertHashes.add(hash)
         }
 
-        val firstId = ids.firstOrNull() ?: 0L
-        Log.d(TAG, "Chunked memory saved: count=${ids.size} firstId=$firstId")
+        // 4) Batch insert
+        val insertedIds = if (toInsert.isNotEmpty()) memoryDao.insertMemories(toInsert) else emptyList()
+
+        // 5) ربط النتائج بالترتيب + معالجة -1 (IGNORE بسبب unique index/سباق)
+        var cursor = 0
+        for (i in chunks.indices) {
+            if (idsInOrder[i] != null) continue
+
+            val returnedId = insertedIds.getOrNull(cursor) ?: -1L
+            val h = toInsertHashes[cursor]
+
+            val finalId =
+                if (returnedId > 0) {
+                    returnedId
+                } else {
+                    // conflict/IGNORE -> اسحب ID بالهاش
+                    memoryDao.getByHash(h)?.id ?: 0L
+                }
+
+            idsInOrder[i] = finalId
+            cursor++
+        }
+
+        val firstId = idsInOrder.firstOrNull { (it ?: 0L) > 0L } ?: 0L
+
+        Log.d(
+            TAG,
+            "addMemory(batch): len=${cleanContent.length} chunks=${chunks.size} " +
+                "existing=${existingByHash.size} inserted=${toInsert.size} firstId=$firstId"
+        )
+
         return firstId
     }
 
-    private suspend fun insertSingleMemoryIfNotDuplicate(
+    private suspend fun buildMemoryItemForInsert(
         cleanContent: String,
+        hash: String,
         sourceConversationId: Long?,
         sourceMessageId: Long?,
         category: String,
         isShared: Boolean
-    ): Long {
-        val hash = calculateHash(cleanContent)
-
-        if (hash.isNotBlank()) {
-            val existing = memoryDao.getByHash(hash)
-            if (existing != null) {
-                Log.d(TAG, "Duplicate content detected (id=${existing.id}), skipping")
-                return existing.id
-            }
-        }
+    ): MemoryItem {
 
         val embedding = extractEmbedding(cleanContent)
 
@@ -279,7 +306,7 @@ class MemoryRepository(
         val embeddingDimensions =
             if (embedding.isNotBlank()) EmbeddingService.CURRENT_DIMENSIONS else 0
 
-        val memory = MemoryItem(
+        return MemoryItem(
             content = cleanContent,
             embedding = embedding,
             embeddingModel = embeddingModel,
@@ -290,10 +317,6 @@ class MemoryRepository(
             category = category,
             isShared = isShared
         )
-
-        val id = memoryDao.insertMemory(memory)
-        Log.d(TAG, "Memory saved with id=$id len=${cleanContent.length}")
-        return id
     }
 
     // ============================================================
@@ -301,7 +324,6 @@ class MemoryRepository(
     // ============================================================
 
     suspend fun updateMemory(memory: MemoryItem) {
-
         val cleanContent = normalizeForStorage(memory.content)
 
         val newEmbedding = extractEmbedding(cleanContent)
@@ -339,15 +361,14 @@ class MemoryRepository(
 
         val allMemories = memoryDao.getAllSharedMemories()
 
-        // إصلاح Hash للذكريات القديمة.
+        // إصلاح Hash للذكريات القديمة (إن وُجدت).
         allMemories
             .filter { it.contentHash.isBlank() }
             .forEach { memory ->
                 val hash = calculateHash(memory.content)
-                if (hash.isNotBlank()) {
-                    memoryDao.updateMemory(
-                        memory.copy(contentHash = hash)
-                    )
+                // مع unique index: لو تعارض، اتركه كما هو أو عالج سياسة دمج لاحقاً
+                runCatching {
+                    memoryDao.updateMemory(memory.copy(contentHash = hash))
                 }
             }
 
@@ -405,10 +426,9 @@ class MemoryRepository(
         val cleanContent = normalizeForStorage(content)
         if (cleanContent.isBlank()) return 0
 
-        // ✅ إذا المحتوى طويل لا نستطيع استخدام embedding "واحد" له.
-        // نرجع لمسار addMemory الذي سيُقسم ويحسب embeddings لكل قطعة.
+        // إذا المحتوى طويل لا نستطيع استخدام embedding واحد له -> نرجع لمسار chunking
         if (CHUNKING_ENABLED && cleanContent.length > CHUNK_SIZE) {
-            Log.w(TAG, "addMemoryWithEmbedding: content too long for a single embedding -> falling back to addMemory() with chunking")
+            Log.w(TAG, "addMemoryWithEmbedding: content too long -> falling back to addMemory() with chunking")
             return addMemory(
                 content = cleanContent,
                 category = category,
@@ -419,12 +439,10 @@ class MemoryRepository(
         }
 
         val hash = calculateHash(cleanContent)
-        if (hash.isNotBlank()) {
-            val existing = memoryDao.getByHash(hash)
-            if (existing != null) {
-                Log.d(TAG, "Duplicate (id=${existing.id}), skipping")
-                return existing.id
-            }
+        val existing = memoryDao.getByHash(hash)
+        if (existing != null) {
+            Log.d(TAG, "Duplicate (id=${existing.id}), skipping")
+            return existing.id
         }
 
         val embeddingStr =
@@ -435,9 +453,7 @@ class MemoryRepository(
                     Log.e(TAG, "Embedding compression failed: ${e.message}")
                     ""
                 }
-            } else {
-                ""
-            }
+            } else ""
 
         val embeddingModel =
             if (embeddingStr.isNotBlank()) EmbeddingService.CURRENT_MODEL else ""
@@ -458,7 +474,6 @@ class MemoryRepository(
         )
 
         val id = memoryDao.insertMemory(memory)
-
         Log.d(TAG, "Memory saved with embedding (id=$id)")
         return id
     }
@@ -506,10 +521,8 @@ class MemoryRepository(
         val hasEmbeddings = withEmbeddings > 0
         val hasApiKey = aiSettings.geminiKey.isNotBlank()
 
-        // Keyword search دائماً
         val keywordResults = fallbackSearch(cleanQuery, allMemories)
 
-        // Semantic search إذا كان متاحاً
         val semanticResults =
             if (hasEmbeddings && hasApiKey) {
                 searchWithEmbeddings(cleanQuery, allMemories)
@@ -517,7 +530,6 @@ class MemoryRepository(
                 emptyList()
             }
 
-        // إذا لم يتوفر Semantic نستخدم Keyword فقط.
         if (semanticResults.isEmpty()) {
             Log.d(TAG, "No semantic results, using keyword results")
             return keywordResults.take(MAX_RESULTS)
@@ -547,20 +559,17 @@ class MemoryRepository(
         }
 
         val memoriesById = LinkedHashMap<Long, MemoryItem>()
-
         semanticResults.forEach { memory -> memoriesById[memory.id] = memory }
         keywordResults.forEach { memory -> memoriesById[memory.id] = memory }
 
         val scores = mutableMapOf<Long, Double>()
 
-        // Semantic ranks
         semanticResults.forEachIndexed { index, memory ->
             val rank = index + 1
             val score = 1.0 / (RRF_K + rank)
             scores[memory.id] = (scores[memory.id] ?: 0.0) + score
         }
 
-        // Keyword ranks
         keywordResults.forEachIndexed { index, memory ->
             val rank = index + 1
             val score = 1.0 / (RRF_K + rank)
