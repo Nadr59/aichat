@@ -12,37 +12,17 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MemoryDao {
 
-    // ============================================================
-    // إضافة ذاكرة (واحدة)
-    // ============================================================
-
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMemory(memory: MemoryItem): Long
-
-    // ============================================================
-    // ✅ إضافة عدة ذكريات دفعة واحدة (مفيد جداً مع chunking)
-    // ============================================================
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMemories(memories: List<MemoryItem>): List<Long>
 
-    // ============================================================
-    // تعديل ذاكرة
-    // ============================================================
-
     @Update
     suspend fun updateMemory(memory: MemoryItem)
 
-    // ============================================================
-    // حذف ذاكرة
-    // ============================================================
-
     @Delete
     suspend fun deleteMemory(memory: MemoryItem)
-
-    // ============================================================
-    // جميع الذكريات المشتركة (Flow)
-    // ============================================================
 
     @Query(
         """
@@ -53,10 +33,6 @@ interface MemoryDao {
     )
     fun getSharedMemories(): Flow<List<MemoryItem>>
 
-    // ============================================================
-    // جميع الذكريات المشتركة - List
-    // ============================================================
-
     @Query(
         """
         SELECT * FROM memory_items
@@ -65,10 +41,6 @@ interface MemoryDao {
         """
     )
     suspend fun getAllSharedMemories(): List<MemoryItem>
-
-    // ============================================================
-    // البحث بالـ Hash لمنع التكرار (واحد)
-    // ============================================================
 
     @Query(
         """
@@ -79,10 +51,6 @@ interface MemoryDao {
     )
     suspend fun getByHash(hash: String): MemoryItem?
 
-    // ============================================================
-    // ✅ البحث بمجموعة Hashes (مفيد لتسريع dedup مع chunking)
-    // ============================================================
-
     @Query(
         """
         SELECT * FROM memory_items
@@ -90,10 +58,6 @@ interface MemoryDao {
         """
     )
     suspend fun getByHashes(hashes: List<String>): List<MemoryItem>
-
-    // ============================================================
-    // البحث النصي المباشر في المحتوى
-    // ============================================================
 
     @Query(
         """
@@ -104,14 +68,7 @@ interface MemoryDao {
         LIMIT :limit
         """
     )
-    suspend fun searchByContent(
-        query: String,
-        limit: Int = 10
-    ): List<MemoryItem>
-
-    // ============================================================
-    // ذكريات محادثة محددة (غير مشتركة فقط)
-    // ============================================================
+    suspend fun searchByContent(query: String, limit: Int = 10): List<MemoryItem>
 
     @Query(
         """
@@ -123,10 +80,6 @@ interface MemoryDao {
     )
     fun getConversationMemories(conversationId: Long): Flow<List<MemoryItem>>
 
-    // ============================================================
-    // الحصول على ذاكرة محددة بالـ ID
-    // ============================================================
-
     @Query(
         """
         SELECT * FROM memory_items
@@ -135,11 +88,6 @@ interface MemoryDao {
         """
     )
     suspend fun getMemoryById(memoryId: Long): MemoryItem?
-
-    // ============================================================
-    // ✅ حذف جميع ذكريات محادثة محددة (غير مشتركة فقط)
-    // (تصحيح لمنع حذف shared بالخطأ إذا كانت مربوطة بمحادثة)
-    // ============================================================
 
     @Query(
         """
@@ -150,10 +98,6 @@ interface MemoryDao {
     )
     suspend fun deleteConversationMemories(conversationId: Long)
 
-    // ============================================================
-    // عدد الذكريات المشتركة
-    // ============================================================
-
     @Query(
         """
         SELECT COUNT(*) FROM memory_items
@@ -161,10 +105,6 @@ interface MemoryDao {
         """
     )
     suspend fun getSharedMemoriesCount(): Int
-
-    // ============================================================
-    // حذف الذكريات القديمة إذا تجاوز الحد
-    // ============================================================
 
     @Query(
         """
