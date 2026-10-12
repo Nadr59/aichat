@@ -17,6 +17,11 @@ data class WebPlatform(
     val isEnabled:         Boolean = true,
     val sortOrder:         Int     = 100,
     val createdAt:         Long    = System.currentTimeMillis(),
-    val aiMessageSelector: String  = "",    // ✅ جديد
-    val memoryEnabled:     Boolean = true   // ✅ جديد
+    val aiMessageSelector: String  = "",
+    val memoryEnabled:     Boolean = true,
+
+    // ✅ جديد للإرسال التلقائي
+    val inputSelector:     String  = "",
+    val sendSelector:      String  = "",
+    val sendWithEnter:     Boolean = true
 )
