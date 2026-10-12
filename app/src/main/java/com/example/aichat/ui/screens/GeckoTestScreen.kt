@@ -50,6 +50,7 @@ import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import org.mozilla.geckoview.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -297,8 +298,18 @@ fun GeckoTestScreen(
             memoryEnabled = isSystemPromptEnabled,
             onDismiss = { showSendDialog = false },
             onSend = { finalText ->
-                app.setContextPending(finalText)
-                showSendDialog = false
+    val p = platform
+    if (p != null) {
+        val js = buildAutoSendJs(
+            text = finalText,
+            inputSelector = p.inputSelector,
+            sendSelector = p.sendSelector,
+            sendWithEnter = p.sendWithEnter
+        )
+        session.evaluateJS(js)
+    }
+    showSendDialog = false
+            }
             }
         )
     }
