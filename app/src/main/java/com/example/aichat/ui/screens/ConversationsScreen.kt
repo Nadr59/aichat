@@ -1,14 +1,45 @@
 package com.example.aichat.ui.screens
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -23,23 +54,26 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationsScreen(
-    viewModel:             ChatViewModel,
-    settings:              AiSettings,
-    onBack:                () -> Unit,
-    onOpenChat:            (Long) -> Unit,      // ← جديد
-    onNewChat:             () -> Unit,           // ← جديد
-    onOpenSettings:        () -> Unit,           // ← جديد
-    onOpenMemory:          () -> Unit,
+    viewModel: ChatViewModel,
+    settings: AiSettings,
+    onBack: () -> Unit, // غير مستخدم حالياً، أبقيته للتوافق
+    onOpenChat: (Long) -> Unit,
+    onNewChat: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenMemory: () -> Unit,
     webPlatformsViewModel: WebPlatformsViewModel,
-    onOpenPlatform:        (WebPlatform) -> Unit,
-    onManagePlatforms:     () -> Unit
+    onOpenPlatform: (WebPlatform) -> Unit,
+    onManagePlatforms: () -> Unit
 ) {
-    val conversations    by viewModel.conversations.collectAsState()
-    val allPlatforms     by webPlatformsViewModel.platforms.collectAsState()
-    val enabledPlatforms  = allPlatforms.filter { it.isEnabled }
+    val conversations by viewModel.conversations.collectAsState()
+    val allPlatforms by webPlatformsViewModel.platforms.collectAsState()
+
+    // ✅ جديد: منع Race condition قبل اكتمال seed/patch للمنصات
+    val seedReady by webPlatformsViewModel.seedReady.collectAsState()
+
+    val enabledPlatforms = remember(allPlatforms) { allPlatforms.filter { it.isEnabled } }
 
     var showDeleteDialog by remember { mutableStateOf<Conversation?>(null) }
 
@@ -50,7 +84,7 @@ fun ConversationsScreen(
                     Column {
                         Text("AiChat", fontWeight = FontWeight.Bold)
                         Text(
-                            text  = settings.getActiveModel().take(30),
+                            text = settings.getActiveModel().take(30),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -60,7 +94,6 @@ fun ConversationsScreen(
                     IconButton(onClick = onOpenMemory) {
                         Icon(Icons.Default.Memory, contentDescription = "الذاكرة")
                     }
-                    // ✅ مُصلَح: يستدعي onOpenSettings بدل lambda فارغة
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "الإعدادات")
                     }
@@ -72,10 +105,9 @@ fun ConversationsScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                // ✅ مُصلَح: يستدعي onNewChat بدل onBack
                 onClick = onNewChat,
-                icon    = { Icon(Icons.Default.Add, contentDescription = null) },
-                text    = { Text("محادثة جديدة") }
+                icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                text = { Text("محادثة جديدة") }
             )
         }
     ) { padding ->
@@ -93,27 +125,41 @@ fun ConversationsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment     = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text  = "منصات الويب",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "منصات الويب",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (!seedReady) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
+                    }
+
                     TextButton(onClick = onManagePlatforms) {
                         Text("إدارة")
                     }
                 }
 
                 LazyRow(
-                    contentPadding        = PaddingValues(horizontal = 12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(enabledPlatforms, key = { it.id }) { platform ->
                         SuggestionChip(
-                            onClick = { onOpenPlatform(platform) },
-                            label   = {
+                            enabled = seedReady && platform.isEnabled,
+                            onClick = { if (seedReady && platform.isEnabled) onOpenPlatform(platform) },
+                            label = {
                                 Text(
                                     "${platform.iconEmoji} ${platform.name}",
                                     maxLines = 1,
@@ -137,36 +183,33 @@ fun ConversationsScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            imageVector        = Icons.Default.Chat,
+                            imageVector = Icons.Default.Chat,
                             contentDescription = null,
-                            modifier           = Modifier.size(56.dp),
-                            tint               = MaterialTheme.colorScheme
-                                .onSurfaceVariant.copy(alpha = 0.4f)
+                            modifier = Modifier.size(56.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            text  = "لا توجد محادثات بعد",
+                            text = "لا توجد محادثات بعد",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text  = "اضغط + لبدء محادثة جديدة",
+                            text = "اضغط + لبدء محادثة جديدة",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                .copy(alpha = 0.6f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
                     }
                 }
             } else {
                 LazyColumn(
-                    modifier       = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(bottom = 88.dp)
                 ) {
                     items(conversations, key = { it.id }) { conversation ->
                         ConversationItem(
                             conversation = conversation,
-                            // ✅ مُصلَح: يستدعي onOpenChat بدل viewModel مباشرة
-                            onOpen  = { onOpenChat(conversation.id) },
+                            onOpen = { onOpenChat(conversation.id) },
                             onDelete = { showDeleteDialog = conversation }
                         )
                         HorizontalDivider()
@@ -180,13 +223,15 @@ fun ConversationsScreen(
     showDeleteDialog?.let { conv ->
         AlertDialog(
             onDismissRequest = { showDeleteDialog = null },
-            title   = { Text("حذف المحادثة") },
-            text    = { Text("هل تريد حذف \"${conv.title}\"؟ لا يمكن التراجع.") },
+            title = { Text("حذف المحادثة") },
+            text = { Text("هل تريد حذف \"${conv.title}\"؟ لا يمكن التراجع.") },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteConversation(conv)
-                    showDeleteDialog = null
-                }) {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteConversation(conv)
+                        showDeleteDialog = null
+                    }
+                ) {
                     Text("حذف", color = MaterialTheme.colorScheme.error)
                 }
             },
@@ -199,44 +244,42 @@ fun ConversationsScreen(
     }
 }
 
-// ── ConversationItem ──────────────────────────────────────────────────────────
-
 @Composable
 private fun ConversationItem(
     conversation: Conversation,
-    onOpen:       () -> Unit,
-    onDelete:     () -> Unit
+    onOpen: () -> Unit,
+    onDelete: () -> Unit
 ) {
     ListItem(
-        modifier        = Modifier.clickable(onClick = onOpen),
+        modifier = Modifier.clickable(onClick = onOpen),
         headlineContent = {
             Text(
-                text       = conversation.title.ifBlank { "محادثة بدون عنوان" },
-                maxLines   = 1,
-                overflow   = TextOverflow.Ellipsis,
+                text = conversation.title.ifBlank { "محادثة بدون عنوان" },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 fontWeight = FontWeight.Medium
             )
         },
         supportingContent = {
             Text(
-                text  = formatDate(conversation.updatedAt),
+                text = formatDate(conversation.updatedAt),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         },
         leadingContent = {
             Icon(
-                imageVector        = Icons.Default.Chat,
+                imageVector = Icons.Default.Chat,
                 contentDescription = null,
-                tint               = MaterialTheme.colorScheme.primary
+                tint = MaterialTheme.colorScheme.primary
             )
         },
         trailingContent = {
             IconButton(onClick = onDelete) {
                 Icon(
-                    imageVector        = Icons.Default.Delete,
+                    imageVector = Icons.Default.Delete,
                     contentDescription = "حذف",
-                    tint               = MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
