@@ -1,4 +1,4 @@
-package com.example.aichat.repository
+ package com.example.aichat.repository
 
 import android.content.Context
 import android.util.Log
@@ -323,31 +323,64 @@ class MemoryRepository(
     // تعديل ذاكرة
     // ============================================================
 
-    suspend fun updateMemory(memory: MemoryItem) {
-        val cleanContent = normalizeForStorage(memory.content)
+    // ============================================================
+// تعديل ذاكرة
+// ============================================================
 
-        val newEmbedding = extractEmbedding(cleanContent)
-        val newHash = calculateHash(cleanContent)
+suspend fun updateMemory(memory: MemoryItem) {
+    val cleanContent = normalizeForStorage(memory.content)
 
-        val embeddingModel =
-            if (newEmbedding.isNotBlank()) EmbeddingService.CURRENT_MODEL else ""
+    if (cleanContent.isBlank()) {
+        // خيار منطقي: إذا صار فارغاً احذف الذاكرة
+        memoryDao.deleteMemory(memory)
+        Log.d(TAG, "Memory cleared -> deleted id=${memory.id}")
+        return
+    }
 
-        val embeddingDimensions =
-            if (newEmbedding.isNotBlank()) EmbeddingService.CURRENT_DIMENSIONS else 0
+    // ✅ إذا المحتوى طويل: استبدل الذاكرة بقطع متعددة
+    if (CHUNKING_ENABLED && cleanContent.length > CHUNK_SIZE) {
+        Log.w(TAG, "updateMemory: long content -> replace with chunked memories oldId=${memory.id} len=${cleanContent.length}")
 
-        memoryDao.updateMemory(
-            memory.copy(
-                content = cleanContent,
-                embedding = newEmbedding,
-                embeddingModel = embeddingModel,
-                embeddingDimensions = embeddingDimensions,
-                contentHash = newHash,
-                updatedAt = System.currentTimeMillis()
-            )
+        // احفظ الجديد (سيتقسم تلقائياً + dedup + batch insert)
+        val newFirstId = addMemory(
+            content = cleanContent,
+            sourceConversationId = if (memory.isShared) null else memory.sourceConversationId,
+            sourceMessageId = memory.sourceMessageId,
+            category = memory.category,
+            isShared = memory.isShared
         )
 
-        Log.d(TAG, "Memory updated id=${memory.id}")
+        // احذف القديم بعد نجاح الإدخال
+        memoryDao.deleteMemory(memory)
+
+        Log.d(TAG, "Memory replaced: oldId=${memory.id} newFirstId=$newFirstId")
+        return
     }
+
+    // المسار العادي (قصير): تحديث نفس السجل
+    val newEmbedding = extractEmbedding(cleanContent)
+    val newHash = calculateHash(cleanContent)
+
+    val embeddingModel =
+        if (newEmbedding.isNotBlank()) EmbeddingService.CURRENT_MODEL else ""
+
+    val embeddingDimensions =
+        if (newEmbedding.isNotBlank()) EmbeddingService.CURRENT_DIMENSIONS else 0
+
+    memoryDao.updateMemory(
+        memory.copy(
+            content = cleanContent,
+            embedding = newEmbedding,
+            embeddingModel = embeddingModel,
+            embeddingDimensions = embeddingDimensions,
+            contentHash = newHash,
+            updatedAt = System.currentTimeMillis()
+        )
+    )
+
+    Log.d(TAG, "Memory updated id=${memory.id}")
+}
+    
 
     // ============================================================
     // Backfill Embeddings
