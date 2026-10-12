@@ -26,16 +26,19 @@ class WebPlatformsViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
-    init {
-        // ✅ seed + patch (لازم يكون داخل repo.seedDefaults)
-        viewModelScope.launch {
-            repo.seedDefaults()
-                .onFailure { _message.value = "⚠️ فشل تهيئة منصات الويب: ${it.message}" }
-        }
-    }
+    /**
+     * ✅ مهم: يمنع Race condition
+     * true بعد اكتمال seedDefaults (insert + patch selectors)
+     */
+    private val _seedReady = MutableStateFlow(false)
+    val seedReady: StateFlow<Boolean> = _seedReady.asStateFlow()
 
-    fun clearMessage() {
-        _message.value = null
+    init {
+        viewModelScope.launch {
+            runCatching { repo.seedDefaults() }
+                .onFailure { _message.value = "⚠️ فشل تهيئة منصات الويب: ${it.message ?: "خطأ غير معروف"}" }
+            _seedReady.value = true
+        }
     }
 
     // ── actions ──────────────────────────────────────────────────────────────
@@ -61,8 +64,8 @@ class WebPlatformsViewModel(
                     repo.setEnabled(platform, false)
                     _message.value = "تم تعطيل ${platform.name} (المنصات الافتراضية لا تُحذف)"
                 } else {
-                    repo.delete(platform.id)
-                    _message.value = "🗑️ تم حذف ${platform.name}"
+                    val ok = repo.delete(platform.id)
+                    _message.value = if (ok) "🗑️ تم حذف ${platform.name}" else "⚠️ لم يتم الحذف"
                 }
             }.onFailure {
                 _message.value = "❌ ${it.message ?: "فشلت العملية"}"
@@ -72,19 +75,28 @@ class WebPlatformsViewModel(
 
     fun toggleEnabled(platform: WebPlatform) {
         viewModelScope.launch {
-            repo.setEnabled(platform, !platform.isEnabled)
-                .onFailure { _message.value = "❌ ${it.message ?: "فشل التحديث"}" }
+            runCatching {
+                repo.setEnabled(platform, !platform.isEnabled)
+            }.onFailure {
+                _message.value = "❌ ${it.message ?: "فشل التحديث"}"
+            }
         }
     }
 
+    fun clearMessage() {
+        _message.value = null
+    }
+
     /**
-     * (اختياري) زر لإعادة تطبيق seed + patch يدوياً إذا احتجت.
+     * (اختياري) إعادة seed/patch يدوياً من UI إن رغبت لاحقاً
      */
     fun reseedDefaults() {
         viewModelScope.launch {
-            repo.seedDefaults()
+            _seedReady.value = false
+            runCatching { repo.seedDefaults() }
                 .onSuccess { _message.value = "✅ تم تحديث إعدادات المنصات الافتراضية" }
                 .onFailure { _message.value = "❌ ${it.message ?: "فشل التحديث"}" }
+            _seedReady.value = true
         }
     }
 
