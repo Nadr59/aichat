@@ -54,6 +54,65 @@ import org.json.JSONObject
 import org.mozilla.geckoview.*
 
 @OptIn(ExperimentalMaterial3Api::class)
+private fun buildAutoSendJs(
+    text: String,
+    inputSelector: String,
+    sendSelector: String,
+    sendWithEnter: Boolean
+): String {
+    val payload = JSONObject().apply {
+        put("text", text)
+        put("inputSelector", inputSelector)
+        put("sendSelector", sendSelector)
+        put("sendWithEnter", sendWithEnter)
+    }.toString()
+
+    return """
+        (() => {
+          const p = $payload;
+
+          const pick = (sel) => {
+            if (!sel || !sel.trim()) return null;
+            return document.querySelector(sel);
+          };
+
+          const input =
+            pick(p.inputSelector) ||
+            document.querySelector('textarea, [contenteditable="true"]');
+
+          if (!input) return JSON.stringify({ok:false, step:"input_not_found"});
+
+          const setText = (el, value) => {
+            if ("value" in el) el.value = value;
+            else el.textContent = value;
+
+            el.dispatchEvent(new Event("input", {bubbles:true}));
+            el.dispatchEvent(new Event("change", {bubbles:true}));
+          };
+
+          input.focus();
+          setText(input, p.text);
+
+          let btn =
+            pick(p.sendSelector) ||
+            document.querySelector('button[type="submit"], button[aria-label*="send" i], button[data-testid*="send" i]');
+
+          if (btn) {
+            btn.click();
+            return JSON.stringify({ok:true, mode:"click"});
+          }
+
+          if (p.sendWithEnter) {
+            const ev = {key:"Enter", code:"Enter", keyCode:13, which:13, bubbles:true, cancelable:true};
+            input.dispatchEvent(new KeyboardEvent("keydown", ev));
+            input.dispatchEvent(new KeyboardEvent("keyup", ev));
+            return JSON.stringify({ok:true, mode:"enter"});
+          }
+
+          return JSON.stringify({ok:false, step:"send_not_found"});
+        })();
+    """.trimIndent()
+}
 @Composable
 fun GeckoTestScreen(
     url: String,
