@@ -131,6 +131,13 @@ abstract class ChatDatabase : RoomDatabase() {
                 )
             }
         }
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE web_platforms ADD COLUMN inputSelector TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE web_platforms ADD COLUMN sendSelector  TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE web_platforms ADD COLUMN sendWithEnter INTEGER NOT NULL DEFAULT 1")
+    }
+        }
 
         // ── Builder ─────────────────────────────────────────────────────────
 
@@ -141,14 +148,15 @@ abstract class ChatDatabase : RoomDatabase() {
                 "aichat_database"
             )
                 .addMigrations(
-                    MIGRATION_1_2,
-                    MIGRATION_2_3,
-                    MIGRATION_3_4,
-                    MIGRATION_4_5,
-                    MIGRATION_5_6,
-                    MIGRATION_6_7,
-                    MIGRATION_7_8   // ✅ مضاف
-                )
+   MIGRATION_1_2,
+   MIGRATION_2_3,
+   MIGRATION_3_4,
+   MIGRATION_4_5,
+   MIGRATION_5_6,
+   MIGRATION_6_7,
+   MIGRATION_7_8,
+   MIGRATION_8_9
+)
                 .build()
 
         fun getDatabase(context: Context): ChatDatabase =
