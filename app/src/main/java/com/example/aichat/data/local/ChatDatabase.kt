@@ -18,7 +18,7 @@ import com.example.aichat.data.model.WebPlatform
         MemoryItem::class,
         WebPlatform::class
     ],
-    version = 8,          // ✅ 7 → 8
+    version = 9, // ✅ 8 → 9 (إضافة حقول الإرسال التلقائي للويب)
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -32,7 +32,7 @@ abstract class ChatDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: ChatDatabase? = null
 
-        // ── Migrations ──────────────────────────────────────────────────────
+        // ── Migrations ───────────────────────────────────────────
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -56,35 +56,25 @@ abstract class ChatDatabase : RoomDatabase() {
 
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "ALTER TABLE memory_items ADD COLUMN embedding TEXT NOT NULL DEFAULT ''"
-                )
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN embedding TEXT NOT NULL DEFAULT ''")
             }
         }
 
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
-                    "ALTER TABLE memory_items " +
-                    "ADD COLUMN embeddingModel TEXT NOT NULL DEFAULT 'text-embedding-004'"
+                    "ALTER TABLE memory_items ADD COLUMN embeddingModel TEXT NOT NULL DEFAULT 'text-embedding-004'"
                 )
                 db.execSQL(
-                    "ALTER TABLE memory_items " +
-                    "ADD COLUMN embeddingDimensions INTEGER NOT NULL DEFAULT 768"
+                    "ALTER TABLE memory_items ADD COLUMN embeddingDimensions INTEGER NOT NULL DEFAULT 768"
                 )
             }
         }
 
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "ALTER TABLE memory_items " +
-                    "ADD COLUMN contentHash TEXT NOT NULL DEFAULT ''"
-                )
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS index_memory_items_contentHash " +
-                    "ON memory_items(contentHash)"
-                )
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN contentHash TEXT NOT NULL DEFAULT ''")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_memory_items_contentHash ON memory_items(contentHash)")
             }
         }
 
@@ -111,35 +101,27 @@ abstract class ChatDatabase : RoomDatabase() {
 
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "ALTER TABLE web_platforms " +
-                    "ADD COLUMN aiMessageSelector TEXT NOT NULL DEFAULT ''"
-                )
-                db.execSQL(
-                    "ALTER TABLE web_platforms " +
-                    "ADD COLUMN memoryEnabled INTEGER NOT NULL DEFAULT 1"
-                )
+                db.execSQL("ALTER TABLE web_platforms ADD COLUMN aiMessageSelector TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE web_platforms ADD COLUMN memoryEnabled INTEGER NOT NULL DEFAULT 1")
             }
         }
 
-        // ✅ جديد — تحكم في الوصول للذاكرة لكل محادثة على حدة
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "ALTER TABLE conversations " +
-                    "ADD COLUMN memoryAccessEnabled INTEGER NOT NULL DEFAULT 1"
-                )
+                db.execSQL("ALTER TABLE conversations ADD COLUMN memoryAccessEnabled INTEGER NOT NULL DEFAULT 1")
             }
         }
+
+        // ✅ جديد: Web auto-send fields
         val MIGRATION_8_9 = object : Migration(8, 9) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE web_platforms ADD COLUMN inputSelector TEXT NOT NULL DEFAULT ''")
-        db.execSQL("ALTER TABLE web_platforms ADD COLUMN sendSelector  TEXT NOT NULL DEFAULT ''")
-        db.execSQL("ALTER TABLE web_platforms ADD COLUMN sendWithEnter INTEGER NOT NULL DEFAULT 1")
-    }
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE web_platforms ADD COLUMN inputSelector TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE web_platforms ADD COLUMN sendSelector  TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE web_platforms ADD COLUMN sendWithEnter INTEGER NOT NULL DEFAULT 1")
+            }
         }
 
-        // ── Builder ─────────────────────────────────────────────────────────
+        // ── Builder ──────────────────────────────────────────────
 
         private fun buildDatabase(context: Context): ChatDatabase =
             Room.databaseBuilder(
@@ -148,15 +130,15 @@ abstract class ChatDatabase : RoomDatabase() {
                 "aichat_database"
             )
                 .addMigrations(
-   MIGRATION_1_2,
-   MIGRATION_2_3,
-   MIGRATION_3_4,
-   MIGRATION_4_5,
-   MIGRATION_5_6,
-   MIGRATION_6_7,
-   MIGRATION_7_8,
-   MIGRATION_8_9
-)
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7,
+                    MIGRATION_7_8,
+                    MIGRATION_8_9
+                )
                 .build()
 
         fun getDatabase(context: Context): ChatDatabase =
