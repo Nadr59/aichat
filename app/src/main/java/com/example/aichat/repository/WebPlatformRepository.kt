@@ -17,11 +17,16 @@ class WebPlatformRepository(private val dao: WebPlatformDao) {
     val enabledPlatforms: Flow<List<WebPlatform>> = dao.observeEnabled()
 
     /**
-     * يُستدعى مرة عند بدء التطبيق.
-     * IGNORE في الـ DAO يضمن عدم الكتابة فوق البيانات الموجودة.
+     * يُستدعى مرة عند بدء التطبيق/فتح شاشة المنصات.
+     *
+     * ✅ مهم: لم نعد نستخدم insertAll فقط، لأن IGNORE لا يحدّث الموجود.
+     * الآن نستخدم ensureSeeded() التي:
+     * - تضمن إدراج الافتراضيات
+     * - وتعمل Patch للحقول الجديدة (inputSelector/sendSelector/...) إذا كانت فارغة
+     * بدون كسر تخصيص المستخدم.
      */
     suspend fun seedDefaults() {
-        dao.insertAll(DefaultWebPlatforms.all)
+        DefaultWebPlatforms.ensureSeeded(dao)
     }
 
     suspend fun getById(id: String): WebPlatform? = dao.getById(id)
@@ -39,29 +44,40 @@ class WebPlatformRepository(private val dao: WebPlatformDao) {
     ): Result<WebPlatform> = runCatching {
 
         val cleanName = name.trim()
-        val cleanUrl  = normalizeUrl(url)
+        val cleanUrl = normalizeUrl(url)
 
         require(cleanName.isNotBlank()) { "اسم المنصة مطلوب" }
         require(Patterns.WEB_URL.matcher(cleanUrl).matches()) { "الرابط غير صالح: $cleanUrl" }
 
         WebPlatform(
-            id              = UUID.randomUUID().toString(),
-            name            = cleanName,
-            url             = cleanUrl,
-            iconEmoji       = emoji.ifBlank { "🌐" },
+            id = UUID.randomUUID().toString(),
+            name = cleanName,
+            url = cleanUrl,
+            iconEmoji = emoji.ifBlank { "🌐" },
             requiresAccount = requiresAccount,
             preferredEngine = engine.name,
-            isBuiltIn       = false,
-            sortOrder       = 100
+            isBuiltIn = false,
+            isEnabled = true,
+            sortOrder = 100,
+
+            // الافتراضي للمخصص (يمكن إضافة شاشة إعداد selectors لاحقاً)
+            aiMessageSelector = "",
+            memoryEnabled = true,
+            inputSelector = "",
+            sendSelector = "",
+            sendWithEnter = true
         ).also { dao.upsert(it) }
     }
 
     /** تحديث أي حقل في منصة موجودة */
-    suspend fun update(platform: WebPlatform) = dao.upsert(platform)
+    suspend fun update(platform: WebPlatform) {
+        dao.upsert(platform)
+    }
 
     /** تفعيل / تعطيل منصة */
-    suspend fun setEnabled(platform: WebPlatform, enabled: Boolean) =
+    suspend fun setEnabled(platform: WebPlatform, enabled: Boolean) {
         dao.upsert(platform.copy(isEnabled = enabled))
+    }
 
     /**
      * حذف منصة مخصصة فقط.
