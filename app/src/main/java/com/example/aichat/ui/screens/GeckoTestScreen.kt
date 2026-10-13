@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape   // ✅ مهم
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -44,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton            // ✅ مهم
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
@@ -133,26 +135,20 @@ fun GeckoTestScreen(
     var loadError by remember(sessionKey) { mutableStateOf<String?>(null) }
     var geckoViewRef by remember(sessionKey) { mutableStateOf<GeckoView?>(null) }
 
-    // Capture
+    // capture
     var isSavingMemory by remember(sessionKey) { mutableStateOf(false) }
     var timeoutRunnable by remember(sessionKey) { mutableStateOf<Runnable?>(null) }
 
-    // Debug
+    // debug
     var showDebugLog by remember(sessionKey) { mutableStateOf(false) }
 
-    /**
-     * 📄✅ / 📄❌
-     * المقصود: تعطيل/تفعيل إرسال الذاكرة فقط، وليس تعطيل الإرسال نفسه.
-     */
+    // toggle memory injection
     var memoryInjectionEnabled by remember(sessionKey) { mutableStateOf(true) }
 
-    // =========================
-    // Compose Send Bar state
-    // =========================
+    // send bar state
     var query by remember(sessionKey) { mutableStateOf("") }
     var enhancedQuery by remember(sessionKey) { mutableStateOf<String?>(null) }
     var isEnhancing by remember(sessionKey) { mutableStateOf(false) }
-
     var includeMemory by remember(sessionKey) { mutableStateOf(false) }
     var isSending by remember(sessionKey) { mutableStateOf(false) }
 
@@ -164,17 +160,14 @@ fun GeckoTestScreen(
 
     val aiSettings = remember { AiSettings(context) }
     val memoryCuratorService = remember {
-        MemoryCuratorService(
-            settings = aiSettings,
-            fallbackBuilder = MemoryContextBuilder()
-        )
+        MemoryCuratorService(settings = aiSettings, fallbackBuilder = MemoryContextBuilder())
     }
     val memoryWindowBuilder = remember { MemoryWindowBuilder() }
 
     fun hostOrEmpty(): String = runCatching { Uri.parse(currentUrl).host.orEmpty() }.getOrDefault("")
 
     // ============================================================
-    // Session delegates
+    // Gecko delegates
     // ============================================================
 
     DisposableEffect(session) {
@@ -216,7 +209,6 @@ fun GeckoTestScreen(
                     val uri = Uri.parse(request.uri)
                     val scheme = uri.scheme?.lowercase()
 
-                    // منع fragment الداخلي للـ capture من إعادة التحميل
                     if (scheme == "https" || scheme == "http") {
                         if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
                             return GeckoResult.deny()
@@ -264,39 +256,24 @@ fun GeckoTestScreen(
         val p = platform
         val vm = chatViewModel
 
-        app.onContextWritten = { _, _, _ ->
-            // أي نتيجة كتابة/إرسال → اعتبر إرسالنا انتهى
-            isSending = false
-        }
+        app.onContextWritten = { _, _, _ -> isSending = false }
 
         if (p != null && vm != null && p.memoryEnabled) {
             app.onAiResponseCaptured = { _, text ->
-                Log.d(TAG, "ASSISTANT_RESPONSE len=${text.length}")
-                vm.onWebAiResponse(
-                    platformId = p.id,
-                    platformName = p.name,
-                    text = text
-                )
+                vm.onWebAiResponse(p.id, p.name, text)
             }
-
             app.onManualCaptureResult = { success, text, debug ->
                 timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
                 timeoutRunnable = null
                 isSavingMemory = false
 
                 if (success && text.isNotBlank()) {
-                    vm.onWebAiResponse(
-                        platformId = p.id,
-                        platformName = p.name,
-                        text = text,
-                        forceSaveToMemory = true
-                    )
-
+                    vm.onWebAiResponse(p.id, p.name, text, forceSaveToMemory = true)
                     Toast.makeText(context, "✅ تم الحفظ\n${text.take(50)}", Toast.LENGTH_LONG).show()
                 } else {
                     val info =
                         debug?.let {
-                            "assistant=${it.optInt("assistant")} articles=${it.optInt("articles")} bodyLen=${it.optInt("bodyLen")}"
+                            "assistant=${it.optInt("assistant")} bodyLen=${it.optInt("bodyLen")}"
                         } ?: "no response"
                     Toast.makeText(context, "⚠️ فشل الاستخراج\n$info", Toast.LENGTH_LONG).show()
                 }
@@ -306,7 +283,6 @@ fun GeckoTestScreen(
         onDispose {
             timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
             timeoutRunnable = null
-
             app.onAiResponseCaptured = null
             app.onManualCaptureResult = null
             app.onContextWritten = null
@@ -314,7 +290,7 @@ fun GeckoTestScreen(
     }
 
     // ============================================================
-    // Memory search + curator selection (Debounce via LaunchedEffect cancellation)
+    // Memory search + curator selection
     // ============================================================
 
     LaunchedEffect(includeMemory, displayedText, memoryInjectionEnabled, platform?.id) {
@@ -336,7 +312,6 @@ fun GeckoTestScreen(
             return@LaunchedEffect
         }
 
-        // debounce
         kotlinx.coroutines.delay(350)
 
         try {
@@ -375,11 +350,7 @@ fun GeckoTestScreen(
         val r = Runnable {
             if (isSavingMemory) {
                 isSavingMemory = false
-                Toast.makeText(
-                    context,
-                    "❌ انتهت المهلة\nExt=${app.aiChatExtension != null}",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(context, "❌ انتهت المهلة", Toast.LENGTH_LONG).show()
             }
         }
         timeoutRunnable = r
@@ -391,10 +362,8 @@ fun GeckoTestScreen(
     // ============================================================
 
     val handleBack: () -> Unit = {
-        if (canGoBack) runCatching { session.goBack() }.onFailure { onBack() }
-        else onBack()
+        if (canGoBack) runCatching { session.goBack() }.onFailure { onBack() } else onBack()
     }
-
     BackHandler { handleBack() }
 
     DisposableEffect(lifecycleOwner, session) {
@@ -406,22 +375,8 @@ fun GeckoTestScreen(
                     else -> Unit
                 }
             }
-
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-            timeoutRunnable = null
-
-            runCatching {
-                geckoViewRef?.releaseSession()
-                geckoViewRef = null
-                session.setActive(false)
-            }
-        }
     }
 
     // ============================================================
@@ -452,10 +407,7 @@ fun GeckoTestScreen(
                 }
             },
             navigationIcon = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     IconButton(onClick = handleBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
                     }
@@ -467,35 +419,22 @@ fun GeckoTestScreen(
             actions = {
                 if (platform != null && chatViewModel != null && platform.memoryEnabled) {
                     IconButton(onClick = saveToMemory, enabled = !isSavingMemory && !isLoading) {
-                        Text(if (isSavingMemory) "⏳" else "🧠", style = MaterialTheme.typography.titleMedium)
+                        Text(if (isSavingMemory) "⏳" else "🧠")
                     }
-
-                    Spacer(Modifier.width(6.dp))
-
-                    IconButton(onClick = { showDebugLog = true }) {
-                        Text("📋", style = MaterialTheme.typography.titleMedium)
-                    }
-
-                    Spacer(Modifier.width(6.dp))
-
+                    IconButton(onClick = { showDebugLog = true }) { Text("📋") }
                     IconButton(onClick = { memoryInjectionEnabled = !memoryInjectionEnabled }) {
-                        Text(if (memoryInjectionEnabled) "📄✅" else "📄❌", style = MaterialTheme.typography.titleMedium)
+                        Text(if (memoryInjectionEnabled) "📄✅" else "📄❌")
                     }
-
-                    Spacer(Modifier.width(6.dp))
                 }
 
                 IconButton(onClick = { session.reload() }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
                 }
-
                 IconButton(onClick = { openExternal(context, currentUrl) }) {
                     Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح خارجي")
                 }
             },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.background
-            )
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
         )
 
         if (availablePlatforms.isNotEmpty()) {
@@ -509,10 +448,7 @@ fun GeckoTestScreen(
                         selected = isSelected,
                         onClick = { if (!isSelected) onSwitchPlatform(tabPlatform) },
                         text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 if (tabPlatform.iconEmoji.isNotBlank()) Text(tabPlatform.iconEmoji)
                                 Text(tabPlatform.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
@@ -522,7 +458,6 @@ fun GeckoTestScreen(
             }
         }
 
-        // ========= Main web view area =========
         Box(modifier = Modifier.weight(1f)) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -569,22 +504,16 @@ fun GeckoTestScreen(
             }
         }
 
-        // ========= Fixed send bar =========
         WebSendBar(
             text = displayedText,
-            onTextChange = { new ->
-                if (enhancedQuery != null) enhancedQuery = new else query = new
-            },
+            onTextChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
             isEnhanced = enhancedQuery != null,
             isEnhancing = isEnhancing,
             isSending = isSending,
             memoryEnabled = memoryInjectionEnabled && (platform?.memoryEnabled == true) && chatViewModel != null,
             includeMemory = includeMemory,
             curatorReasoning = curatorReasoning,
-            onToggleMemory = {
-                val allowed = memoryInjectionEnabled && (platform?.memoryEnabled == true) && chatViewModel != null
-                if (allowed) includeMemory = !includeMemory
-            },
+            onToggleMemory = { includeMemory = !includeMemory },
             onEnhance = {
                 val t = displayedText.trim()
                 if (t.isBlank()) return@WebSendBar
@@ -603,11 +532,9 @@ fun GeckoTestScreen(
             },
             onClearEnhanced = { enhancedQuery = null },
             onSend = {
-                val p = platform
+                val p = platform ?: return@WebSendBar
                 val t = displayedText.trim()
-                if (p == null || t.isBlank()) return@WebSendBar
-
-                val host = hostOrEmpty()
+                if (t.isBlank()) return@WebSendBar
 
                 val memoryXml =
                     if (memoryInjectionEnabled && includeMemory && selectedIds.isNotEmpty()) {
@@ -640,13 +567,12 @@ fun GeckoTestScreen(
                 isSending = true
                 app.setContextPending(
                     text = finalText,
-                    targetDomain = host,
+                    targetDomain = hostOrEmpty(),
                     inputSelector = p.inputSelector,
                     sendSelector = p.sendSelector,
                     sendWithEnter = p.sendWithEnter
                 )
 
-                // تنظيف مربع الإدخال بعد الإرسال
                 query = ""
                 enhancedQuery = null
             }
@@ -657,10 +583,6 @@ fun GeckoTestScreen(
         DebugLogDialog(app = app, onDismiss = { showDebugLog = false })
     }
 }
-
-// ============================================================
-// Fixed bottom send bar
-// ============================================================
 
 @Composable
 private fun WebSendBar(
@@ -681,8 +603,10 @@ private fun WebSendBar(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
-        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             if (includeMemory && curatorReasoning.isNotBlank()) {
                 Text(
                     text = "🧠 اختيار الوسيط: $curatorReasoning",
@@ -732,7 +656,7 @@ private fun WebSendBar(
                         if (!isEnhanced && isEnhancing) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
-                            Text(if (isEnhanced) "↩️" else "⚡", style = MaterialTheme.typography.titleMedium)
+                            Text(if (isEnhanced) "↩️" else "⚡")
                         }
                     }
 
@@ -740,17 +664,13 @@ private fun WebSendBar(
                         onClick = onSend,
                         enabled = text.isNotBlank() && !isSending && !isEnhancing
                     ) {
-                        Text(if (isSending) "⏳" else "📤", style = MaterialTheme.typography.titleMedium)
+                        Text(if (isSending) "⏳" else "📤")
                     }
                 }
             }
         }
     }
 }
-
-// ============================================================
-// Debug log dialog
-// ============================================================
 
 @Composable
 private fun DebugLogDialog(
@@ -765,10 +685,7 @@ private fun DebugLogDialog(
         title = { Text("📋 سجل التشخيص (${logs.size})") },
         text = {
             if (logs.isEmpty()) {
-                Text(
-                    "لا توجد رسائل بعد.\nجرّب الإرسال 📤 أو الالتقاط 🧠 ثم افتح السجل.",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Text("لا توجد رسائل بعد.", style = MaterialTheme.typography.bodySmall)
             } else {
                 LazyColumn(
                     modifier = Modifier
@@ -776,11 +693,7 @@ private fun DebugLogDialog(
                         .height(420.dp)
                 ) {
                     items(logs) { line ->
-                        Text(
-                            text = line,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(vertical = 2.dp)
-                        )
+                        Text(text = line, fontSize = 11.sp, modifier = Modifier.padding(vertical = 2.dp))
                         HorizontalDivider()
                     }
                 }
@@ -803,10 +716,6 @@ private fun DebugLogDialog(
     )
 }
 
-// ============================================================
-// External open
-// ============================================================
-
 private fun openExternal(context: Context, url: String) {
     try {
         context.startActivity(
@@ -816,10 +725,6 @@ private fun openExternal(context: Context, url: String) {
         Toast.makeText(context, "لا يوجد تطبيق لفتح هذا الرابط", Toast.LENGTH_SHORT).show()
     }
 }
-
-// ============================================================
-// Load error
-// ============================================================
 
 @Composable
 private fun LoadErrorView(
@@ -833,29 +738,15 @@ private fun LoadErrorView(
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("⚠️", style = MaterialTheme.typography.displaySmall)
-
-            Text(
-                text = message,
-                style = MaterialTheme.typography.titleMedium,
-                textAlign = TextAlign.Center
-            )
-
+            Text(text = message, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             Spacer(Modifier.height(4.dp))
-
             androidx.compose.material3.Button(onClick = onRetry) { Text("إعادة المحاولة") }
             OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
         }
     }
 }
-
-// ============================================================
-// Gecko unavailable
-// ============================================================
 
 @Composable
 private fun GeckoUnavailableDialog(
@@ -875,9 +766,7 @@ private fun GeckoUnavailableDialog(
             )
         },
         confirmButton = {
-            androidx.compose.material3.Button(onClick = onOpenBrowser) {
-                Text("📱 فتح في المتصفح")
-            }
+            androidx.compose.material3.Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") }
         },
         dismissButton = {
             OutlinedButton(onClick = onBack) { Text("رجوع") }
