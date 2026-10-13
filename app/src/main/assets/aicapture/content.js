@@ -2,11 +2,11 @@
   "use strict";
 
   // ============================================================
-  // AiChat — PLATFORM REGISTRY + AUTO SEND + CAPTURE
-  // Version 1.0.36
+  // AiChat — AUTO SEND + CAPTURE
+  // Version 1.0.37 (Arena: enter-only + ctrl+enter fallback)
   // ============================================================
 
-  var VERSION = "1.0.36";
+  var VERSION = "1.0.37";
 
   // ============================================================
   // DEBUG LOG → Kotlin
@@ -136,10 +136,6 @@
     }
   }
 
-  function normalizeSpaces(s) {
-    return (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-  }
-
   // ============================================================
   // Input finders (fallback list)
   // ============================================================
@@ -187,19 +183,23 @@
 
   function findInputWithRetry(preferSelector, attempts, delay, callback, onFail) {
     var count = 0;
+
     function attempt() {
       var input = findInput(preferSelector);
       if (input) {
         callback(input);
         return;
       }
+
       count++;
       if (count >= attempts) {
         if (onFail) onFail();
         return;
       }
+
       setTimeout(attempt, delay);
     }
+
     attempt();
   }
 
@@ -261,13 +261,15 @@
   ];
 
   function findSendButton(preferSelector) {
-    if (preferSelector && preferSelector.trim()) {
-      try {
-        var b = document.querySelector(preferSelector);
-        if (b) return b;
-      } catch (e) {}
-    }
+    // ✅ لا نبحث في DOM إذا selector فاضي (لتجنب الضغط على زر غلط)
+    if (!preferSelector || !preferSelector.trim()) return null;
 
+    try {
+      var b = document.querySelector(preferSelector);
+      if (b) return b;
+    } catch (e) {}
+
+    // fallback selectors (لكن فقط إذا preferSelector كان موجوداً أساساً)
     for (var i = 0; i < DEFAULT_SEND_SELECTORS.length; i++) {
       try {
         var btn = document.querySelector(DEFAULT_SEND_SELECTORS[i]);
@@ -288,29 +290,41 @@
     }
   }
 
-  function sendEnter(input) {
+  function dispatchEnter(target, withCtrl) {
     try {
-      input.focus();
+      target.focus();
 
       var options = {
         key: "Enter",
         code: "Enter",
         keyCode: 13,
         which: 13,
+        ctrlKey: !!withCtrl,
+        shiftKey: false,
+        altKey: false,
+        metaKey: false,
         bubbles: true,
         cancelable: true,
         composed: true
       };
 
-      input.dispatchEvent(new KeyboardEvent("keydown", options));
-      input.dispatchEvent(new KeyboardEvent("keypress", options));
-      input.dispatchEvent(new KeyboardEvent("keyup", options));
+      target.dispatchEvent(new KeyboardEvent("keydown", options));
+      target.dispatchEvent(new KeyboardEvent("keypress", options));
+      target.dispatchEvent(new KeyboardEvent("keyup", options));
 
       return true;
     } catch (e) {
-      log("❌ Enter failed: " + (e && e.message ? e.message : String(e)));
+      log("❌ Enter dispatch failed: " + (e && e.message ? e.message : String(e)));
       return false;
     }
+  }
+
+  function sendEnter(input) {
+    return dispatchEnter(input, false);
+  }
+
+  function sendCtrlEnter(input) {
+    return dispatchEnter(input, true);
   }
 
   // ============================================================
@@ -328,9 +342,7 @@
         platform: CURRENT_PLATFORM.id,
         timestamp: Date.now()
       });
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   }
 
   function sendContextConsumed(contextId) {
@@ -341,9 +353,7 @@
         platform: CURRENT_PLATFORM.id,
         timestamp: Date.now()
       });
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   }
 
   // ============================================================
@@ -389,7 +399,7 @@
   }
 
   // ============================================================
-  // Response cleaning (كما هو تقريباً)
+  // Response cleaning / extraction
   // ============================================================
 
   function cleanAssistantResponse(text) {
@@ -399,7 +409,6 @@
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n");
 
-    // تقليل فراغات
     cleaned = cleaned.replace(/\n[ \t]*\n[ \t]*\n+/g, "\n\n");
     cleaned = cleaned.replace(/[ \t]+\n/g, "\n");
 
@@ -443,10 +452,7 @@
 
       text = cleanAssistantResponse(text);
 
-      if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(text)) {
-        continue;
-      }
-
+      if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(text)) continue;
       if (text) return text;
     }
 
@@ -465,10 +471,9 @@
   }
 
   // ============================================================
-  // Arena guard (كما كان + تحسين بسيط)
+  // Arena guard: prevent capturing injected/user prompt as assistant
   // ============================================================
 
-  var lastInjectedText = "";
   var lastInjectedSignature = "";
   var lastInjectedAt = 0;
 
@@ -521,7 +526,7 @@
   }
 
   // ============================================================
-  // Capture watcher (كما هو)
+  // Capture watcher (unchanged behavior)
   // ============================================================
 
   var baselineAssistant = "";
@@ -659,15 +664,12 @@
     var text = opts.text || "";
     var contextId = opts.contextId || 0;
 
-    // Arena guard signature
-    lastInjectedText = text;
     lastInjectedSignature = makeSignature(text);
     lastInjectedAt = Date.now();
 
-    // نبدأ الالتقاط قبل الإرسال
+    // capture BEFORE sending
     startResponseCapture();
 
-    // 1) find input
     findInputWithRetry(
       opts.inputSelector || "",
       12,
@@ -682,8 +684,41 @@
 
           sendContextWritten(true, contextId, "text_injected", "ok");
 
-          // 2) try click send button
-          var btn = findSendButton(opts.sendSelector || "");
+          // ====================================================
+          // ✅ Arena: ENTER only (no click)
+          // ====================================================
+          if (CURRENT_PLATFORM.id === "arena") {
+            if (!opts.sendWithEnter) {
+              sendContextWritten(false, contextId, "send_failed", "arena_sendWithEnter_disabled");
+              return;
+            }
+
+            log("🎯 Arena: send via Enter (skip button click)");
+            if (sendEnter(input)) {
+              sendContextWritten(true, contextId, "enter_sent", "arena_enter");
+              sendContextConsumed(contextId);
+              return;
+            }
+
+            log("🎯 Arena: Enter failed, try Ctrl+Enter");
+            if (sendCtrlEnter(input)) {
+              sendContextWritten(true, contextId, "ctrl_enter_sent", "arena_ctrl_enter");
+              sendContextConsumed(contextId);
+              return;
+            }
+
+            sendContextWritten(false, contextId, "send_failed", "arena_enter_and_ctrl_enter_failed");
+            return;
+          }
+
+          // ====================================================
+          // Other platforms:
+          // - click only if sendSelector is provided (non-empty)
+          // - else fallback to Enter
+          // ====================================================
+          var preferSendSel = (opts.sendSelector || "").trim();
+          var btn = findSendButton(preferSendSel);
+
           if (btn) {
             var clicked = clickSend(btn);
             if (clicked) {
@@ -691,10 +726,8 @@
               sendContextConsumed(contextId);
               return;
             }
-            // إذا فشل click نجرّب Enter
           }
 
-          // 3) fallback enter
           if (opts.sendWithEnter) {
             var sent = sendEnter(input);
             if (sent) {
@@ -748,7 +781,6 @@
         return Promise.resolve({ ok: false, reason: "empty_text" });
       }
 
-      // ✅ تنفيذ الإرسال التلقائي مع selectors
       injectAndSend({
         text: text,
         contextId: contextId,
@@ -757,7 +789,6 @@
         sendWithEnter: message.sendWithEnter !== false
       });
 
-      // نرد بسرعة للـ background
       return Promise.resolve({ ok: true, type: "CONTEXT_TO_PAGE" });
     }
   });
