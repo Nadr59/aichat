@@ -23,14 +23,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -38,18 +36,14 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
@@ -76,7 +70,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.AichatApp
@@ -84,14 +77,12 @@ import com.example.aichat.GeckoSessionManager
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.MemoryItem
-import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
@@ -99,94 +90,6 @@ import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
 
 private const val TAG = "GeckoTestScreen"
-
-/**
- * GeckoView artifact عندك لا يوفر evaluateJS كـ API Kotlin،
- * لذلك نستخدم Reflection لتجنب خطأ compile.
- *
- * إذا لم توجد evaluateJS فعلاً وقت التشغيل، سنسجل تحذير فقط.
- * (الحل النهائي وقتها: إرسال عبر WebExtension messaging بدل JS injection.)
- */
-private fun evaluateJsCompat(session: GeckoSession, js: String) {
-    runCatching {
-        val method = session.javaClass.methods.firstOrNull { m ->
-            (m.name == "evaluateJS" || m.name == "evaluateJavascript") &&
-                m.parameterTypes.size == 1 &&
-                m.parameterTypes[0] == String::class.java
-        } ?: throw NoSuchMethodException("No evaluateJS(String) / evaluateJavascript(String) in this GeckoView")
-
-        method.invoke(session, js)
-    }.onFailure { e ->
-        Log.w(TAG, "JS injection failed: ${e.message}", e)
-    }
-}
-
-/**
- * JS helper: يكتب النص داخل حقل إدخال المنصة ويضغط إرسال (أو Enter).
- * يعتمد على selectors داخل WebPlatform:
- * - inputSelector
- * - sendSelector
- * - sendWithEnter
- */
-private fun buildAutoSendJs(
-    text: String,
-    inputSelector: String,
-    sendSelector: String,
-    sendWithEnter: Boolean
-): String {
-    val payload = JSONObject().apply {
-        put("text", text)
-        put("inputSelector", inputSelector)
-        put("sendSelector", sendSelector)
-        put("sendWithEnter", sendWithEnter)
-    }.toString()
-
-    return """
-        (() => {
-          const p = $payload;
-
-          const pick = (sel) => {
-            if (!sel || !sel.trim()) return null;
-            return document.querySelector(sel);
-          };
-
-          const input =
-            pick(p.inputSelector) ||
-            document.querySelector('textarea, [contenteditable="true"]');
-
-          if (!input) return JSON.stringify({ok:false, step:"input_not_found"});
-
-          const setText = (el, value) => {
-            if ("value" in el) el.value = value;
-            else el.textContent = value;
-
-            el.dispatchEvent(new Event("input", {bubbles:true}));
-            el.dispatchEvent(new Event("change", {bubbles:true}));
-          };
-
-          input.focus();
-          setText(input, p.text);
-
-          let btn =
-            pick(p.sendSelector) ||
-            document.querySelector('button[type="submit"], button[aria-label*="send" i], button[data-testid*="send" i]');
-
-          if (btn) {
-            btn.click();
-            return JSON.stringify({ok:true, mode:"click"});
-          }
-
-          if (p.sendWithEnter) {
-            const ev = {key:"Enter", code:"Enter", keyCode:13, which:13, bubbles:true, cancelable:true};
-            input.dispatchEvent(new KeyboardEvent("keydown", ev));
-            input.dispatchEvent(new KeyboardEvent("keyup", ev));
-            return JSON.stringify({ok:true, mode:"enter"});
-          }
-
-          return JSON.stringify({ok:false, step:"send_not_found"});
-        })();
-    """.trimIndent()
-}
 
 @Composable
 fun GeckoTestScreen(
@@ -203,8 +106,9 @@ fun GeckoTestScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val app = context.applicationContext as AichatApp
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val runtime = remember { app.getOrCreateGeckoRuntime() }
+    val scope = rememberCoroutineScope()
 
+    val runtime = remember { app.getOrCreateGeckoRuntime() }
     if (runtime == null) {
         GeckoUnavailableDialog(
             platformTitle = title,
@@ -229,18 +133,45 @@ fun GeckoTestScreen(
     var loadError by remember(sessionKey) { mutableStateOf<String?>(null) }
     var geckoViewRef by remember(sessionKey) { mutableStateOf<GeckoView?>(null) }
 
+    // Capture
     var isSavingMemory by remember(sessionKey) { mutableStateOf(false) }
     var timeoutRunnable by remember(sessionKey) { mutableStateOf<Runnable?>(null) }
 
+    // Debug
+    var showDebugLog by remember(sessionKey) { mutableStateOf(false) }
+
     /**
      * 📄✅ / 📄❌
-     * تمكين/تعطيل "إرسال الذاكرة للويب" فقط (Memory injection).
-     * customSystemInstruction تُرسل دائماً.
+     * المقصود: تعطيل/تفعيل إرسال الذاكرة فقط، وليس تعطيل الإرسال نفسه.
      */
-    var isSystemPromptEnabled by remember(sessionKey) { mutableStateOf(true) }
+    var memoryInjectionEnabled by remember(sessionKey) { mutableStateOf(true) }
 
-    var showSendDialog by remember(sessionKey) { mutableStateOf(false) }
-    var showDebugLog by remember(sessionKey) { mutableStateOf(false) }
+    // =========================
+    // Compose Send Bar state
+    // =========================
+    var query by remember(sessionKey) { mutableStateOf("") }
+    var enhancedQuery by remember(sessionKey) { mutableStateOf<String?>(null) }
+    var isEnhancing by remember(sessionKey) { mutableStateOf(false) }
+
+    var includeMemory by remember(sessionKey) { mutableStateOf(false) }
+    var isSending by remember(sessionKey) { mutableStateOf(false) }
+
+    var searchResults by remember(sessionKey) { mutableStateOf(emptyList<MemoryItem>()) }
+    var selectedIds by remember(sessionKey) { mutableStateOf(emptyList<Long>()) }
+    var curatorReasoning by remember(sessionKey) { mutableStateOf("") }
+
+    val displayedText = enhancedQuery ?: query
+
+    val aiSettings = remember { AiSettings(context) }
+    val memoryCuratorService = remember {
+        MemoryCuratorService(
+            settings = aiSettings,
+            fallbackBuilder = MemoryContextBuilder()
+        )
+    }
+    val memoryWindowBuilder = remember { MemoryWindowBuilder() }
+
+    fun hostOrEmpty(): String = runCatching { Uri.parse(currentUrl).host.orEmpty() }.getOrDefault("")
 
     // ============================================================
     // Session delegates
@@ -268,7 +199,7 @@ fun GeckoTestScreen(
         session.contentDelegate =
             object : GeckoSession.ContentDelegate {
                 override fun onTitleChange(session: GeckoSession, title: String?) {
-                    if (!title.isNullOrBlank()) currentTitle = title.take(50)
+                    if (!title.isNullOrBlank()) currentTitle = title.take(60)
                 }
             }
 
@@ -285,6 +216,7 @@ fun GeckoTestScreen(
                     val uri = Uri.parse(request.uri)
                     val scheme = uri.scheme?.lowercase()
 
+                    // منع fragment الداخلي للـ capture من إعادة التحميل
                     if (scheme == "https" || scheme == "http") {
                         if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
                             return GeckoResult.deny()
@@ -325,18 +257,21 @@ fun GeckoTestScreen(
     }
 
     // ============================================================
-    // Extension callbacks (capture -> save to shared memory)
+    // Extension callbacks
     // ============================================================
 
     DisposableEffect(platform?.id) {
         val p = platform
         val vm = chatViewModel
 
+        app.onContextWritten = { _, _, _ ->
+            // أي نتيجة كتابة/إرسال → اعتبر إرسالنا انتهى
+            isSending = false
+        }
+
         if (p != null && vm != null && p.memoryEnabled) {
             app.onAiResponseCaptured = { _, text ->
-                Log.d(TAG, "📨 Callback received: platform=${p.name}, len=${text.length}")
-                app.logDebug("📨 GeckoTestScreen received ASSISTANT_RESPONSE: len=${text.length}")
-
+                Log.d(TAG, "ASSISTANT_RESPONSE len=${text.length}")
                 vm.onWebAiResponse(
                     platformId = p.id,
                     platformName = p.name,
@@ -361,11 +296,8 @@ fun GeckoTestScreen(
                 } else {
                     val info =
                         debug?.let {
-                            "assistant=${it.optInt("assistant")} " +
-                                "articles=${it.optInt("articles")} " +
-                                "body=${it.optInt("bodyLen")}"
+                            "assistant=${it.optInt("assistant")} articles=${it.optInt("articles")} bodyLen=${it.optInt("bodyLen")}"
                         } ?: "no response"
-
                     Toast.makeText(context, "⚠️ فشل الاستخراج\n$info", Toast.LENGTH_LONG).show()
                 }
             }
@@ -374,13 +306,60 @@ fun GeckoTestScreen(
         onDispose {
             timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
             timeoutRunnable = null
+
             app.onAiResponseCaptured = null
             app.onManualCaptureResult = null
+            app.onContextWritten = null
         }
     }
 
     // ============================================================
-    // Actions
+    // Memory search + curator selection (Debounce via LaunchedEffect cancellation)
+    // ============================================================
+
+    LaunchedEffect(includeMemory, displayedText, memoryInjectionEnabled, platform?.id) {
+        val memoryAllowed = memoryInjectionEnabled && (platform?.memoryEnabled == true) && chatViewModel != null
+
+        if (!memoryAllowed) {
+            includeMemory = false
+            searchResults = emptyList()
+            selectedIds = emptyList()
+            curatorReasoning = ""
+            return@LaunchedEffect
+        }
+
+        val q = displayedText.trim()
+        if (!includeMemory || q.length <= 2) {
+            searchResults = emptyList()
+            selectedIds = emptyList()
+            curatorReasoning = ""
+            return@LaunchedEffect
+        }
+
+        // debounce
+        kotlinx.coroutines.delay(350)
+
+        try {
+            val candidates = chatViewModel!!.searchSharedMemories(q)
+            searchResults = candidates
+
+            if (candidates.isEmpty()) {
+                selectedIds = emptyList()
+                curatorReasoning = ""
+            } else {
+                val curatorResult = memoryCuratorService.curateSelection(q, candidates)
+                selectedIds = curatorResult.selectedIds
+                curatorReasoning = curatorResult.reasoning
+            }
+        } catch (_: Exception) {
+            searchResults = emptyList()
+            selectedIds = emptyList()
+            curatorReasoning = ""
+        }
+    }
+
+    // ============================================================
+    // Capture action
     // ============================================================
 
     val saveToMemory: () -> Unit = save@{
@@ -391,7 +370,6 @@ fun GeckoTestScreen(
         isSavingMemory = true
 
         Toast.makeText(context, "🧠 جاري البحث في الصفحة...", Toast.LENGTH_SHORT).show()
-
         app.triggerCapture()
 
         val r = Runnable {
@@ -404,45 +382,13 @@ fun GeckoTestScreen(
                 ).show()
             }
         }
-
         timeoutRunnable = r
         mainHandler.postDelayed(r, 5000L)
     }
 
-    val openSendDialog: () -> Unit = {
-        if (!isLoading && platform != null && chatViewModel != null) {
-            showSendDialog = true
-        }
-    }
-
-    if (showSendDialog && chatViewModel != null) {
-        SendToWebDialog(
-            chatViewModel = chatViewModel,
-            memoryEnabled = isSystemPromptEnabled,
-            onDismiss = { showSendDialog = false },
-            onSend = { finalText ->
-    val p = platform
-    if (p != null) {
-        val host = runCatching { Uri.parse(currentUrl).host.orEmpty() }.getOrDefault("")
-        app.setContextPending(
-            text = finalText,
-            targetDomain = host,
-            inputSelector = p.inputSelector,
-            sendSelector = p.sendSelector,
-            sendWithEnter = p.sendWithEnter
-        )
-        app.logDebug("📤 CONTEXT_TO_PAGE queued | platform=${p.id} host=$host len=${finalText.length}")
-    } else {
-        Toast.makeText(context, "⚠️ لا توجد منصة محددة", Toast.LENGTH_SHORT).show()
-    }
-    showSendDialog = false
-            }
-        )
-    }
-
-    if (showDebugLog) {
-        DebugLogDialog(app = app, onDismiss = { showDebugLog = false })
-    }
+    // ============================================================
+    // Back handling
+    // ============================================================
 
     val handleBack: () -> Unit = {
         if (canGoBack) runCatching { session.goBack() }.onFailure { onBack() }
@@ -470,12 +416,10 @@ fun GeckoTestScreen(
             timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
             timeoutRunnable = null
 
-            try {
+            runCatching {
                 geckoViewRef?.releaseSession()
                 geckoViewRef = null
                 session.setActive(false)
-            } catch (e: Exception) {
-                Log.w(TAG, "Cleanup: ${e.message}")
             }
         }
     }
@@ -496,7 +440,6 @@ fun GeckoTestScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-
                     if (currentTitle != title && currentTitle.isNotBlank()) {
                         Text(
                             text = currentTitle,
@@ -514,47 +457,32 @@ fun GeckoTestScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     IconButton(onClick = handleBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع داخل المنصة")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
                     }
                     IconButton(onClick = onHome) {
-                        Icon(Icons.Filled.Home, contentDescription = "الصفحة الرئيسية")
+                        Icon(Icons.Filled.Home, contentDescription = "الرئيسية")
                     }
                 }
             },
             actions = {
-                if (platform != null && chatViewModel != null) {
-
-                    if (platform.memoryEnabled) {
-                        IconButton(
-                            onClick = saveToMemory,
-                            enabled = !isSavingMemory && !isLoading
-                        ) {
-                            Text(if (isSavingMemory) "⏳" else "🧠", style = MaterialTheme.typography.titleMedium)
-                        }
-
-                        Spacer(Modifier.width(6.dp))
-
-                        IconButton(onClick = { showDebugLog = true }) {
-                            Text("📋", style = MaterialTheme.typography.titleMedium)
-                        }
-
-                        Spacer(Modifier.width(6.dp))
-
-                        IconButton(onClick = { isSystemPromptEnabled = !isSystemPromptEnabled }) {
-                            Text(
-                                text = if (isSystemPromptEnabled) "📄✅" else "📄❌",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
-
-                        Spacer(Modifier.width(6.dp))
+                if (platform != null && chatViewModel != null && platform.memoryEnabled) {
+                    IconButton(onClick = saveToMemory, enabled = !isSavingMemory && !isLoading) {
+                        Text(if (isSavingMemory) "⏳" else "🧠", style = MaterialTheme.typography.titleMedium)
                     }
 
-                    IconButton(onClick = openSendDialog, enabled = !isLoading) {
-                        Text("📤", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.width(6.dp))
+
+                    IconButton(onClick = { showDebugLog = true }) {
+                        Text("📋", style = MaterialTheme.typography.titleMedium)
                     }
 
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(6.dp))
+
+                    IconButton(onClick = { memoryInjectionEnabled = !memoryInjectionEnabled }) {
+                        Text(if (memoryInjectionEnabled) "📄✅" else "📄❌", style = MaterialTheme.typography.titleMedium)
+                    }
+
+                    Spacer(Modifier.width(6.dp))
                 }
 
                 IconButton(onClick = { session.reload() }) {
@@ -562,7 +490,7 @@ fun GeckoTestScreen(
                 }
 
                 IconButton(onClick = { openExternal(context, currentUrl) }) {
-                    Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح في المتصفح")
+                    Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح خارجي")
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -577,7 +505,6 @@ fun GeckoTestScreen(
             ScrollableTabRow(selectedTabIndex = selectedIndex, edgePadding = 8.dp) {
                 availablePlatforms.forEach { tabPlatform ->
                     val isSelected = tabPlatform.id == platform?.id
-
                     Tab(
                         selected = isSelected,
                         onClick = { if (!isSelected) onSwitchPlatform(tabPlatform) },
@@ -586,9 +513,7 @@ fun GeckoTestScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                if (tabPlatform.iconEmoji.isNotBlank()) {
-                                    Text(tabPlatform.iconEmoji, style = MaterialTheme.typography.bodyMedium)
-                                }
+                                if (tabPlatform.iconEmoji.isNotBlank()) Text(tabPlatform.iconEmoji)
                                 Text(tabPlatform.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
@@ -597,8 +522,8 @@ fun GeckoTestScreen(
             }
         }
 
-        Box(modifier = Modifier.fillMaxSize()) {
-
+        // ========= Main web view area =========
+        Box(modifier = Modifier.weight(1f)) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
@@ -643,8 +568,189 @@ fun GeckoTestScreen(
                 )
             }
         }
+
+        // ========= Fixed send bar =========
+        WebSendBar(
+            text = displayedText,
+            onTextChange = { new ->
+                if (enhancedQuery != null) enhancedQuery = new else query = new
+            },
+            isEnhanced = enhancedQuery != null,
+            isEnhancing = isEnhancing,
+            isSending = isSending,
+            memoryEnabled = memoryInjectionEnabled && (platform?.memoryEnabled == true) && chatViewModel != null,
+            includeMemory = includeMemory,
+            curatorReasoning = curatorReasoning,
+            onToggleMemory = {
+                val allowed = memoryInjectionEnabled && (platform?.memoryEnabled == true) && chatViewModel != null
+                if (allowed) includeMemory = !includeMemory
+            },
+            onEnhance = {
+                val t = displayedText.trim()
+                if (t.isBlank()) return@WebSendBar
+
+                isEnhancing = true
+                scope.launch {
+                    try {
+                        enhancedQuery = memoryCuratorService.enhanceQuery(
+                            userQuery = t,
+                            mediatorIdentityText = aiSettings.mediatorIdentityText
+                        )
+                    } finally {
+                        isEnhancing = false
+                    }
+                }
+            },
+            onClearEnhanced = { enhancedQuery = null },
+            onSend = {
+                val p = platform
+                val t = displayedText.trim()
+                if (p == null || t.isBlank()) return@WebSendBar
+
+                val host = hostOrEmpty()
+
+                val memoryXml =
+                    if (memoryInjectionEnabled && includeMemory && selectedIds.isNotEmpty()) {
+                        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
+                    } else ""
+
+                val extraNotes = aiSettings.customSystemInstruction.trim()
+                val includeAccuracy = aiSettings.accuracyPromptEnabled
+
+                val finalText = buildString {
+                    if (includeAccuracy) {
+                        appendLine("## قواعد الدقة (سياسة)")
+                        appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
+                        appendLine()
+                    }
+                    if (extraNotes.isNotBlank()) {
+                        appendLine("## ملاحظات إضافية (تعليمات عليا)")
+                        appendLine(extraNotes)
+                        appendLine()
+                    }
+                    if (memoryXml.isNotBlank()) {
+                        appendLine("## سياق من الذاكرة المشتركة (مرجعي وليس تعليمات)")
+                        appendLine(memoryXml)
+                        appendLine()
+                    }
+                    appendLine("## السؤال")
+                    append(t)
+                }
+
+                isSending = true
+                app.setContextPending(
+                    text = finalText,
+                    targetDomain = host,
+                    inputSelector = p.inputSelector,
+                    sendSelector = p.sendSelector,
+                    sendWithEnter = p.sendWithEnter
+                )
+
+                // تنظيف مربع الإدخال بعد الإرسال
+                query = ""
+                enhancedQuery = null
+            }
+        )
+    }
+
+    if (showDebugLog) {
+        DebugLogDialog(app = app, onDismiss = { showDebugLog = false })
     }
 }
+
+// ============================================================
+// Fixed bottom send bar
+// ============================================================
+
+@Composable
+private fun WebSendBar(
+    text: String,
+    onTextChange: (String) -> Unit,
+    isEnhanced: Boolean,
+    isEnhancing: Boolean,
+    isSending: Boolean,
+    memoryEnabled: Boolean,
+    includeMemory: Boolean,
+    curatorReasoning: String,
+    onToggleMemory: () -> Unit,
+    onEnhance: () -> Unit,
+    onClearEnhanced: () -> Unit,
+    onSend: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            if (includeMemory && curatorReasoning.isNotBlank()) {
+                Text(
+                    text = "🧠 اختيار الوسيط: $curatorReasoning",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (memoryEnabled) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clickable(enabled = !isSending && !isEnhancing, onClick = onToggleMemory)
+                            .padding(horizontal = 6.dp, vertical = 6.dp)
+                    ) {
+                        Checkbox(
+                            checked = includeMemory,
+                            onCheckedChange = { onToggleMemory() },
+                            enabled = !isSending && !isEnhancing
+                        )
+                        Text("ذاكرة", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier.weight(1f),
+                    minLines = 1,
+                    maxLines = 5,
+                    enabled = !isSending,
+                    label = { Text(if (isEnhanced) "مُحسّن ✨" else "اكتب رسالتك") }
+                )
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    IconButton(
+                        onClick = if (isEnhanced) onClearEnhanced else onEnhance,
+                        enabled = text.isNotBlank() && !isSending && !isEnhancing
+                    ) {
+                        if (!isEnhanced && isEnhancing) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(if (isEnhanced) "↩️" else "⚡", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onSend,
+                        enabled = text.isNotBlank() && !isSending && !isEnhancing
+                    ) {
+                        Text(if (isSending) "⏳" else "📤", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// Debug log dialog
+// ============================================================
 
 @Composable
 private fun DebugLogDialog(
@@ -660,7 +766,7 @@ private fun DebugLogDialog(
         text = {
             if (logs.isEmpty()) {
                 Text(
-                    "لا توجد رسائل تشخيص بعد.\nجرّب زر 🧠 أو 📤 ثم افتح هذا السجل.",
+                    "لا توجد رسائل بعد.\nجرّب الإرسال 📤 أو الالتقاط 🧠 ثم افتح السجل.",
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
@@ -697,342 +803,23 @@ private fun DebugLogDialog(
     )
 }
 
-@Composable
-private fun SendToWebDialog(
-    chatViewModel: ChatViewModel,
-    memoryEnabled: Boolean = true,
-    onDismiss: () -> Unit,
-    onSend: (String) -> Unit
-) {
-    var query by remember { mutableStateOf("") }
-    var enhancedQuery by remember { mutableStateOf<String?>(null) }
-    var isEnhancing by remember { mutableStateOf(false) }
-    var showStyleMenu by remember { mutableStateOf(false) }
-
-    var includeMemory by remember { mutableStateOf(false) }
-
-    var searchResults by remember { mutableStateOf(emptyList<MemoryItem>()) }
-    var selectedIds by remember { mutableStateOf(emptyList<Long>()) }
-    var curatorReasoning by remember { mutableStateOf("") }
-
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-
-    val aiSettings = remember { AiSettings(context) }
-
-    val memoryCuratorService = remember {
-        MemoryCuratorService(
-            settings = aiSettings,
-            fallbackBuilder = MemoryContextBuilder()
-        )
-    }
-
-    val memoryWindowBuilder = remember { MemoryWindowBuilder() }
-
-    val displayedText = enhancedQuery ?: query
-
-    LaunchedEffect(memoryEnabled) {
-        if (!memoryEnabled) {
-            includeMemory = false
-            searchResults = emptyList()
-            selectedIds = emptyList()
-            curatorReasoning = ""
-        }
-    }
-
-    LaunchedEffect(includeMemory, displayedText, memoryEnabled) {
-        if (!memoryEnabled) return@LaunchedEffect
-
-        if (includeMemory && displayedText.length > 2) {
-            try {
-                val candidates = chatViewModel.searchSharedMemories(displayedText)
-                searchResults = candidates
-
-                if (candidates.isEmpty()) {
-                    selectedIds = emptyList()
-                    curatorReasoning = ""
-                } else {
-                    val curatorResult = memoryCuratorService.curateSelection(
-                        userQuery = displayedText,
-                        candidates = candidates
-                    )
-                    selectedIds = curatorResult.selectedIds
-                    curatorReasoning = curatorResult.reasoning
-                }
-            } catch (_: Exception) {
-                searchResults = emptyList()
-                selectedIds = emptyList()
-                curatorReasoning = ""
-            }
-        } else {
-            searchResults = emptyList()
-            selectedIds = emptyList()
-            curatorReasoning = ""
-        }
-    }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 650.dp),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "💬 إرسال سؤال إلى المنصة",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-
-                OutlinedTextField(
-                    value = displayedText,
-                    onValueChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
-                    label = { Text(if (enhancedQuery != null) "السؤال المُحسّن ✨" else "اكتب سؤالك") },
-                    placeholder = { Text("مثال: ما الطقس اليوم؟") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2,
-                    maxLines = 6,
-                    enabled = !isEnhancing
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            val textToEnhance = displayedText.trim()
-                            if (textToEnhance.isBlank()) return@OutlinedButton
-
-                            isEnhancing = true
-                            scope.launch {
-                                try {
-                                    val enhanced = memoryCuratorService.enhanceQuery(
-                                        userQuery = textToEnhance,
-                                        mediatorIdentityText = aiSettings.mediatorIdentityText
-                                    )
-                                    enhancedQuery = enhanced
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "❌ فشل التحسين: ${e.message}", Toast.LENGTH_SHORT).show()
-                                } finally {
-                                    isEnhancing = false
-                                }
-                            }
-                        },
-                        enabled = displayedText.isNotBlank() && !isEnhancing,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        if (isEnhancing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.width(4.dp))
-                        }
-                        Text("⚡ توسيع")
-                    }
-
-                    Box(modifier = Modifier.weight(1f)) {
-                        OutlinedButton(
-                            onClick = { showStyleMenu = true },
-                            enabled = displayedText.isNotBlank() && !isEnhancing,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("🎨 صياغة")
-                        }
-
-                        DropdownMenu(
-                            expanded = showStyleMenu,
-                            onDismissRequest = { showStyleMenu = false }
-                        ) {
-                            for (style in QueryStyle.entries) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Text(style.emoji, style = MaterialTheme.typography.titleMedium)
-                                            Column {
-                                                Text(style.displayName, fontWeight = FontWeight.Bold)
-                                                Text(
-                                                    text = style.description,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = {
-                                        showStyleMenu = false
-                                        val textToRefine = displayedText.trim()
-                                        if (textToRefine.isBlank()) return@DropdownMenuItem
-
-                                        isEnhancing = true
-                                        scope.launch {
-                                            try {
-                                                val refined = memoryCuratorService.refineQueryStyle(
-                                                    userQuery = textToRefine,
-                                                    style = style
-                                                )
-                                                enhancedQuery = refined
-                                            } catch (e: Exception) {
-                                                Toast.makeText(context, "❌ فشل التحسين: ${e.message}", Toast.LENGTH_SHORT).show()
-                                            } finally {
-                                                isEnhancing = false
-                                            }
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    if (enhancedQuery != null) {
-                        OutlinedButton(
-                            onClick = { enhancedQuery = null },
-                            modifier = Modifier.weight(1f)
-                        ) { Text("🧹 مسح") }
-                    }
-                }
-
-                HorizontalDivider()
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .let { base -> if (memoryEnabled) base.clickable { includeMemory = !includeMemory } else base }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = includeMemory && memoryEnabled,
-                        onCheckedChange = { if (memoryEnabled) includeMemory = it },
-                        enabled = memoryEnabled
-                    )
-
-                    Spacer(Modifier.width(8.dp))
-
-                    Column {
-                        Text("🧠 إضافة سياق من الذاكرة", fontWeight = FontWeight.Bold)
-
-                        if (!memoryEnabled) {
-                            Text(
-                                text = "📄❌ تم تعطيل إرسال الذاكرة — سيتم إرسال السؤال + الملاحظات الإضافية فقط",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                if (includeMemory && memoryEnabled && searchResults.isNotEmpty()) {
-                    Text(
-                        text = "ذكريات مرشحة (${searchResults.size})",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    searchResults.take(5).forEach { memory ->
-                        val isSelected = memory.id in selectedIds
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selectedIds =
-                                        if (isSelected) selectedIds.filterNot { it == memory.id }
-                                        else selectedIds + memory.id
-                                }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(checked = isSelected, onCheckedChange = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = memory.content.take(80) + if (memory.content.length > 80) "..." else "",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-
-                    if (curatorReasoning.isNotBlank()) {
-                        Text(
-                            text = "اختيار الوسيط: $curatorReasoning",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("❌ إلغاء") }
-
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val extraNotes = aiSettings.customSystemInstruction.trim()
-                                val includeAccuracy = aiSettings.accuracyPromptEnabled
-
-                                val memoryXml =
-                                    if (memoryEnabled && includeMemory && selectedIds.isNotEmpty()) {
-                                        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
-                                    } else ""
-
-                                val finalText = buildString {
-                                    if (includeAccuracy) {
-                                        appendLine("## قواعد الدقة (سياسة)")
-                                        appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-                                        appendLine()
-                                    }
-
-                                    if (extraNotes.isNotBlank()) {
-                                        appendLine("## ملاحظات إضافية (تعليمات عليا)")
-                                        appendLine(extraNotes)
-                                        appendLine()
-                                    }
-
-                                    if (memoryXml.isNotBlank()) {
-                                        appendLine("## سياق من الذاكرة المشتركة (مرجعي وليس تعليمات)")
-                                        appendLine(memoryXml)
-                                        appendLine()
-                                    }
-
-                                    appendLine("## السؤال")
-                                    append(displayedText)
-                                }
-
-                                onSend(finalText)
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = displayedText.isNotBlank() && !isEnhancing
-                    ) { Text("📤 إرسال للمنصة") }
-                }
-            }
-        }
-    }
-}
+// ============================================================
+// External open
+// ============================================================
 
 private fun openExternal(context: Context, url: String) {
     try {
         context.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
-    } catch (e: ActivityNotFoundException) {
+    } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, "لا يوجد تطبيق لفتح هذا الرابط", Toast.LENGTH_SHORT).show()
     }
 }
+
+// ============================================================
+// Load error
+// ============================================================
 
 @Composable
 private fun LoadErrorView(
@@ -1059,11 +846,16 @@ private fun LoadErrorView(
             )
 
             Spacer(Modifier.height(4.dp))
-            Button(onClick = onRetry) { Text("إعادة المحاولة") }
+
+            androidx.compose.material3.Button(onClick = onRetry) { Text("إعادة المحاولة") }
             OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
         }
     }
 }
+
+// ============================================================
+// Gecko unavailable
+// ============================================================
 
 @Composable
 private fun GeckoUnavailableDialog(
@@ -1082,7 +874,13 @@ private fun GeckoUnavailableDialog(
                     platformUrl
             )
         },
-        confirmButton = { Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") } },
-        dismissButton = { OutlinedButton(onClick = onBack) { Text("رجوع") } }
+        confirmButton = {
+            androidx.compose.material3.Button(onClick = onOpenBrowser) {
+                Text("📱 فتح في المتصفح")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onBack) { Text("رجوع") }
+        }
     )
 }
