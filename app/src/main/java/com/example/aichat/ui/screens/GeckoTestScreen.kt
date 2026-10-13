@@ -421,19 +421,21 @@ fun GeckoTestScreen(
             memoryEnabled = isSystemPromptEnabled,
             onDismiss = { showSendDialog = false },
             onSend = { finalText ->
-                val p = platform
-                if (p != null) {
-                    val js = buildAutoSendJs(
-                        text = finalText,
-                        inputSelector = p.inputSelector,
-                        sendSelector = p.sendSelector,
-                        sendWithEnter = p.sendWithEnter
-                    )
-
-                    app.logDebug("📤 AUTO_SEND start | platform=${p.id} len=${finalText.length}")
-                    evaluateJsCompat(session, js)
-                }
-                showSendDialog = false
+    val p = platform
+    if (p != null) {
+        val host = runCatching { Uri.parse(currentUrl).host.orEmpty() }.getOrDefault("")
+        app.setContextPending(
+            text = finalText,
+            targetDomain = host,
+            inputSelector = p.inputSelector,
+            sendSelector = p.sendSelector,
+            sendWithEnter = p.sendWithEnter
+        )
+        app.logDebug("📤 CONTEXT_TO_PAGE queued | platform=${p.id} host=$host len=${finalText.length}")
+    } else {
+        Toast.makeText(context, "⚠️ لا توجد منصة محددة", Toast.LENGTH_SHORT).show()
+    }
+    showSendDialog = false
             }
         )
     }
