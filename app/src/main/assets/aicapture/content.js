@@ -120,6 +120,7 @@
 
   var CURRENT_PLATFORM = detectPlatform();
   log("🌐 Platform detected: " + CURRENT_PLATFORM.name + " (" + CURRENT_PLATFORM.id + ") host=" + location.hostname);
+  startAutoHideComposer();
 
   // ============================================================
   // DOM utilities
@@ -202,6 +203,88 @@
 
     attempt();
   }
+
+  // ============================================================
+// UI: Hide platform composer (make app input the only visible one)
+// ============================================================
+
+var composerHidden = false;
+
+function findComposerContainer(input) {
+  if (!input) return null;
+
+  // أفضلية: form أو footer أو عناصر composer's wrappers
+  var c =
+    input.closest("form") ||
+    input.closest("footer") ||
+    input.closest("[role='form']") ||
+    input.closest("section") ||
+    input.parentElement;
+
+  return c || null;
+}
+
+function hideElementVisually(el) {
+  if (!el) return false;
+
+  // لا تعيد تطبيقها
+  if (el.getAttribute("data-aichat-hidden") === "1") return true;
+
+  el.setAttribute("data-aichat-hidden", "1");
+
+  // إخفاء بصري بدون إزالة من DOM
+  el.style.opacity = "0";
+  el.style.height = "0px";
+  el.style.minHeight = "0px";
+  el.style.maxHeight = "0px";
+  el.style.overflow = "hidden";
+  el.style.padding = "0";
+  el.style.margin = "0";
+  el.style.pointerEvents = "none";
+
+  return true;
+}
+
+function tryHideComposer() {
+  // لا تخفِ generic لأننا لا نعرف بنية الصفحة
+  if (CURRENT_PLATFORM.id === "generic") return false;
+
+  var input = findInput(""); // بدون selector مفضل
+  if (!input) return false;
+
+  var container = findComposerContainer(input);
+  if (!container) return false;
+
+  var ok = hideElementVisually(container);
+  if (ok) {
+    composerHidden = true;
+    log("👻 Composer hidden for platform=" + CURRENT_PLATFORM.id);
+  }
+  return ok;
+}
+
+function startAutoHideComposer() {
+  // محاولات أولية لأن DOM قد يتأخر
+  var attempts = 0;
+
+  function loop() {
+    attempts++;
+    if (tryHideComposer() || attempts >= 30) return;
+    setTimeout(loop, 350);
+  }
+  loop();
+
+  // راقب تغييرات DOM لأن بعض المنصات تعيد بناء composer
+  try {
+    var obs = new MutationObserver(function () {
+      // أعِد الإخفاء دائماً (حتى لو أعيد بناء DOM)
+      tryHideComposer();
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+  } catch (e) {
+    // ignore
+  }
+      }
 
   // ============================================================
   // Injection
@@ -311,6 +394,7 @@
       target.dispatchEvent(new KeyboardEvent("keydown", options));
       target.dispatchEvent(new KeyboardEvent("keypress", options));
       target.dispatchEvent(new KeyboardEvent("keyup", options));
+      try { target.blur(); } catch (e) {}
 
       return true;
     } catch (e) {
