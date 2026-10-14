@@ -4,20 +4,43 @@
   "version": "1.0.34",
   "description": "AiChat GeckoView WebExtension",
   "permissions": [
-  "nativeMessaging",
-  "nativeMessagingFromContent",
-  "geckoViewAddons",
-  "tabs",
-  "<all_urls>"
+    "nativeMessaging",
+    "nativeMessagingFromContent",
+    "geckoViewAddons",
+    "tabs",
+
+    "*://chatgpt.com/*",
+    "*://*.chatgpt.com/*",
+    "*://chat.openai.com/*",
+    "*://*.chat.openai.com/*",
+
+    "*://arena.ai/*",
+    "*://*.arena.ai/*",
+
+    "*://venice.ai/*",
+    "*://*.venice.ai/*"
   ],
   "background": {
     "scripts": ["background.js"]
   },
-  "content_scripts": [{
-    "matches": ["<all_urls>"],
-    "js": ["content.js"],
-    "run_at": "document_idle"
-  }],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://chatgpt.com/*",
+        "*://*.chatgpt.com/*",
+        "*://chat.openai.com/*",
+        "*://*.chat.openai.com/*",
+
+        "*://arena.ai/*",
+        "*://*.arena.ai/*",
+
+        "*://venice.ai/*",
+        "*://*.venice.ai/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "browser_specific_settings": {
     "gecko": {
       "id": "aicapture@aichat.example.com"
