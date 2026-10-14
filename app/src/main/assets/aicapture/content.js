@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.0.39";
+  var VERSION = "1.0.40";
   var HOST = String((location && location.hostname) || "");
   var HREF = String((location && location.href) || "");
 
@@ -9,7 +9,7 @@
   var ALLOW_GENERIC_DIAGNOSTICS = false;
 
   // -------------------- Platforms --------------------
-  // ✅ أضفنا: userSelectors + userTextSelector (لاخفاء الذاكرة بصرياً من رسائل المستخدم بعد الإرسال)
+  // ✅ أضفنا userSelectors + userTextSelector لاستخدامها في "تنظيف" رسالة المستخدم بعد الإرسال
   var PLATFORMS = {
     chatgpt: {
       id: "chatgpt",
@@ -26,11 +26,10 @@
       userSelectors: [
         '[data-message-author-role="user"]',
         '[data-role="user"]',
-        '[data-message-author="user"]',
-        // fallback إضافي شائع في ChatGPT
-        'article[data-testid="conversation-turn"] [data-message-author-role="user"]'
+        '[data-message-author="user"]'
       ],
-      userTextSelector: ".markdown, .whitespace-pre-wrap, [data-message-content]",
+      // ملاحظة: ChatGPT غالباً يضع نص user هنا
+      userTextSelector: ".whitespace-pre-wrap, .markdown, [data-message-content]",
       extractResponse: function (el) {
         if (!el) return "";
         var md = null;
@@ -44,18 +43,8 @@
       id: "venice",
       name: "Venice",
       matches: function () { return HOST === "venice.ai"; },
-      responseSelectors: [
-        ".prose",
-        "[data-message-author-role='assistant']",
-        ".assistant-message",
-        ".ai-message"
-      ],
-      userSelectors: [
-        "[data-message-author-role='user']",
-        ".user-message",
-        ".human-message",
-        ".message.user"
-      ],
+      responseSelectors: [".prose", "[data-message-author-role='assistant']", ".assistant-message", ".ai-message"],
+      userSelectors: ["[data-message-author-role='user']", ".user-message", ".human-message", ".message.user"],
       userTextSelector: ".prose, .message-content, .content, [data-message-content]",
       extractResponse: function (el) { return getElementText(el); },
       legacyContainerMode: false
@@ -66,12 +55,7 @@
       name: "Arena",
       matches: function () { return HOST === "arena.ai"; },
       responseSelectors: ["main .prose", ".prose.prose-base", "div.prose"],
-      userSelectors: [
-        "[data-message-author-role='user']",
-        ".user-message",
-        ".human-message",
-        ".message.user"
-      ],
+      userSelectors: ["[data-message-author-role='user']", ".user-message", ".human-message", ".message.user"],
       userTextSelector: "main .prose, .prose, .message-content, [data-message-content]",
       extractResponse: function (el) { return getElementText(el); },
       legacyContainerMode: false
@@ -82,22 +66,12 @@
       name: "Generic Web AI",
       matches: function () { return true; },
       responseSelectors: [
-        '[data-message-author-role="assistant"]',
-        '[data-role="assistant"]',
-        '[data-message-author="assistant"]',
-        ".assistant-message",
-        ".ai-message",
-        ".model-response",
-        ".response-container",
-        ".prose"
+        '[data-message-author-role="assistant"]', '[data-role="assistant"]', '[data-message-author="assistant"]',
+        ".assistant-message", ".ai-message", ".model-response", ".response-container", ".prose"
       ],
       userSelectors: [
-        '[data-message-author-role="user"]',
-        '[data-role="user"]',
-        '[data-message-author="user"]',
-        ".user-message",
-        ".human-message",
-        ".message.user"
+        '[data-message-author-role="user"]', '[data-role="user"]', '[data-message-author="user"]',
+        ".user-message", ".human-message", ".message.user"
       ],
       userTextSelector: ".prose, .message-content, [data-message-content]",
       extractResponse: function (el) { return getElementText(el); },
@@ -133,10 +107,7 @@
   }
 
   function log(msg) {
-    if (!shouldSendDiagnostics()) {
-      try { console.log("[AiChat] " + msg); } catch (_) {}
-      return;
-    }
+    if (!shouldSendDiagnostics()) { try { console.log("[AiChat] " + msg); } catch (_) {} return; }
     sendToBackground({ type: "DEBUG_INFO", info: String(msg || "") });
   }
 
@@ -353,8 +324,8 @@
     } catch (e3) { log("❌ Enter dispatch failed: " + (e3 && e3.message ? e3.message : String(e3))); return false; }
   }
 
-  // -------------------- Hide injected memory from UI (persistent sanitizer) --------------------
-  // ✅ هذا الجزء هو “الحل الحقيقي” لإخفاء الذاكرة: sanitization مستمر لأي رسالة user تحتوي marker
+  // -------------------- Hide injected memory from UI (Sanitizer) --------------------
+  // ✅ هذا الجزء مهم: المنصات ستعرض النص حرفياً. لذا نقوم "بتنظيف" أي bubble تحتوي marker/ذاكرة.
   var HIDDEN_MARKER = "aichat_hidden_context";
   var sanitizeObserver = null;
   var sanitizeThrottleTimer = 0;
@@ -373,20 +344,20 @@
   function stripHiddenContextFromText(s) {
     var out = String(s || "");
 
-    // remove HTML-comment block if present
-    // <!-- aichat_hidden_context .... -->
-    out = out.replace(/<!--\s*aichat_hidden_context[\s\S]*?-->\s*/i, "");
+    // remove HTML comment block
+    out = out.replace(/<!--\s*aichat_hidden_context[\s\S]*?-->\s*/ig, "");
 
-    // fallback: remove raw shared memories xml block if included plainly
-    out = out.replace(/SHARED_MEMORIES_XML:\s*<shared_memories>[\s\S]*?<\/shared_memories>\s*/i, "");
+    // remove raw xml block (fallback)
+    out = out.replace(/SHARED_MEMORIES_XML:\s*<shared_memories>[\s\S]*?<\/shared_memories>\s*/ig, "");
 
-    // (اختياري) لو عندك بلوكات أخرى قد تظهر
-    out = out.replace(/ACCURACY_POLICY:\s*[\s\S]*?(?=\n{2,}|$)/i, "");
-    out = out.replace(/EXTRA_NOTES:\s*[\s\S]*?(?=\n{2,}|$)/i, "");
+    // optional: remove other blocks if they appear
+    out = out.replace(/ACCURACY_POLICY:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
+    out = out.replace(/EXTRA_NOTES:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
 
     return out.trim();
   }
 
+  // (1) طريقة 1: استهداف عناصر "رسائل المستخدم" المتوقعة
   function getUserMessageElements() {
     var out = [];
     var sels = (CURRENT_PLATFORM.userSelectors || []).concat([
@@ -401,9 +372,7 @@
     for (var i = 0; i < sels.length; i++) {
       try {
         var els = document.querySelectorAll(sels[i]);
-        for (var j = 0; j < els.length; j++) {
-          if (out.indexOf(els[j]) === -1) out.push(els[j]);
-        }
+        for (var j = 0; j < els.length; j++) if (out.indexOf(els[j]) === -1) out.push(els[j]);
       } catch (e) {}
     }
     return out;
@@ -411,6 +380,15 @@
 
   function pickEditableTextNode(msgEl) {
     if (!msgEl) return null;
+
+    // ChatGPT: نحاول دائماً أولاً whitespace-pre-wrap داخل bubble (الأكثر أماناً)
+    if (CURRENT_PLATFORM.id === "chatgpt") {
+      try {
+        var w = msgEl.querySelector(".whitespace-pre-wrap");
+        if (w) return w;
+      } catch (e0) {}
+    }
+
     var sel = String(CURRENT_PLATFORM.userTextSelector || "").trim();
     if (sel) {
       try {
@@ -418,67 +396,126 @@
         if (inner) return inner;
       } catch (e) {}
     }
+
+    // fallback (قد يكون خطير لأنه قد يمسح أزرار/عناصر داخل bubble)
     return msgEl;
   }
 
-  function sanitizeOneUserMessage(msgEl) {
-    var target = pickEditableTextNode(msgEl);
-    if (!target) return false;
-
-    var t = getElementText(target);
+  function sanitizeOneNodeText(node) {
+    if (!node) return false;
+    var t = getElementText(node);
     if (!looksLikeHasHiddenContext(t)) return false;
 
     var cleaned = stripHiddenContextFromText(t);
-    if (!cleaned) return false;
-
-    // لو صار تنظيف مسبقاً لا نعيد كل مرة (لكن لو React أعادت النص، سيختلف t وسيُعاد تنظيفه)
-    if (cleaned === t) return false;
+    if (!cleaned || cleaned === t) return false;
 
     try {
-      target.innerText = cleaned;
-      msgEl.setAttribute("data-aichat-sanitized", "1");
+      // textContent أقل تداخل مع layout وأحياناً أفضل مع React
+      node.textContent = cleaned;
+      try { node.setAttribute("data-aichat-sanitized", "1"); } catch (_) {}
       return true;
     } catch (e2) {
-      log("❌ sanitizeOneUserMessage failed: " + e2);
+      log("❌ sanitizeOneNodeText failed: " + e2);
       return false;
     }
   }
 
-  function sanitizeAllNow() {
+  function sanitizeByUserElements() {
     var els = getUserMessageElements();
-    if (!els.length) return;
+    if (!els.length) return 0;
 
-    // لتقليل الحمل: امسح فقط آخر N عناصر غالباً
+    // فقط آخر N
     var N = 16;
     var start = els.length > N ? (els.length - N) : 0;
 
     var changed = 0;
     for (var i = start; i < els.length; i++) {
-      if (sanitizeOneUserMessage(els[i])) changed++;
+      var target = pickEditableTextNode(els[i]);
+      if (sanitizeOneNodeText(target)) {
+        try { els[i].setAttribute("data-aichat-sanitized", "1"); } catch (_) {}
+        changed++;
+      }
+    }
+    return changed;
+  }
+
+  // (2) طريقة 2 (أقوى): مسح مرشحين للنص داخل منطقة المحادثة نفسها (خصوصاً ChatGPT)
+  // هذه تعالج حالات لم تنطبق فيها userSelectors.
+  function getSanitizeCandidateTextNodes() {
+    var out = [];
+    var sels = [];
+
+    if (CURRENT_PLATFORM.id === "chatgpt") {
+      sels = [
+        // الأكثر احتمالاً لنص رسالة user
+        'main [data-message-author-role="user"] .whitespace-pre-wrap',
+        'main [data-message-author-role="user"] [data-message-content]',
+        'main [data-message-author-role="user"]',
+        // fallback عام داخل main
+        "main .whitespace-pre-wrap",
+        "main [data-message-content]"
+      ];
+    } else {
+      sels = [
+        "main .prose",
+        ".prose",
+        "[data-message-content]",
+        ".message-content",
+        ".content"
+      ];
     }
 
-    if (changed > 0) {
-      log("🧼 Sanitized " + changed + " user message(s) platform=" + CURRENT_PLATFORM.id);
+    for (var i = 0; i < sels.length; i++) {
+      try {
+        var els = document.querySelectorAll(sels[i]);
+        for (var j = 0; j < els.length; j++) if (out.indexOf(els[j]) === -1) out.push(els[j]);
+      } catch (e) {}
     }
+    return out;
+  }
+
+  function sanitizeByCandidatesScan() {
+    var nodes = getSanitizeCandidateTextNodes();
+    if (!nodes.length) return 0;
+
+    var N = 60; // نفحص آخر 60 عنصر فقط لتخفيف الحمل
+    var start = nodes.length > N ? (nodes.length - N) : 0;
+
+    var changed = 0;
+    for (var i = start; i < nodes.length; i++) {
+      if (sanitizeOneNodeText(nodes[i])) changed++;
+    }
+    return changed;
+  }
+
+  function sanitizeAllNow(reason) {
+    var changed1 = 0, changed2 = 0;
+    try { changed1 = sanitizeByUserElements(); } catch (e1) {}
+    try { changed2 = sanitizeByCandidatesScan(); } catch (e2) {}
+    var changed = (changed1 + changed2);
+
+    if (changed > 0) {
+      log("🧼 Sanitized " + changed + " node(s) reason=" + (reason || "") + " platform=" + CURRENT_PLATFORM.id);
+    }
+    return changed;
   }
 
   function requestSanitizeSoon() {
     if (sanitizeThrottleTimer) return;
     sanitizeThrottleTimer = setTimeout(function () {
       sanitizeThrottleTimer = 0;
-      sanitizeAllNow();
+      sanitizeAllNow("throttled");
     }, 120);
   }
 
   function startSanitizer() {
-    sanitizeAllNow();
+    sanitizeAllNow("startup");
 
     if (sanitizeObserver) return;
     try {
       sanitizeObserver = new MutationObserver(function () {
-        // لو في فترة aggressive (بعد الإرسال) نعقم فوراً
         if (sanitizeAggressiveUntil && Date.now() < sanitizeAggressiveUntil) {
-          sanitizeAllNow();
+          sanitizeAllNow("mutation_aggressive");
         } else {
           requestSanitizeSoon();
         }
@@ -490,39 +527,32 @@
     }
   }
 
-  // اجعل المعقم يعمل دائماً (حتى لو فتحت محادثة قديمة فيها marker)
   startSanitizer();
 
   function scheduleSanitizeAfterSend(injectedText) {
-    // aggressive mode for a few seconds after send (DOM يتغير بسرعة)
-    sanitizeAggressiveUntil = Date.now() + 10000;
+    // aggressive mode for 12 seconds
+    sanitizeAggressiveUntil = Date.now() + 12000;
 
-    // نظف فوراً
-    sanitizeAllNow();
+    var changedNow = sanitizeAllNow("after_send_now");
 
-    // وكرر لمدة 10 ثواني
-    if (sanitizeAggressiveTimer) {
-      try { clearInterval(sanitizeAggressiveTimer); } catch (_) {}
-      sanitizeAggressiveTimer = 0;
-    }
-
+    // كرر لمدة 12 ثانية لأن ChatGPT قد يعيد render
+    if (sanitizeAggressiveTimer) { try { clearInterval(sanitizeAggressiveTimer); } catch (_) {} }
     var tries = 0;
     sanitizeAggressiveTimer = setInterval(function () {
       tries++;
-      sanitizeAllNow();
-      if (tries >= 40) { // 40 * 250ms = 10s
+      sanitizeAllNow("after_send_tick_" + tries);
+      if (tries >= 48) { // 48 * 250ms = 12s
         clearInterval(sanitizeAggressiveTimer);
         sanitizeAggressiveTimer = 0;
       }
     }, 250);
 
-    // للتشخيص
-    try {
-      var hint = "";
-      var tt = String(injectedText || "");
-      if (tt.indexOf(HIDDEN_MARKER) !== -1) hint = "marker=yes";
-      log("🧼 scheduleSanitizeAfterSend (" + hint + ") platform=" + CURRENT_PLATFORM.id);
-    } catch (e) {}
+    // تشخيص: إذا لم يُغيّر شيء فوراً، غالباً selectors لا تمسك bubble بعد (أو DOM مختلف)
+    if (changedNow === 0) {
+      try {
+        log("🧼 scheduleSanitizeAfterSend: changedNow=0 marker=" + (String(injectedText || "").indexOf(HIDDEN_MARKER) !== -1 ? "yes" : "no"));
+      } catch (e) {}
+    }
   }
 
   // -------------------- Context feedback --------------------
@@ -743,14 +773,14 @@
             if (dispatchEnter(input, false)) {
               sendContextWritten(true, contextId, "enter_sent", "arena_enter");
               sendContextConsumed(contextId);
-              scheduleSanitizeAfterSend(text); // ✅ hide memory from UI
+              scheduleSanitizeAfterSend(text);
               return;
             }
             log("🎯 Arena: Enter failed, try Ctrl+Enter");
             if (dispatchEnter(input, true)) {
               sendContextWritten(true, contextId, "ctrl_enter_sent", "arena_ctrl_enter");
               sendContextConsumed(contextId);
-              scheduleSanitizeAfterSend(text); // ✅ hide memory from UI
+              scheduleSanitizeAfterSend(text);
               return;
             }
             return sendContextWritten(false, contextId, "send_failed", "arena_enter_and_ctrl_enter_failed");
@@ -764,7 +794,7 @@
               btn.click();
               sendContextWritten(true, contextId, "button_clicked", "ok");
               sendContextConsumed(contextId);
-              scheduleSanitizeAfterSend(text); // ✅ hide memory from UI
+              scheduleSanitizeAfterSend(text);
               return;
             } catch (e1) { log("❌ clickSend failed: " + e1); }
           }
@@ -772,7 +802,7 @@
           if (opts.sendWithEnter && dispatchEnter(input, false)) {
             sendContextWritten(true, contextId, "enter_sent", "ok");
             sendContextConsumed(contextId);
-            scheduleSanitizeAfterSend(text); // ✅ hide memory from UI
+            scheduleSanitizeAfterSend(text);
             return;
           }
 
