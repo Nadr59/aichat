@@ -1,23 +1,34 @@
 "use strict";
 
 /**
- * AiChat WebExtension — background.js
- * هدف هذا الملف:
+ * AiChat WebExtension — background.js (FIXED)
+ *
+ * الهدف:
  * - استقبال رسائل Kotlin عبر NativeMessaging Port
  * - توجيهها إلى content.js في تبويب المنصة الصحيح
  *
- * إصلاح أساسي:
- * - لا نعتمد على tabs.query({active:true}) لأن GeckoView كثيراً يرجّع NO_ACTIVE_TAB
- * - نعتمد على آخر sender.tab.id من content.js (CONTENT_READY / DEBUG_INFO / أي رسالة)
- * - وإذا لم يكن لدينا tabId بعد، نحاول إيجاد tab بمطابقة domain القادم من Kotlin
+ * إصلاحات أساسية:
+ * 1) لا نعتمد على tabs.query({active:true}) (مشاكل GeckoView)
+ * 2) لا نعتمد على "آخر تبويب" global لأن content.js محقون على <all_urls>
+ *    وبالتالي أي صفحة يمكن أن تغيّر currentTab بالخطأ.
+ *    الحل: تخزين tabId لكل منصة/دومين (Map domain -> tabId).
+ * 3) مطابقة دومين صحيحة عبر hostname (بدون includes)
+ * 4) Retry عند خطأ: Receiving end does not exist (سباق تحميل/إعادة تحميل)
  */
 
 const NATIVE_APP = "browser";
 
 let nativePort = null;
 
-/** آخر تبويب معروف للمنصة (من sender.tab.id) */
-let currentPlatformTabId = null;
+// domain(base) -> tabId
+const tabByBaseDomain = new Map();
+
+// tabId readiness (CONTENT_READY وصل من content.js)
+const readyTabs = new Set();
+
+// ============================================================
+// Logging
+// ============================================================
 
 function logLocal(message) {
   const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
@@ -36,75 +47,172 @@ function postToKotlin(obj) {
   }
 }
 
-/** احفظ sender.tab.id من أي رسالة قادمة من content.js */
-function rememberSenderTab(sender, message) {
+// ============================================================
+// Domain / URL helpers
+// ============================================================
+
+function normalize(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
+function safeHost(url) {
   try {
-    if (sender && sender.tab && sender.tab.id !== undefined) {
-      const newId = sender.tab.id;
-      if (currentPlatformTabId !== newId) {
-        currentPlatformTabId = newId;
-        logLocal(
-          "📌 remembered platform tab=" +
-            currentPlatformTabId +
-            " url=" +
-            (sender.tab.url || (message && message.url) || "")
-        );
-      }
-    }
-  } catch (e) {
-    // ignore
+    return new URL(url).hostname.toLowerCase();
+  } catch (_) {
+    return "";
   }
 }
 
 /**
- * حل تبويب المنصة المستهدف:
- * 1) إذا لدينا currentPlatformTabId → استخدمه
- * 2) وإلا → tabs.query({}) ثم:
- *    - اختر tab يطابق domain (host) إن وجد
- *    - إن لم يوجد وكان هناك tab واحد → اختره
- *    - وإلا فشل
+ * حوّل أي host إلى base domain للمنصات المعروفة.
+ * يرجع "" إذا الموقع ليس منصة مدعومة (لمنع تلويث tabByBaseDomain).
  */
-function resolvePlatformTab(message) {
-  const targetDomain = (message && (message.domain || message.targetDomain) ? String(message.domain || message.targetDomain) : "")
-    .trim()
-    .toLowerCase();
+function toBaseDomainFromHost(host) {
+  host = normalize(host);
 
-  if (currentPlatformTabId !== null) {
+  // ChatGPT aliases -> treat both as chatgpt.com
+  if (host === "chatgpt.com" || host.endsWith(".chatgpt.com")) return "chatgpt.com";
+  if (host === "chat.openai.com" || host.endsWith(".chat.openai.com")) return "chatgpt.com";
+
+  // Arena
+  if (host === "arena.ai" || host.endsWith(".arena.ai")) return "arena.ai";
+
+  // Venice
+  if (host === "venice.ai" || host.endsWith(".venice.ai")) return "venice.ai";
+
+  return "";
+}
+
+function toBaseDomainFromUrl(url) {
+  return toBaseDomainFromHost(safeHost(url));
+}
+
+function buildUrlQueryPatterns(baseDomain) {
+  baseDomain = normalize(baseDomain);
+
+  if (baseDomain === "chatgpt.com") {
+    // include chat.openai.com too
+    return [
+      "*://chatgpt.com/*",
+      "*://*.chatgpt.com/*",
+      "*://chat.openai.com/*",
+      "*://*.chat.openai.com/*"
+    ];
+  }
+
+  return [`*://${baseDomain}/*`, `*://*.${baseDomain}/*`];
+}
+
+function purgeTabFromMaps(tabId) {
+  readyTabs.delete(tabId);
+  for (const [domain, id] of tabByBaseDomain.entries()) {
+    if (id === tabId) tabByBaseDomain.delete(domain);
+  }
+}
+
+// ============================================================
+// Remember sender tab (Content -> Background)
+// ============================================================
+
+function rememberSenderTab(sender, message) {
+  try {
+    const tabId = sender?.tab?.id;
+    if (tabId === undefined || tabId === null) return;
+
+    // الأفضلية: sender.tab.url ثم message.url (CONTENT_READY يرسل url)
+    const url = sender?.tab?.url || message?.url || "";
+    const baseDomain = toBaseDomainFromUrl(url);
+
+    // تجاهل أي صفحات ليست منصات (لأن content.js على <all_urls>)
+    if (!baseDomain) return;
+
+    const old = tabByBaseDomain.get(baseDomain);
+    if (old !== tabId) {
+      tabByBaseDomain.set(baseDomain, tabId);
+      logLocal(`📌 remembered ${baseDomain} -> tab=${tabId} url=${url}`);
+    }
+  } catch (_) {
+    // ignore
+  }
+}
+
+// ============================================================
+// Resolve target tab
+// ============================================================
+
+function resolvePlatformTab(message) {
+  const requestedDomain = normalize(message?.domain || message?.targetDomain);
+
+  if (!requestedDomain) {
+    return Promise.reject(new Error("NO_TARGET_DOMAIN"));
+  }
+
+  // Normalize aliases to base domain when possible
+  const baseDomain = toBaseDomainFromHost(requestedDomain) || requestedDomain;
+
+  // 1) Try remembered tab for this domain
+  const rememberedTabId = tabByBaseDomain.get(baseDomain);
+  if (rememberedTabId != null) {
     return browser.tabs
-      .get(currentPlatformTabId)
+      .get(rememberedTabId)
       .then((tab) => {
         if (!tab) throw new Error("NO_PLATFORM_TAB");
+
+        const tabBase = toBaseDomainFromUrl(tab.url || "");
+        // إذا كانت منصة معروفة: تأكد من التطابق
+        // (للدومينات غير المعروفة، tabBase سيكون "" لذا لا نعتمد هذا المسار)
+        if (toBaseDomainFromHost(baseDomain) && tabBase !== baseDomain) {
+          tabByBaseDomain.delete(baseDomain);
+          throw new Error("STALE_TAB_FOR_DOMAIN");
+        }
+
         return tab;
       })
       .catch(() => {
-        currentPlatformTabId = null;
-        throw new Error("NO_PLATFORM_TAB");
+        tabByBaseDomain.delete(baseDomain);
+        // fallback to query
+        return browser.tabs.query({ url: buildUrlQueryPatterns(baseDomain) }).then((tabs) => {
+          if (!tabs || tabs.length === 0) throw new Error("NO_PLATFORM_TAB");
+          tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+          tabByBaseDomain.set(baseDomain, tabs[0].id);
+          logLocal(`🎯 resolved ${baseDomain} -> tab=${tabs[0].id} url=${tabs[0].url || ""}`);
+          return tabs[0];
+        });
       });
   }
 
-  return browser.tabs.query({}).then((tabs) => {
+  // 2) Query by URL patterns (أفضل بكثير من query({}) + includes)
+  return browser.tabs.query({ url: buildUrlQueryPatterns(baseDomain) }).then((tabs) => {
     if (!tabs || tabs.length === 0) throw new Error("NO_PLATFORM_TAB");
-
-    if (targetDomain) {
-      // match by url host contains domain
-      for (let i = 0; i < tabs.length; i++) {
-        const u = (tabs[i].url || "").toLowerCase();
-        if (u.includes(targetDomain)) {
-          currentPlatformTabId = tabs[i].id;
-          logLocal("🎯 resolved tab by domain=" + targetDomain + " -> tab=" + currentPlatformTabId);
-          return tabs[i];
-        }
-      }
-    }
-
-    if (tabs.length === 1) {
-      currentPlatformTabId = tabs[0].id;
-      logLocal("🎯 resolved single tab -> tab=" + currentPlatformTabId);
-      return tabs[0];
-    }
-
-    throw new Error("NO_PLATFORM_TAB");
+    tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    tabByBaseDomain.set(baseDomain, tabs[0].id);
+    logLocal(`🎯 resolved ${baseDomain} -> tab=${tabs[0].id} url=${tabs[0].url || ""}`);
+    return tabs[0];
   });
+}
+
+// ============================================================
+// Send message with retry (race with load/reload)
+// ============================================================
+
+async function sendMessageWithRetry(tabId, payload, retries = 8, delayMs = 250) {
+  let lastErr = null;
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await browser.tabs.sendMessage(tabId, payload);
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || e);
+
+      // retry only for "Receiving end does not exist"
+      if (!msg.includes("Receiving end does not exist")) throw e;
+
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+
+  throw lastErr || new Error("NO_RECEIVER");
 }
 
 // ============================================================
@@ -112,43 +220,38 @@ function resolvePlatformTab(message) {
 // ============================================================
 
 function sendContextToPlatform(message) {
-  return resolvePlatformTab(message)
-    .then((tab) => {
-      logLocal("📤 Background → Content: tab=" + tab.id + " url=" + (tab.url || ""));
+  return resolvePlatformTab(message).then(async (tab) => {
+    logLocal("📤 Background → Content: tab=" + tab.id + " url=" + (tab.url || ""));
 
-      return browser.tabs.sendMessage(tab.id, {
-        type: "CONTEXT_TO_PAGE",
-        text: message.text || "",
-        contextId: message.contextId || 0,
-        domain: message.domain || "",
-
-        // selectors للإرسال التلقائي
-        inputSelector: message.inputSelector || "",
-        sendSelector: message.sendSelector || "",
-        sendWithEnter: message.sendWithEnter !== false,
-
-        timestamp: message.timestamp || Date.now()
-      });
-    })
-    .then((response) => {
-      logLocal("✅ Content replied: " + JSON.stringify(response || {}));
-      return response;
+    // حتى لو لم يصل CONTENT_READY بعد، الـ retry يعالج السباق غالباً
+    const response = await sendMessageWithRetry(tab.id, {
+      type: "CONTEXT_TO_PAGE",
+      text: message.text || "",
+      contextId: message.contextId || 0,
+      domain: message.domain || "",
+      inputSelector: message.inputSelector || "",
+      sendSelector: message.sendSelector || "",
+      sendWithEnter: message.sendWithEnter !== false,
+      timestamp: message.timestamp || Date.now()
     });
+
+    logLocal("✅ Content replied: " + JSON.stringify(response || {}));
+    return response;
+  });
 }
 
 function sendManualCaptureToPlatform(message) {
-  return resolvePlatformTab(message || {})
-    .then((tab) => {
-      logLocal("📤 MANUAL_CAPTURE → Content: tab=" + tab.id + " url=" + (tab.url || ""));
-      return browser.tabs.sendMessage(tab.id, {
-        type: "MANUAL_CAPTURE",
-        timestamp: Date.now()
-      });
-    })
-    .then((response) => {
-      logLocal("✅ MANUAL_CAPTURE Content replied: " + JSON.stringify(response || {}));
-      return response;
+  return resolvePlatformTab(message || {}).then(async (tab) => {
+    logLocal("📤 MANUAL_CAPTURE → Content: tab=" + tab.id + " url=" + (tab.url || ""));
+
+    const response = await sendMessageWithRetry(tab.id, {
+      type: "MANUAL_CAPTURE",
+      timestamp: Date.now()
     });
+
+    logLocal("✅ MANUAL_CAPTURE Content replied: " + JSON.stringify(response || {}));
+    return response;
+  });
 }
 
 // ============================================================
@@ -175,7 +278,7 @@ function connectToNative() {
             success: false,
             contextId: message.contextId || 0,
             stage: "background_to_content_failed",
-            detail: detail
+            detail
           });
         });
         return;
@@ -214,6 +317,9 @@ function connectToNative() {
     });
   } catch (e) {
     logLocal("❌ connectNative failed: " + (e && e.message ? e.message : String(e)));
+
+    // retry connect if connectNative throws
+    setTimeout(() => connectToNative(), 1000);
   }
 }
 
@@ -224,15 +330,16 @@ function connectToNative() {
 browser.runtime.onMessage.addListener((message, sender) => {
   if (!message || !message.type) return Promise.resolve({ ok: false });
 
-  // ✅ احفظ tab.id من أي رسالة
+  // احفظ tabId فقط للمنصات المعروفة (مهم جداً)
   rememberSenderTab(sender, message);
 
-  // content.js يخبرنا بالجاهزية (مفيد لكنه لم يعد شرطاً)
   if (message.type === "CONTENT_READY") {
+    const tabId = sender?.tab?.id;
+    if (tabId !== undefined && tabId !== null) readyTabs.add(tabId);
     return Promise.resolve({ ok: true });
   }
 
-  // تمرير أي رسالة أخرى من content إلى Kotlin
+  // Pass-through: أي رسالة أخرى من content إلى Kotlin
   if (nativePort) {
     logLocal("↗️ Content → Kotlin: " + JSON.stringify(message));
     try {
@@ -245,6 +352,22 @@ browser.runtime.onMessage.addListener((message, sender) => {
   }
 
   return Promise.resolve({ ok: true });
+});
+
+// ============================================================
+// Tab lifecycle (cleanup)
+// ============================================================
+
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") {
+    // أثناء reload قد يفشل sendMessage مؤقتاً
+    // نخلي retry يتعامل، لكن ننظف ready state
+    readyTabs.delete(tabId);
+  }
+});
+
+browser.tabs.onRemoved.addListener((tabId) => {
+  purgeTabFromMaps(tabId);
 });
 
 // Startup
