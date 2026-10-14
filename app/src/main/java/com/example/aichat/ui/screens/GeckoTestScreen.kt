@@ -22,11 +22,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding              // ✅ NEW (keyboard)
-import androidx.compose.foundation.layout.navigationBarsPadding  // ✅ NEW (nav bar)
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -292,7 +291,8 @@ fun GeckoTestScreen(
     // ============================================================
 
     LaunchedEffect(includeMemory, displayedText, memoryInjectionEnabled, platform?.id) {
-        val memoryAllowed = memoryInjectionEnabled && (platform?.memoryEnabled == true) && chatViewModel != null
+        val memoryAllowed =
+            memoryInjectionEnabled && (platform?.memoryEnabled == true) && chatViewModel != null
 
         if (!memoryAllowed) {
             includeMemory = false
@@ -382,7 +382,6 @@ fun GeckoTestScreen(
     // ============================================================
 
     Column(modifier = Modifier.fillMaxSize()) {
-
         TopAppBar(
             title = {
                 Column {
@@ -405,7 +404,10 @@ fun GeckoTestScreen(
                 }
             },
             navigationIcon = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     IconButton(onClick = handleBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
                     }
@@ -446,7 +448,10 @@ fun GeckoTestScreen(
                         selected = isSelected,
                         onClick = { if (!isSelected) onSwitchPlatform(tabPlatform) },
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 if (tabPlatform.iconEmoji.isNotBlank()) Text(tabPlatform.iconEmoji)
                                 Text(tabPlatform.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
@@ -502,7 +507,7 @@ fun GeckoTestScreen(
             }
         }
 
-        // ✅ FIX: لا تجعل الكيبورد يغطي شريط الإرسال
+        // ✅ keyboard-safe send bar + memory hidden from user (HTML comment)
         WebSendBar(
             modifier = Modifier
                 .fillMaxWidth()
@@ -536,64 +541,56 @@ fun GeckoTestScreen(
             onClearEnhanced = { enhancedQuery = null },
             onSend = {
                 val p = platform ?: return@WebSendBar
-                val t = displayedText.trim()
-                if (t.isBlank()) return@WebSendBar
+                val question = displayedText.trim()
+                if (question.isBlank()) return@WebSendBar
 
                 val memoryXml =
                     if (memoryInjectionEnabled && includeMemory && selectedIds.isNotEmpty()) {
-                        MemoryWindowBuilder().build(selectedIds = selectedIds, candidates = searchResults)
+                        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
                     } else ""
 
                 val extraNotes = aiSettings.customSystemInstruction.trim()
                 val includeAccuracy = aiSettings.accuracyPromptEnabled
 
-                val question = t // displayedText.trim()
+                val hiddenContext = buildString {
+                    if (includeAccuracy) {
+                        appendLine("ACCURACY_POLICY:")
+                        appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
+                        appendLine()
+                    }
+                    if (extraNotes.isNotBlank()) {
+                        appendLine("EXTRA_NOTES:")
+                        appendLine(extraNotes)
+                        appendLine()
+                    }
+                    if (memoryXml.isNotBlank()) {
+                        appendLine("SHARED_MEMORIES_XML:")
+                        appendLine(memoryXml)
+                        appendLine()
+                    }
+                }.trim()
 
-val memoryXml =
-    if (memoryInjectionEnabled && includeMemory && selectedIds.isNotEmpty()) {
-        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
-    } else ""
+                val finalText =
+                    if (hiddenContext.isBlank()) {
+                        question
+                    } else {
+                        "<!-- aichat_hidden_context\n$hiddenContext\n-->\n\n$question"
+                    }
 
-val extraNotes = aiSettings.customSystemInstruction.trim()
-val includeAccuracy = aiSettings.accuracyPromptEnabled
+                isSending = true
+                app.setContextPending(
+                    text = finalText,
+                    targetDomain = hostOrEmpty(),
+                    inputSelector = p.inputSelector,
+                    sendSelector = p.sendSelector,
+                    sendWithEnter = p.sendWithEnter
+                )
 
-// كل شيء “غير مرئي” للمستخدم (عادة) داخل تعليق HTML
-val hiddenContext = buildString {
-    if (includeAccuracy) {
-        appendLine("ACCURACY_POLICY:")
-        appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-        appendLine()
+                query = ""
+                enhancedQuery = null
+            }
+        )
     }
-    if (extraNotes.isNotBlank()) {
-        appendLine("EXTRA_NOTES:")
-        appendLine(extraNotes)
-        appendLine()
-    }
-    if (memoryXml.isNotBlank()) {
-        appendLine("SHARED_MEMORIES_XML:")
-        appendLine(memoryXml)
-        appendLine()
-    }
-}.trim()
-
-val finalText =
-    if (hiddenContext.isBlank()) {
-        question
-    } else {
-        "<!-- aichat_hidden_context\n$hiddenContext\n-->\n\n$question"
-    }
-
-isSending = true
-app.setContextPending(
-    text = finalText,
-    targetDomain = hostOrEmpty(),
-    inputSelector = p.inputSelector,
-    sendSelector = p.sendSelector,
-    sendWithEnter = p.sendWithEnter
-)
-
-query = ""
-enhancedQuery = null
 
     if (showDebugLog) {
         DebugLogDialog(app = app, onDismiss = { showDebugLog = false })
@@ -602,7 +599,7 @@ enhancedQuery = null
 
 @Composable
 private fun WebSendBar(
-    modifier: Modifier = Modifier, // ✅ NEW
+    modifier: Modifier = Modifier,
     text: String,
     onTextChange: (String) -> Unit,
     isEnhanced: Boolean,
@@ -617,7 +614,7 @@ private fun WebSendBar(
     onSend: () -> Unit
 ) {
     Card(
-        modifier = modifier, // ✅ UPDATED
+        modifier = modifier,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
         Column(
@@ -755,7 +752,10 @@ private fun LoadErrorView(
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             Text("⚠️", style = MaterialTheme.typography.displaySmall)
             Text(text = message, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             Spacer(Modifier.height(4.dp))
