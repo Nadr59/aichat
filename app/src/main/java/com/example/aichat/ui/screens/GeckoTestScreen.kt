@@ -10,7 +10,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -23,14 +22,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding              // ✅ NEW (keyboard)
+import androidx.compose.foundation.layout.navigationBarsPadding  // ✅ NEW (nav bar)
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape   // ✅ مهم
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
@@ -45,7 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton            // ✅ مهم
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
@@ -90,8 +89,6 @@ import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
-
-private const val TAG = "GeckoTestScreen"
 
 @Composable
 fun GeckoTestScreen(
@@ -164,7 +161,8 @@ fun GeckoTestScreen(
     }
     val memoryWindowBuilder = remember { MemoryWindowBuilder() }
 
-    fun hostOrEmpty(): String = runCatching { Uri.parse(currentUrl).host.orEmpty() }.getOrDefault("")
+    fun hostOrEmpty(): String =
+        runCatching { Uri.parse(currentUrl).host.orEmpty() }.getOrDefault("")
 
     // ============================================================
     // Gecko delegates
@@ -504,7 +502,12 @@ fun GeckoTestScreen(
             }
         }
 
+        // ✅ FIX: لا تجعل الكيبورد يغطي شريط الإرسال
         WebSendBar(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding(),
             text = displayedText,
             onTextChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
             isEnhanced = enhancedQuery != null,
@@ -538,7 +541,7 @@ fun GeckoTestScreen(
 
                 val memoryXml =
                     if (memoryInjectionEnabled && includeMemory && selectedIds.isNotEmpty()) {
-                        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
+                        MemoryWindowBuilder().build(selectedIds = selectedIds, candidates = searchResults)
                     } else ""
 
                 val extraNotes = aiSettings.customSystemInstruction.trim()
@@ -586,6 +589,7 @@ fun GeckoTestScreen(
 
 @Composable
 private fun WebSendBar(
+    modifier: Modifier = Modifier, // ✅ NEW
     text: String,
     onTextChange: (String) -> Unit,
     isEnhanced: Boolean,
@@ -600,7 +604,7 @@ private fun WebSendBar(
     onSend: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier, // ✅ UPDATED
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
         Column(
