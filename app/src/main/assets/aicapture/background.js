@@ -1,8 +1,22 @@
 "use strict";
 
+/**
+ * AiChat WebExtension — background.js
+ * هدف هذا الملف:
+ * - استقبال رسائل Kotlin عبر NativeMessaging Port
+ * - توجيهها إلى content.js في تبويب المنصة الصحيح
+ *
+ * إصلاح أساسي:
+ * - لا نعتمد على tabs.query({active:true}) لأن GeckoView كثيراً يرجّع NO_ACTIVE_TAB
+ * - نعتمد على آخر sender.tab.id من content.js (CONTENT_READY / DEBUG_INFO / أي رسالة)
+ * - وإذا لم يكن لدينا tabId بعد، نحاول إيجاد tab بمطابقة domain القادم من Kotlin
+ */
+
 const NATIVE_APP = "browser";
 
 let nativePort = null;
+
+/** آخر تبويب معروف للمنصة (من sender.tab.id) */
 let currentPlatformTabId = null;
 
 function logLocal(message) {
@@ -22,12 +36,39 @@ function postToKotlin(obj) {
   }
 }
 
+/** احفظ sender.tab.id من أي رسالة قادمة من content.js */
+function rememberSenderTab(sender, message) {
+  try {
+    if (sender && sender.tab && sender.tab.id !== undefined) {
+      const newId = sender.tab.id;
+      if (currentPlatformTabId !== newId) {
+        currentPlatformTabId = newId;
+        logLocal(
+          "📌 remembered platform tab=" +
+            currentPlatformTabId +
+            " url=" +
+            (sender.tab.url || (message && message.url) || "")
+        );
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
 /**
- * يحاول إيجاد tab نشط:
- * 1) إذا كان لدينا currentPlatformTabId نستخدمه.
- * 2) وإلا نحاول الحصول على active tab الحالية.
+ * حل تبويب المنصة المستهدف:
+ * 1) إذا لدينا currentPlatformTabId → استخدمه
+ * 2) وإلا → tabs.query({}) ثم:
+ *    - اختر tab يطابق domain (host) إن وجد
+ *    - إن لم يوجد وكان هناك tab واحد → اختره
+ *    - وإلا فشل
  */
-function findActivePlatformTab() {
+function resolvePlatformTab(message) {
+  const targetDomain = (message && (message.domain || message.targetDomain) ? String(message.domain || message.targetDomain) : "")
+    .trim()
+    .toLowerCase();
+
   if (currentPlatformTabId !== null) {
     return browser.tabs
       .get(currentPlatformTabId)
@@ -35,20 +76,34 @@ function findActivePlatformTab() {
         if (!tab) throw new Error("NO_PLATFORM_TAB");
         return tab;
       })
-      .catch((err) => {
-        logLocal("⚠️ Saved platform tab invalid: " + (err && err.message ? err.message : String(err)));
+      .catch(() => {
         currentPlatformTabId = null;
-        // fallback للـ active tab
-        return browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-          if (!tabs || tabs.length === 0) throw new Error("NO_ACTIVE_TAB");
-          return tabs[0];
-        });
+        throw new Error("NO_PLATFORM_TAB");
       });
   }
 
-  return browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-    if (!tabs || tabs.length === 0) throw new Error("NO_ACTIVE_TAB");
-    return tabs[0];
+  return browser.tabs.query({}).then((tabs) => {
+    if (!tabs || tabs.length === 0) throw new Error("NO_PLATFORM_TAB");
+
+    if (targetDomain) {
+      // match by url host contains domain
+      for (let i = 0; i < tabs.length; i++) {
+        const u = (tabs[i].url || "").toLowerCase();
+        if (u.includes(targetDomain)) {
+          currentPlatformTabId = tabs[i].id;
+          logLocal("🎯 resolved tab by domain=" + targetDomain + " -> tab=" + currentPlatformTabId);
+          return tabs[i];
+        }
+      }
+    }
+
+    if (tabs.length === 1) {
+      currentPlatformTabId = tabs[0].id;
+      logLocal("🎯 resolved single tab -> tab=" + currentPlatformTabId);
+      return tabs[0];
+    }
+
+    throw new Error("NO_PLATFORM_TAB");
   });
 }
 
@@ -57,19 +112,21 @@ function findActivePlatformTab() {
 // ============================================================
 
 function sendContextToPlatform(message) {
-  return findActivePlatformTab()
+  return resolvePlatformTab(message)
     .then((tab) => {
       logLocal("📤 Background → Content: tab=" + tab.id + " url=" + (tab.url || ""));
 
-      // ✅ تمرير selectors للإرسال التلقائي
       return browser.tabs.sendMessage(tab.id, {
         type: "CONTEXT_TO_PAGE",
         text: message.text || "",
         contextId: message.contextId || 0,
         domain: message.domain || "",
+
+        // selectors للإرسال التلقائي
         inputSelector: message.inputSelector || "",
         sendSelector: message.sendSelector || "",
-        sendWithEnter: message.sendWithEnter !== false, // default true
+        sendWithEnter: message.sendWithEnter !== false,
+
         timestamp: message.timestamp || Date.now()
       });
     })
@@ -79,8 +136,8 @@ function sendContextToPlatform(message) {
     });
 }
 
-function sendManualCaptureToPlatform() {
-  return findActivePlatformTab()
+function sendManualCaptureToPlatform(message) {
+  return resolvePlatformTab(message || {})
     .then((tab) => {
       logLocal("📤 MANUAL_CAPTURE → Content: tab=" + tab.id + " url=" + (tab.url || ""));
       return browser.tabs.sendMessage(tab.id, {
@@ -106,10 +163,8 @@ function connectToNative() {
 
     nativePort.onMessage.addListener((message) => {
       logLocal("🚨 FROM KOTLIN: " + JSON.stringify(message || {}));
-
       if (!message || !message.type) return;
 
-      // CONTEXT_TO_PAGE
       if (message.type === "CONTEXT_TO_PAGE") {
         sendContextToPlatform(message).catch((err) => {
           const detail = err && err.message ? err.message : String(err);
@@ -126,9 +181,8 @@ function connectToNative() {
         return;
       }
 
-      // MANUAL_CAPTURE
       if (message.type === "MANUAL_CAPTURE") {
-        sendManualCaptureToPlatform().catch((err) => {
+        sendManualCaptureToPlatform(message).catch((err) => {
           const detail = err && err.message ? err.message : String(err);
           logLocal("❌ MANUAL_CAPTURE Background → Content failed: " + detail);
 
@@ -153,13 +207,11 @@ function connectToNative() {
       }, 1000);
     });
 
-    // رسالة readiness بسيطة
     postToKotlin({
       type: "EXT_READY",
       source: "background.js",
       timestamp: new Date().toISOString()
     });
-
   } catch (e) {
     logLocal("❌ connectNative failed: " + (e && e.message ? e.message : String(e)));
   }
@@ -172,23 +224,15 @@ function connectToNative() {
 browser.runtime.onMessage.addListener((message, sender) => {
   if (!message || !message.type) return Promise.resolve({ ok: false });
 
-  // content.js يخبرنا بالتاب النشط
+  // ✅ احفظ tab.id من أي رسالة
+  rememberSenderTab(sender, message);
+
+  // content.js يخبرنا بالجاهزية (مفيد لكنه لم يعد شرطاً)
   if (message.type === "CONTENT_READY") {
-    if (sender && sender.tab && sender.tab.id !== undefined) {
-      currentPlatformTabId = sender.tab.id;
-      logLocal(
-        "📌 CONTENT_READY saved tab=" +
-          currentPlatformTabId +
-          " url=" +
-          (sender.tab.url || message.url || "")
-      );
-    } else {
-      logLocal("⚠️ CONTENT_READY without sender.tab.id");
-    }
     return Promise.resolve({ ok: true });
   }
 
-  // تمرير أي رسالة أخرى من content إلى Kotlin (ASSISTANT_RESPONSE / CONTEXT_WRITTEN / CAPTURE_RESULT / DEBUG_INFO...)
+  // تمرير أي رسالة أخرى من content إلى Kotlin
   if (nativePort) {
     logLocal("↗️ Content → Kotlin: " + JSON.stringify(message));
     try {
