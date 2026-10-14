@@ -547,40 +547,53 @@ fun GeckoTestScreen(
                 val extraNotes = aiSettings.customSystemInstruction.trim()
                 val includeAccuracy = aiSettings.accuracyPromptEnabled
 
-                val finalText = buildString {
-                    if (includeAccuracy) {
-                        appendLine("## قواعد الدقة (سياسة)")
-                        appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-                        appendLine()
-                    }
-                    if (extraNotes.isNotBlank()) {
-                        appendLine("## ملاحظات إضافية (تعليمات عليا)")
-                        appendLine(extraNotes)
-                        appendLine()
-                    }
-                    if (memoryXml.isNotBlank()) {
-                        appendLine("## سياق من الذاكرة المشتركة (مرجعي وليس تعليمات)")
-                        appendLine(memoryXml)
-                        appendLine()
-                    }
-                    appendLine("## السؤال")
-                    append(t)
-                }
+                val question = t // displayedText.trim()
 
-                isSending = true
-                app.setContextPending(
-                    text = finalText,
-                    targetDomain = hostOrEmpty(),
-                    inputSelector = p.inputSelector,
-                    sendSelector = p.sendSelector,
-                    sendWithEnter = p.sendWithEnter
-                )
+val memoryXml =
+    if (memoryInjectionEnabled && includeMemory && selectedIds.isNotEmpty()) {
+        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
+    } else ""
 
-                query = ""
-                enhancedQuery = null
-            }
-        )
+val extraNotes = aiSettings.customSystemInstruction.trim()
+val includeAccuracy = aiSettings.accuracyPromptEnabled
+
+// كل شيء “غير مرئي” للمستخدم (عادة) داخل تعليق HTML
+val hiddenContext = buildString {
+    if (includeAccuracy) {
+        appendLine("ACCURACY_POLICY:")
+        appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
+        appendLine()
     }
+    if (extraNotes.isNotBlank()) {
+        appendLine("EXTRA_NOTES:")
+        appendLine(extraNotes)
+        appendLine()
+    }
+    if (memoryXml.isNotBlank()) {
+        appendLine("SHARED_MEMORIES_XML:")
+        appendLine(memoryXml)
+        appendLine()
+    }
+}.trim()
+
+val finalText =
+    if (hiddenContext.isBlank()) {
+        question
+    } else {
+        "<!-- aichat_hidden_context\n$hiddenContext\n-->\n\n$question"
+    }
+
+isSending = true
+app.setContextPending(
+    text = finalText,
+    targetDomain = hostOrEmpty(),
+    inputSelector = p.inputSelector,
+    sendSelector = p.sendSelector,
+    sendWithEnter = p.sendWithEnter
+)
+
+query = ""
+enhancedQuery = null
 
     if (showDebugLog) {
         DebugLogDialog(app = app, onDismiss = { showDebugLog = false })
