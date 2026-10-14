@@ -3,28 +3,19 @@
 
   // ============================================================
   // AiChat — AUTO SEND + CAPTURE
-  // Version 1.0.37 (Arena: enter-only + ctrl+enter fallback)
+  // Patched to work cleanly with background tab resolution
+  // - Adds host/url/platform/version to outgoing messages
+  // - Avoids noisy DEBUG/READY on generic pages (configurable)
   // ============================================================
 
   var VERSION = "1.0.37";
 
-  // ============================================================
-  // DEBUG LOG → Kotlin
-  // ============================================================
+  var HOST = (location && location.hostname) ? String(location.hostname) : "";
+  var HREF = (location && location.href) ? String(location.href) : "";
 
-  function log(message) {
-    try {
-      browser.runtime.sendMessage({
-        type: "DEBUG_INFO",
-        info: message,
-        timestamp: Date.now()
-      });
-    } catch (e) {
-      console.log("[AiChat] " + message);
-    }
-  }
-
-  log("🧪 content.js loaded v=" + VERSION);
+  // إذا true: سيُرسل DEBUG_INFO و CONTENT_READY حتى على صفحات generic
+  // (عادةً الأفضل تركها false لتقليل الضجيج)
+  var ALLOW_GENERIC_DIAGNOSTICS = false;
 
   // ============================================================
   // PLATFORM REGISTRY
@@ -35,7 +26,7 @@
       id: "chatgpt",
       name: "ChatGPT",
       matches: function () {
-        return location.hostname === "chatgpt.com" || location.hostname === "chat.openai.com";
+        return HOST === "chatgpt.com" || HOST === "chat.openai.com";
       },
       responseSelectors: [
         '[data-message-author-role="assistant"]',
@@ -57,7 +48,7 @@
       id: "venice",
       name: "Venice",
       matches: function () {
-        return location.hostname === "venice.ai";
+        return HOST === "venice.ai";
       },
       responseSelectors: [
         ".prose",
@@ -75,7 +66,7 @@
       id: "arena",
       name: "Arena",
       matches: function () {
-        return location.hostname === "arena.ai";
+        return HOST === "arena.ai";
       },
       responseSelectors: [
         "main .prose",
@@ -119,8 +110,56 @@
   }
 
   var CURRENT_PLATFORM = detectPlatform();
-  log("🌐 Platform detected: " + CURRENT_PLATFORM.name + " (" + CURRENT_PLATFORM.id + ") host=" + location.hostname);
-  startAutoHideComposer();
+
+  function shouldSendDiagnostics() {
+    if (CURRENT_PLATFORM.id !== "generic") return true;
+    return !!ALLOW_GENERIC_DIAGNOSTICS;
+  }
+
+  // ============================================================
+  // Safe sendMessage wrapper (content -> background)
+  // ============================================================
+
+  function sendToBackground(payload) {
+    try {
+      payload = payload || {};
+      if (!payload.type) return;
+
+      // attach useful metadata for background/Kotlin
+      payload.platform = payload.platform || CURRENT_PLATFORM.id;
+      payload.host = payload.host || HOST;
+      payload.url = payload.url || HREF;
+      payload.version = payload.version || VERSION;
+      payload.timestamp = payload.timestamp || Date.now();
+
+      browser.runtime.sendMessage(payload);
+    } catch (e) {
+      // fallback: do not throw
+      try {
+        console.log("[AiChat] sendToBackground failed:", e);
+      } catch (_) {}
+    }
+  }
+
+  // ============================================================
+  // DEBUG LOG → Kotlin (via background)
+  // ============================================================
+
+  function log(message) {
+    if (!shouldSendDiagnostics()) {
+      // still allow local console if needed
+      try { console.log("[AiChat] " + message); } catch (_) {}
+      return;
+    }
+
+    sendToBackground({
+      type: "DEBUG_INFO",
+      info: String(message || "")
+    });
+  }
+
+  log("🧪 content.js loaded v=" + VERSION);
+  log("🌐 Platform detected: " + CURRENT_PLATFORM.name + " (" + CURRENT_PLATFORM.id + ") host=" + HOST);
 
   // ============================================================
   // DOM utilities
@@ -205,86 +244,83 @@
   }
 
   // ============================================================
-// UI: Hide platform composer (make app input the only visible one)
-// ============================================================
+  // UI: Hide platform composer (make app input the only visible one)
+  // ============================================================
 
-var composerHidden = false;
+  var composerHidden = false;
 
-function findComposerContainer(input) {
-  if (!input) return null;
+  function findComposerContainer(input) {
+    if (!input) return null;
 
-  // أفضلية: form أو footer أو عناصر composer's wrappers
-  var c =
-    input.closest("form") ||
-    input.closest("footer") ||
-    input.closest("[role='form']") ||
-    input.closest("section") ||
-    input.parentElement;
+    var c =
+      input.closest("form") ||
+      input.closest("footer") ||
+      input.closest("[role='form']") ||
+      input.closest("section") ||
+      input.parentElement;
 
-  return c || null;
-}
-
-function hideElementVisually(el) {
-  if (!el) return false;
-
-  // لا تعيد تطبيقها
-  if (el.getAttribute("data-aichat-hidden") === "1") return true;
-
-  el.setAttribute("data-aichat-hidden", "1");
-
-  // إخفاء بصري بدون إزالة من DOM
-  el.style.opacity = "0";
-  el.style.height = "0px";
-  el.style.minHeight = "0px";
-  el.style.maxHeight = "0px";
-  el.style.overflow = "hidden";
-  el.style.padding = "0";
-  el.style.margin = "0";
-  el.style.pointerEvents = "none";
-
-  return true;
-}
-
-function tryHideComposer() {
-  // لا تخفِ generic لأننا لا نعرف بنية الصفحة
-  if (CURRENT_PLATFORM.id === "generic") return false;
-
-  var input = findInput(""); // بدون selector مفضل
-  if (!input) return false;
-
-  var container = findComposerContainer(input);
-  if (!container) return false;
-
-  var ok = hideElementVisually(container);
-  if (ok) {
-    composerHidden = true;
-    log("👻 Composer hidden for platform=" + CURRENT_PLATFORM.id);
+    return c || null;
   }
-  return ok;
-}
 
-function startAutoHideComposer() {
-  // محاولات أولية لأن DOM قد يتأخر
-  var attempts = 0;
+  function hideElementVisually(el) {
+    if (!el) return false;
 
-  function loop() {
-    attempts++;
-    if (tryHideComposer() || attempts >= 30) return;
-    setTimeout(loop, 350);
+    if (el.getAttribute("data-aichat-hidden") === "1") return true;
+
+    el.setAttribute("data-aichat-hidden", "1");
+
+    el.style.opacity = "0";
+    el.style.height = "0px";
+    el.style.minHeight = "0px";
+    el.style.maxHeight = "0px";
+    el.style.overflow = "hidden";
+    el.style.padding = "0";
+    el.style.margin = "0";
+    el.style.pointerEvents = "none";
+
+    return true;
   }
-  loop();
 
-  // راقب تغييرات DOM لأن بعض المنصات تعيد بناء composer
-  try {
-    var obs = new MutationObserver(function () {
-      // أعِد الإخفاء دائماً (حتى لو أعيد بناء DOM)
-      tryHideComposer();
-    });
-    obs.observe(document.documentElement, { childList: true, subtree: true });
-  } catch (e) {
-    // ignore
+  function tryHideComposer() {
+    // لا تخفِ generic لأننا لا نعرف بنية الصفحة
+    if (CURRENT_PLATFORM.id === "generic") return false;
+
+    var input = findInput("");
+    if (!input) return false;
+
+    var container = findComposerContainer(input);
+    if (!container) return false;
+
+    var ok = hideElementVisually(container);
+    if (ok && !composerHidden) {
+      composerHidden = true;
+      log("👻 Composer hidden for platform=" + CURRENT_PLATFORM.id);
+    }
+    return ok;
   }
-      }
+
+  function startAutoHideComposer() {
+    var attempts = 0;
+
+    function loop() {
+      attempts++;
+      if (tryHideComposer() || attempts >= 30) return;
+      setTimeout(loop, 350);
+    }
+    loop();
+
+    try {
+      var obs = new MutationObserver(function () {
+        tryHideComposer();
+      });
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // start (safe: functions are hoisted)
+  startAutoHideComposer();
 
   // ============================================================
   // Injection
@@ -308,7 +344,7 @@ function startAutoHideComposer() {
 
         try {
           document.execCommand("insertText", false, text);
-        } catch (e) {
+        } catch (e2) {
           input.textContent = text;
           input.dispatchEvent(
             new InputEvent("input", {
@@ -322,8 +358,8 @@ function startAutoHideComposer() {
       }
 
       return true;
-    } catch (e) {
-      log("❌ Text injection failed: " + (e && e.message ? e.message : String(e)));
+    } catch (e3) {
+      log("❌ Text injection failed: " + (e3 && e3.message ? e3.message : String(e3)));
       return false;
     }
   }
@@ -357,7 +393,7 @@ function startAutoHideComposer() {
       try {
         var btn = document.querySelector(DEFAULT_SEND_SELECTORS[i]);
         if (btn) return btn;
-      } catch (e) {}
+      } catch (e2) {}
     }
 
     return null;
@@ -394,11 +430,11 @@ function startAutoHideComposer() {
       target.dispatchEvent(new KeyboardEvent("keydown", options));
       target.dispatchEvent(new KeyboardEvent("keypress", options));
       target.dispatchEvent(new KeyboardEvent("keyup", options));
-      try { target.blur(); } catch (e) {}
+      try { target.blur(); } catch (e2) {}
 
       return true;
-    } catch (e) {
-      log("❌ Enter dispatch failed: " + (e && e.message ? e.message : String(e)));
+    } catch (e3) {
+      log("❌ Enter dispatch failed: " + (e3 && e3.message ? e3.message : String(e3)));
       return false;
     }
   }
@@ -416,28 +452,20 @@ function startAutoHideComposer() {
   // ============================================================
 
   function sendContextWritten(success, contextId, stage, detail) {
-    try {
-      browser.runtime.sendMessage({
-        type: "CONTEXT_WRITTEN",
-        success: !!success,
-        contextId: contextId || 0,
-        stage: stage || "",
-        detail: detail || "",
-        platform: CURRENT_PLATFORM.id,
-        timestamp: Date.now()
-      });
-    } catch (e) {}
+    sendToBackground({
+      type: "CONTEXT_WRITTEN",
+      success: !!success,
+      contextId: contextId || 0,
+      stage: stage || "",
+      detail: detail || ""
+    });
   }
 
   function sendContextConsumed(contextId) {
-    try {
-      browser.runtime.sendMessage({
-        type: "CONTEXT_CONSUMED",
-        contextId: contextId || 0,
-        platform: CURRENT_PLATFORM.id,
-        timestamp: Date.now()
-      });
-    } catch (e) {}
+    sendToBackground({
+      type: "CONTEXT_CONSUMED",
+      contextId: contextId || 0
+    });
   }
 
   // ============================================================
@@ -456,7 +484,7 @@ function startAutoHideComposer() {
       try {
         var regions = document.querySelectorAll('[role="region"][aria-label="محادثة"]');
         for (var j = 0; j < regions.length; j++) result.push(regions[j]);
-      } catch (e) {}
+      } catch (e2) {}
     }
 
     return result;
@@ -647,17 +675,13 @@ function startAutoHideComposer() {
     answer = cleanAssistantResponse(answer || "");
     if (!answer) return;
 
-    try {
-      browser.runtime.sendMessage({
-        type: "ASSISTANT_RESPONSE",
-        text: answer,
-        source: CURRENT_PLATFORM.id,
-        timestamp: Date.now()
-      });
-      log("📤 ASSISTANT_RESPONSE sent source=" + CURRENT_PLATFORM.id + " len=" + answer.length);
-    } catch (e) {
-      log("❌ ASSISTANT_RESPONSE send failed: " + e);
-    }
+    sendToBackground({
+      type: "ASSISTANT_RESPONSE",
+      text: answer,
+      source: CURRENT_PLATFORM.id
+    });
+
+    log("📤 ASSISTANT_RESPONSE sent source=" + CURRENT_PLATFORM.id + " len=" + answer.length);
   }
 
   function watchForResponse() {
@@ -699,7 +723,7 @@ function startAutoHideComposer() {
   // Manual capture
   // ============================================================
 
-  function sendManualCaptureResult(success, text, reason) {
+  function sendManualCaptureResult(text, reason) {
     var cleaned = cleanAssistantResponse(text || "");
 
     var debug = {
@@ -710,34 +734,29 @@ function startAutoHideComposer() {
       reason: reason || ""
     };
 
-    try {
-      browser.runtime.sendMessage({
-        type: "CAPTURE_RESULT",
-        success: !!cleaned,
-        text: cleaned,
-        debug: debug,
-        source: CURRENT_PLATFORM.id,
-        timestamp: Date.now()
-      });
-    } catch (e) {
-      log("❌ CAPTURE_RESULT send failed: " + e);
-    }
+    sendToBackground({
+      type: "CAPTURE_RESULT",
+      success: !!cleaned,
+      text: cleaned,
+      debug: debug,
+      source: CURRENT_PLATFORM.id
+    });
   }
 
   function captureCurrentResponse() {
     var current = getCurrentAssistantText();
 
     if (!current) {
-      sendManualCaptureResult(false, "", "assistant_response_not_found");
+      sendManualCaptureResult("", "assistant_response_not_found");
       return;
     }
 
     if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(current)) {
-      sendManualCaptureResult(false, "", "rejected_injected_prompt");
+      sendManualCaptureResult("", "rejected_injected_prompt");
       return;
     }
 
-    sendManualCaptureResult(true, current, "current_response");
+    sendManualCaptureResult(current, "current_response");
   }
 
   // ============================================================
@@ -837,43 +856,51 @@ function startAutoHideComposer() {
   // ============================================================
 
   browser.runtime.onMessage.addListener(function (message) {
-    if (!message || !message.type) return;
+    try {
+      if (!message || !message.type) return Promise.resolve({ ok: false, reason: "no_type" });
 
-    if (message.type === "MANUAL_CAPTURE") {
-      log("🎯 MANUAL_CAPTURE received");
-      captureCurrentResponse();
-      return Promise.resolve({ ok: true, type: "MANUAL_CAPTURE" });
-    }
-
-    if (message.type === "CONTEXT_TO_PAGE") {
-      var text = message.text || "";
-      var contextId = message.contextId || 0;
-
-      log(
-        "📥 CONTEXT_TO_PAGE len=" +
-          text.length +
-          " platform=" +
-          CURRENT_PLATFORM.id +
-          " inputSel=" +
-          (message.inputSelector || "") +
-          " sendSel=" +
-          (message.sendSelector || "")
-      );
-
-      if (!text.trim()) {
-        sendContextWritten(false, contextId, "empty_text", "text is empty");
-        return Promise.resolve({ ok: false, reason: "empty_text" });
+      if (message.type === "MANUAL_CAPTURE") {
+        log("🎯 MANUAL_CAPTURE received");
+        captureCurrentResponse();
+        return Promise.resolve({ ok: true, type: "MANUAL_CAPTURE" });
       }
 
-      injectAndSend({
-        text: text,
-        contextId: contextId,
-        inputSelector: message.inputSelector || "",
-        sendSelector: message.sendSelector || "",
-        sendWithEnter: message.sendWithEnter !== false
-      });
+      if (message.type === "CONTEXT_TO_PAGE") {
+        var text = message.text || "";
+        var contextId = message.contextId || 0;
 
-      return Promise.resolve({ ok: true, type: "CONTEXT_TO_PAGE" });
+        log(
+          "📥 CONTEXT_TO_PAGE len=" +
+            text.length +
+            " platform=" +
+            CURRENT_PLATFORM.id +
+            " inputSel=" +
+            (message.inputSelector || "") +
+            " sendSel=" +
+            (message.sendSelector || "")
+        );
+
+        if (!text.trim()) {
+          sendContextWritten(false, contextId, "empty_text", "text is empty");
+          return Promise.resolve({ ok: false, reason: "empty_text" });
+        }
+
+        injectAndSend({
+          text: text,
+          contextId: contextId,
+          inputSelector: message.inputSelector || "",
+          sendSelector: message.sendSelector || "",
+          sendWithEnter: message.sendWithEnter !== false
+        });
+
+        return Promise.resolve({ ok: true, type: "CONTEXT_TO_PAGE" });
+      }
+
+      return Promise.resolve({ ok: false, reason: "unknown_type", type: message.type });
+    } catch (e) {
+      // لا تسمح بانهيار السكربت
+      try { console.log("[AiChat] onMessage exception", e); } catch (_) {}
+      return Promise.resolve({ ok: false, reason: "exception" });
     }
   });
 
@@ -881,14 +908,16 @@ function startAutoHideComposer() {
   // READY
   // ============================================================
 
-  try {
-    browser.runtime.sendMessage({
-      type: "CONTENT_READY",
-      version: VERSION,
-      url: location.href
+  // إرسال CONTENT_READY فقط للمنصات المعروفة (إلا إذا ALLOW_GENERIC_DIAGNOSTICS=true)
+  if (shouldSendDiagnostics()) {
+    sendToBackground({
+      type: "CONTENT_READY"
+      // metadata تُضاف تلقائياً في sendToBackground
     });
     log("📡 CONTENT_READY sent");
-  } catch (e) {
-    log("❌ CONTENT_READY failed: " + e);
+  } else {
+    try {
+      console.log("[AiChat] generic page - skip CONTENT_READY/DEBUG (host=" + HOST + ")");
+    } catch (_) {}
   }
 })();
