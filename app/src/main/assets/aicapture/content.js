@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.0.41";
+  var VERSION = "1.0.42";
   var HOST = String((location && location.hostname) || "");
   var HREF = String((location && location.href) || "");
 
@@ -14,12 +14,7 @@
       id: "chatgpt",
       name: "ChatGPT",
       matches: function () { return HOST === "chatgpt.com" || HOST === "chat.openai.com"; },
-      responseSelectors: [
-        '[data-message-author-role="assistant"]',
-        '[data-role="assistant"]',
-        '[data-message-author="assistant"]',
-        ".agent-turn"
-      ],
+      responseSelectors: ['[data-message-author-role="assistant"]', '[data-role="assistant"]', '[data-message-author="assistant"]', ".agent-turn"],
       extractResponse: function (el) {
         if (!el) return "";
         var md = null; try { md = el.querySelector(".markdown"); } catch (e) {}
@@ -88,8 +83,8 @@
     sendToBackground({ type: "DEBUG_INFO", info: String(msg || "") });
   }
 
-  log("🧪 content.js loaded v=" + VERSION);
-  log("🌐 Platform detected: " + CURRENT_PLATFORM.name + " (" + CURRENT_PLATFORM.id + ") host=" + HOST);
+  log("content.js loaded v=" + VERSION);
+  log("Platform detected: " + CURRENT_PLATFORM.name + " (" + CURRENT_PLATFORM.id + ") host=" + HOST);
 
   // -------------------- DOM helpers --------------------
   function getElementText(el) {
@@ -221,7 +216,7 @@
       });
       document.documentElement.appendChild(toggleBtn);
       updateToggleBtn();
-    } catch (e) { log("❌ installToggleButton failed: " + e); }
+    } catch (e) { log("installToggleButton failed: " + e); }
   }
 
   function startComposerController() {
@@ -266,7 +261,10 @@
         }
       }
       return true;
-    } catch (e3) { log("❌ Text injection failed: " + (e3 && e3.message ? e3.message : String(e3))); return false; }
+    } catch (e3) {
+      log("Text injection failed: " + (e3 && e3.message ? e3.message : String(e3)));
+      return false;
+    }
   }
 
   // -------------------- Send controls --------------------
@@ -296,16 +294,18 @@
       target.dispatchEvent(new KeyboardEvent("keyup", opt));
       try { target.blur(); } catch (e2) {}
       return true;
-    } catch (e3) { log("❌ Enter dispatch failed: " + (e3 && e3.message ? e3.message : String(e3))); return false; }
+    } catch (e3) {
+      log("Enter dispatch failed: " + (e3 && e3.message ? e3.message : String(e3)));
+      return false;
+    }
   }
 
-  // -------------------- Hide injected memory from UI (Sanitizer v2: TreeWalker fallback) --------------------
+  // -------------------- Sanitizer (hide hidden context from UI) --------------------
   var HIDDEN_MARKER = "aichat_hidden_context";
   var sanitizeObserver = null;
-  var sanitizeThrottleTimer = 0;
   var sanitizeAggressiveTimer = 0;
   var sanitizeAggressiveUntil = 0;
-  var debugDumpedForThisSend = false;
+  var sanitizeThrottleTimer = 0;
 
   function looksLikeHasHiddenContext(t) {
     if (!t) return false;
@@ -316,129 +316,197 @@
     );
   }
 
+  function stripLeadingYouSaid(s) {
+    var txt = String(s || "").trim();
+    if (!txt) return txt;
+
+    var lines = txt.split(/\n+/);
+    while (lines.length) {
+      var first = (lines[0] || "").trim().toLowerCase();
+      // عربي + إنجليزي (بدون مخاطرة كبيرة)
+      if (
+        first === "you said" || first === "you said:" ||
+        first === "you said :" ||
+        first === "أنت قلت" || first === "أنت قلت:" || first === "أنت قلت :" ||
+        first === "انت قلت" || first === "انت قلت:" || first === "انت قلت :"
+      ) {
+        lines.shift();
+        continue;
+      }
+      break;
+    }
+    return lines.join("\n").trim();
+  }
+
   function stripHiddenContextFromText(s) {
     var out = String(s || "");
+
+    // remove the hidden HTML comment block
     out = out.replace(/<!--\s*aichat_hidden_context[\s\S]*?-->\s*/ig, "");
+
+    // remove raw xml (fallback)
     out = out.replace(/SHARED_MEMORIES_XML:\s*<shared_memories>[\s\S]*?<\/shared_memories>\s*/ig, "");
+
+    // optional: if these appear
     out = out.replace(/ACCURACY_POLICY:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
     out = out.replace(/EXTRA_NOTES:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
+
+    out = out.replace(/\n{3,}/g, "\n\n").trim();
+    out = stripLeadingYouSaid(out);
     return out.trim();
   }
 
-  function sanitizeOneNodeText(node) {
-    if (!node) return false;
-    var t = getElementText(node);
-    if (!looksLikeHasHiddenContext(t)) return false;
+  function getUserContainerFromElement(el) {
+    if (!el || !el.closest) return null;
+    try {
+      return el.closest(
+        // common user message containers across platforms
+        '[data-message-author-role="user"], [data-role="user"], [data-message-author="user"], .user-message, .human-message, .message.user, .message--user'
+      );
+    } catch (e) {
+      return null;
+    }
+  }
 
-    var cleaned = stripHiddenContextFromText(t);
-    if (!cleaned || cleaned === t) return false;
+  function findUserTextNodeWithinContainer(container) {
+    if (!container || !container.querySelector) return null;
+
+    // prefer "content/text" areas, not wrappers
+    var selectors = [];
+    if (CURRENT_PLATFORM.id === "chatgpt") {
+      selectors = [
+        ".whitespace-pre-wrap",
+        "[data-message-content]",
+        ".markdown"
+      ];
+    } else {
+      selectors = [
+        ".prose",
+        ".message-content",
+        ".content",
+        "[data-message-content]"
+      ];
+    }
+
+    for (var i = 0; i < selectors.length; i++) {
+      try {
+        var n = container.querySelector(selectors[i]);
+        if (n) return n;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  function safeSetNodeText(node, newText) {
+    if (!node) return false;
+
+    // avoid nuking big wrappers that likely include buttons/controls
+    try {
+      // إذا العنصر يحتوي على أزرار/نماذج كثيرة لا نلمسه
+      if (node.querySelector && node.querySelector("button, form, textarea, input, select, [role='button']")) {
+        // still allow if it's a small text-only node; but if it contains button => skip
+        // (we prefer inner text nodes only)
+      }
+    } catch (_) {}
 
     try {
-      node.textContent = cleaned; // أفضل من innerText ضد إعادة render
+      node.textContent = newText;
       try { node.setAttribute("data-aichat-sanitized", "1"); } catch (_) {}
       return true;
-    } catch (e2) {
-      log("❌ sanitizeOneNodeText failed: " + e2);
+    } catch (e) {
       return false;
     }
   }
 
-  // فحص خفيف باستخدام selectors شائعة
-  function sanitizeBySelectorsScan() {
-    var nodes = [];
-    var sels = [];
+  function sanitizeContainer(container) {
+    if (!container) return 0;
 
-    if (CURRENT_PLATFORM.id === "chatgpt") {
-      sels = [
-        'main [data-message-author-role="user"] .whitespace-pre-wrap',
-        'main [data-message-author-role="user"] [data-message-content]',
-        'main [data-message-author-role="user"]',
-        "main .whitespace-pre-wrap",
-        "main [data-message-content]"
-      ];
-    } else {
-      sels = [
-        "main .prose",
-        ".prose",
-        "[data-message-content]",
-        ".message-content",
-        ".content"
-      ];
+    var fullText = getElementText(container);
+    if (!looksLikeHasHiddenContext(fullText)) return 0;
+
+    var cleaned = stripHiddenContextFromText(fullText);
+    if (!cleaned) return 0;
+
+    // pick best text node inside container
+    var target = findUserTextNodeWithinContainer(container);
+    if (!target) {
+      // fallback: try to find the closest paragraph-like element inside
+      try {
+        target = container.querySelector("p, div, span");
+      } catch (_) {}
     }
+    if (!target) target = container;
+
+    // IMPORTANT: don't overwrite container if it has buttons; try inner target only
+    // if target has buttons too, try a deeper leaf
+    try {
+      if (target !== container && target.querySelector && target.querySelector("button, [role='button']")) {
+        // fallback to container text node areas
+        target = findUserTextNodeWithinContainer(container) || target;
+      }
+    } catch (_) {}
+
+    // if target looks like wrapper (has buttons), avoid breaking UI: just return 0
+    try {
+      if (target && target.querySelector && target.querySelector("button, form, textarea, input, [role='button']")) {
+        // do not destroy UI controls
+        return 0;
+      }
+    } catch (_) {}
+
+    // final apply
+    return safeSetNodeText(target, cleaned) ? 1 : 0;
+  }
+
+  function uniquePush(arr, el) {
+    if (!el) return;
+    if (arr.indexOf(el) === -1) arr.push(el);
+  }
+
+  function getUserContainersBySelectors() {
+    var out = [];
+    var sels = [
+      '[data-message-author-role="user"]',
+      '[data-role="user"]',
+      '[data-message-author="user"]',
+      ".user-message",
+      ".human-message",
+      ".message.user",
+      ".message--user"
+    ];
 
     for (var i = 0; i < sels.length; i++) {
       try {
         var els = document.querySelectorAll(sels[i]);
-        for (var j = 0; j < els.length; j++) if (nodes.indexOf(els[j]) === -1) nodes.push(els[j]);
+        for (var j = 0; j < els.length; j++) uniquePush(out, els[j]);
       } catch (e) {}
     }
+    return out;
+  }
 
-    if (!nodes.length) return 0;
+  function sanitizeByContainerScan() {
+    var containers = getUserContainersBySelectors();
+    if (!containers.length) return 0;
 
-    // نفحص آخر 60 عنصر فقط
-    var N = 60;
-    var start = nodes.length > N ? (nodes.length - N) : 0;
+    // scan last N only
+    var N = 12;
+    var start = containers.length > N ? (containers.length - N) : 0;
 
     var changed = 0;
-    for (var k = start; k < nodes.length; k++) {
-      if (sanitizeOneNodeText(nodes[k])) changed++;
+    for (var i = start; i < containers.length; i++) {
+      changed += sanitizeContainer(containers[i]);
     }
     return changed;
   }
 
-  // ✅ الفحص الأقوى: TreeWalker يبحث عن marker داخل نصوص DOM مهما تغيرت بنية ChatGPT
-  function sanitizeFromTextNode(textNode, root) {
-    try {
-      if (!textNode || !textNode.parentElement) return false;
-
-      var el = textNode.parentElement;
-
-      // حاول الوصول لأقرب حاوية user
-      var userContainer = null;
-      try {
-        userContainer = el.closest('[data-message-author-role="user"], [data-role="user"], [data-message-author="user"], .user-message, .human-message, .message.user');
-      } catch (e0) {}
-
-      // fallback: داخل turn
-      if (!userContainer) {
-        var turn = null;
-        try { turn = el.closest('article[data-testid="conversation-turn"], article, [role="article"]'); } catch (e1) {}
-        if (turn) {
-          try {
-            userContainer = turn.querySelector('[data-message-author-role="user"], [data-role="user"], [data-message-author="user"]');
-          } catch (e2) {}
-        }
-      }
-
-      var target = userContainer || el;
-
-      // اختر عنصر نص "قريب" يحتوي marker (حتى لا نمسح عناصر كبيرة)
-      var best = null;
-      var cur = target;
-      for (var i = 0; i < 7 && cur && cur !== root; i++) {
-        var t = getElementText(cur);
-        if (looksLikeHasHiddenContext(t) && t.length < 20000) best = cur;
-        cur = cur.parentElement;
-      }
-      best = best || target;
-
-      return sanitizeOneNodeText(best);
-    } catch (e3) {
-      return false;
-    }
-  }
-
-  function sanitizeByTreeWalker(maxNodes, maxChanges) {
+  // TreeWalker fallback: find marker text node, then sanitize its user container
+  function sanitizeByTreeWalkerFallback() {
     var root = null;
     try { root = document.querySelector("main") || document.body || document.documentElement; } catch (_) {}
     if (!root) return 0;
 
     var walker = null;
-    try {
-      walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    } catch (e) {
-      return 0;
-    }
+    try { walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); } catch (_) { return 0; }
 
     var visited = 0;
     var changed = 0;
@@ -446,8 +514,7 @@
 
     while ((node = walker.nextNode())) {
       visited++;
-      if (visited > (maxNodes || 2500)) break;
-
+      if (visited > 4000) break;
       var v = node.nodeValue || "";
       if (!v) continue;
 
@@ -457,29 +524,28 @@
         v.indexOf("SHARED_MEMORIES_XML:") === -1
       ) continue;
 
-      if (sanitizeFromTextNode(node, root)) {
-        changed++;
-        if (changed >= (maxChanges || 3)) break;
+      var pe = node.parentElement;
+      var container = getUserContainerFromElement(pe);
+      if (container) {
+        changed += sanitizeContainer(container);
+        if (changed >= 2) break;
       }
     }
 
-    if (changed > 0) log("🧼 TreeWalker sanitized=" + changed + " visited=" + visited + " platform=" + CURRENT_PLATFORM.id);
+    if (changed > 0) log("TreeWalker fallback sanitized=" + changed + " visited=" + visited + " platform=" + CURRENT_PLATFORM.id);
     return changed;
   }
 
   function sanitizeAllNow(reason) {
     var changed = 0;
+    try { changed += sanitizeByContainerScan(); } catch (_) {}
 
-    try { changed += sanitizeBySelectorsScan(); } catch (_) {}
-
-    // إذا لم ينجح، جرّب TreeWalker (خاصة ChatGPT)
+    // fallback only if needed
     if (changed === 0) {
-      try { changed += sanitizeByTreeWalker(3500, 5); } catch (_) {}
+      try { changed += sanitizeByTreeWalkerFallback(); } catch (_) {}
     }
 
-    if (changed > 0) {
-      log("🧼 Sanitized " + changed + " node(s) reason=" + (reason || "") + " platform=" + CURRENT_PLATFORM.id);
-    }
+    if (changed > 0) log("Sanitized nodes=" + changed + " reason=" + (reason || "") + " platform=" + CURRENT_PLATFORM.id);
     return changed;
   }
 
@@ -491,7 +557,7 @@
     }, 120);
   }
 
-  function startSanitizer() {
+  function startSanitizerObserver() {
     sanitizeAllNow("startup");
 
     if (sanitizeObserver) return;
@@ -504,57 +570,32 @@
         }
       });
       sanitizeObserver.observe(document.documentElement, { childList: true, subtree: true });
-      log("🧼 Sanitizer observer installed");
+      log("Sanitizer observer installed");
     } catch (e) {
-      log("❌ Sanitizer observer failed: " + e);
+      log("Sanitizer observer failed: " + e);
     }
   }
 
-  function debugDumpCountsOnce() {
-    if (debugDumpedForThisSend) return;
-    debugDumpedForThisSend = true;
-
-    try {
-      var u = 0, w = 0, mm = 0;
-      try { u = document.querySelectorAll('[data-message-author-role="user"]').length; } catch (_) {}
-      try { w = document.querySelectorAll("main .whitespace-pre-wrap").length; } catch (_) {}
-      try { mm = (document.querySelector("main") ? 1 : 0); } catch (_) {}
-      log("DBG DOM counts: main=" + mm + " userRole=" + u + " wsPre=" + w + " host=" + HOST);
-    } catch (e) {}
-  }
-
-  startSanitizer();
+  startSanitizerObserver();
 
   function scheduleSanitizeAfterSend(injectedText) {
-    sanitizeAggressiveUntil = Date.now() + 14000; // 14s aggressive
-    debugDumpedForThisSend = false;
+    sanitizeAggressiveUntil = Date.now() + 10000;
 
     var changedNow = sanitizeAllNow("after_send_now");
-    if (changedNow === 0) {
-      // إذا فشل فوراً (غالباً DOM لم يبنِ bubble بعد أو selectors غير مطابقة)
-      debugDumpCountsOnce();
-    }
+    log("scheduleSanitizeAfterSend marker=" + (String(injectedText || "").indexOf(HIDDEN_MARKER) !== -1 ? "yes" : "no") +
+      " changedNow=" + changedNow + " platform=" + CURRENT_PLATFORM.id);
 
-    if (sanitizeAggressiveTimer) { try { clearInterval(sanitizeAggressiveTimer); } catch (_) {} }
+    if (sanitizeAggressiveTimer) { try { clearInterval(sanitizeAggressiveTimer); } catch (_) {} sanitizeAggressiveTimer = 0; }
+
     var tries = 0;
     sanitizeAggressiveTimer = setInterval(function () {
       tries++;
-      var ch = sanitizeAllNow("after_send_tick_" + tries);
-      if (ch > 0) {
-        // بمجرد أن ينجح مرة، لا نحتاج spam كثير
-        // نتركه يكمل ثواني بسيطة ثم يتوقف تلقائياً
-      }
-      if (tries >= 56) { // 56 * 250ms = 14s
+      sanitizeAllNow("after_send_tick_" + tries);
+      if (tries >= 40) {
         clearInterval(sanitizeAggressiveTimer);
         sanitizeAggressiveTimer = 0;
       }
     }, 250);
-
-    // للتشخيص
-    try {
-      log("🧼 scheduleSanitizeAfterSend marker=" + (String(injectedText || "").indexOf(HIDDEN_MARKER) !== -1 ? "yes" : "no") +
-          " platform=" + CURRENT_PLATFORM.id);
-    } catch (e) {}
   }
 
   // -------------------- Context feedback --------------------
@@ -688,7 +729,7 @@
     lastCandidate = "";
     stableSince = 0;
     baselineAssistant = getCurrentAssistantText();
-    log("🧪 Capture started platform=" + CURRENT_PLATFORM.id + " baselineLen=" + (baselineAssistant ? baselineAssistant.length : 0));
+    log("Capture started platform=" + CURRENT_PLATFORM.id + " baselineLen=" + (baselineAssistant ? baselineAssistant.length : 0));
     watchForResponse();
   }
 
@@ -696,7 +737,7 @@
     if (captureFinished) return;
 
     if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(answer)) {
-      log("⚠️ FinishCapture blocked (Arena rejected candidate) — keep watching");
+      log("FinishCapture blocked (Arena rejected candidate) — keep watching");
       lastCandidate = "";
       stableSince = 0;
       return setTimeout(watchForResponse, 900);
@@ -709,7 +750,7 @@
     if (!answer) return;
 
     sendToBackground({ type: "ASSISTANT_RESPONSE", text: answer, source: CURRENT_PLATFORM.id });
-    log("📤 ASSISTANT_RESPONSE sent source=" + CURRENT_PLATFORM.id + " len=" + answer.length);
+    log("ASSISTANT_RESPONSE sent source=" + CURRENT_PLATFORM.id + " len=" + answer.length);
   }
 
   function watchForResponse() {
@@ -771,14 +812,14 @@
           // Arena: Enter only (+ Ctrl+Enter fallback)
           if (CURRENT_PLATFORM.id === "arena") {
             if (!opts.sendWithEnter) return sendContextWritten(false, contextId, "send_failed", "arena_sendWithEnter_disabled");
-            log("🎯 Arena: send via Enter");
+            log("Arena: send via Enter");
             if (dispatchEnter(input, false)) {
               sendContextWritten(true, contextId, "enter_sent", "arena_enter");
               sendContextConsumed(contextId);
               scheduleSanitizeAfterSend(text);
               return;
             }
-            log("🎯 Arena: Enter failed, try Ctrl+Enter");
+            log("Arena: Enter failed, try Ctrl+Enter");
             if (dispatchEnter(input, true)) {
               sendContextWritten(true, contextId, "ctrl_enter_sent", "arena_ctrl_enter");
               sendContextConsumed(contextId);
@@ -798,7 +839,7 @@
               sendContextConsumed(contextId);
               scheduleSanitizeAfterSend(text);
               return;
-            } catch (e1) { log("❌ clickSend failed: " + e1); }
+            } catch (e1) { log("clickSend failed: " + e1); }
           }
 
           if (opts.sendWithEnter && dispatchEnter(input, false)) {
@@ -823,7 +864,7 @@
       if (!message || !message.type) return Promise.resolve({ ok: false, reason: "no_type" });
 
       if (message.type === "MANUAL_CAPTURE") {
-        log("🎯 MANUAL_CAPTURE received");
+        log("MANUAL_CAPTURE received");
         captureCurrentResponse();
         return Promise.resolve({ ok: true, type: "MANUAL_CAPTURE" });
       }
@@ -832,7 +873,7 @@
         var text = String(message.text || "");
         var contextId = message.contextId || 0;
 
-        log("📥 CONTEXT_TO_PAGE len=" + text.length + " platform=" + CURRENT_PLATFORM.id +
+        log("CONTEXT_TO_PAGE len=" + text.length + " platform=" + CURRENT_PLATFORM.id +
             " inputSel=" + (message.inputSelector || "") + " sendSel=" + (message.sendSelector || ""));
 
         if (!text.trim()) {
@@ -861,7 +902,7 @@
   // -------------------- READY --------------------
   if (shouldSendDiagnostics()) {
     sendToBackground({ type: "CONTENT_READY" });
-    log("📡 CONTENT_READY sent");
+    log("CONTENT_READY sent");
   } else {
     try { console.log("[AiChat] generic page - skip CONTENT_READY/DEBUG (host=" + HOST + ")"); } catch (_) {}
   }
