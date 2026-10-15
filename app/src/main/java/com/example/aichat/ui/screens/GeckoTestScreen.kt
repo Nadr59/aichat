@@ -55,6 +55,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,6 +83,7 @@ import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
@@ -152,6 +154,9 @@ fun GeckoTestScreen(
     var selectedIds by remember(sessionKey) { mutableStateOf(emptyList<Long>()) }
     var curatorReasoning by remember(sessionKey) { mutableStateOf("") }
 
+    // ✅ مهم: نتأكد أن selectedIds الحالية تخص نفس النص (حتى لا نرسل قبل تجهيزها)
+    var curatedForText by remember(sessionKey) { mutableStateOf("") }
+
     val displayedText = enhancedQuery ?: query
 
     val aiSettings = remember { AiSettings(context) }
@@ -160,8 +165,18 @@ fun GeckoTestScreen(
     }
     val memoryWindowBuilder = remember { MemoryWindowBuilder() }
 
-    fun hostOrEmpty(): String =
-        runCatching { Uri.parse(currentUrl).host.orEmpty() }.getOrDefault("")
+    fun hostOrEmptyFrom(urlStr: String): String =
+        runCatching { Uri.parse(urlStr).host.orEmpty() }.getOrDefault("")
+
+    fun targetDomainStable(): String {
+        // ✅ ثابت: نعتمد على رابط المنصة (أفضل من currentUrl المتقلب أثناء التنقل)
+        val p = platform
+        return when {
+            p != null && p.url.isNotBlank() -> hostOrEmptyFrom(p.url)
+            currentUrl.isNotBlank() -> hostOrEmptyFrom(currentUrl)
+            else -> ""
+        }
+    }
 
     // ============================================================
     // Gecko delegates
@@ -287,7 +302,7 @@ fun GeckoTestScreen(
     }
 
     // ============================================================
-    // Memory search + curator selection
+    // Memory search + curator selection (للـ UI فقط)
     // ============================================================
 
     LaunchedEffect(includeMemory, displayedText, memoryInjectionEnabled, platform?.id) {
@@ -299,6 +314,7 @@ fun GeckoTestScreen(
             searchResults = emptyList()
             selectedIds = emptyList()
             curatorReasoning = ""
+            curatedForText = ""
             return@LaunchedEffect
         }
 
@@ -307,10 +323,11 @@ fun GeckoTestScreen(
             searchResults = emptyList()
             selectedIds = emptyList()
             curatorReasoning = ""
+            curatedForText = ""
             return@LaunchedEffect
         }
 
-        kotlinx.coroutines.delay(350)
+        delay(350)
 
         try {
             val candidates = chatViewModel!!.searchSharedMemories(q)
@@ -319,15 +336,18 @@ fun GeckoTestScreen(
             if (candidates.isEmpty()) {
                 selectedIds = emptyList()
                 curatorReasoning = ""
+                curatedForText = q
             } else {
                 val curatorResult = memoryCuratorService.curateSelection(q, candidates)
                 selectedIds = curatorResult.selectedIds
                 curatorReasoning = curatorResult.reasoning
+                curatedForText = q
             }
         } catch (_: Exception) {
             searchResults = emptyList()
             selectedIds = emptyList()
             curatorReasoning = ""
+            curatedForText = ""
         }
     }
 
@@ -427,7 +447,7 @@ fun GeckoTestScreen(
                     }
                 }
 
-                IconButton(onClick = { session.reload() }) {
+                IconButton(onClick = { if (session.isOpen) session.reload() }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
                 }
                 IconButton(onClick = { openExternal(context, currentUrl) }) {
@@ -462,28 +482,36 @@ fun GeckoTestScreen(
         }
 
         Box(modifier = Modifier.weight(1f)) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    GeckoView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
+            // ✅ مهم: key(sessionKey) لضمان عدم إعادة استخدام GeckoView مع Session قديم عند تبديل المنصة
+            key(sessionKey) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        GeckoView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
 
-                        setSession(session)
+                            setSession(session)
 
-                        if (!session.isOpen) {
-                            session.open(runtime)
-                            session.setActive(true)
-                            isLoading = true
-                            session.loadUri(url)
-                        } else {
-                            session.setActive(true)
-                        }
-                    }.also { geckoViewRef = it }
-                }
-            )
+                            if (!session.isOpen) {
+                                session.open(runtime)
+                                session.setActive(true)
+                                isLoading = true
+                                session.loadUri(url)
+                            } else {
+                                session.setActive(true)
+                            }
+                        }.also { geckoViewRef = it }
+                    },
+                    update = { view ->
+                        // احتياط إضافي
+                        runCatching { view.setSession(session) }
+                        runCatching { if (session.isOpen) session.setActive(true) }
+                    }
+                )
+            }
 
             if (isLoading) {
                 LinearProgressIndicator(
@@ -500,7 +528,7 @@ fun GeckoTestScreen(
                     message = message,
                     onRetry = {
                         loadError = null
-                        session.reload()
+                        if (session.isOpen) session.reload()
                     },
                     onOpenBrowser = { openExternal(context, currentUrl) }
                 )
@@ -541,53 +569,96 @@ fun GeckoTestScreen(
             onClearEnhanced = { enhancedQuery = null },
             onSend = {
                 val p = platform ?: return@WebSendBar
+                val vm = chatViewModel
                 val question = displayedText.trim()
                 if (question.isBlank()) return@WebSendBar
+                if (isSending) return@WebSendBar
 
-                val memoryXml =
-                    if (memoryInjectionEnabled && includeMemory && selectedIds.isNotEmpty()) {
-                        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
-                    } else ""
-
-                val extraNotes = aiSettings.customSystemInstruction.trim()
-                val includeAccuracy = aiSettings.accuracyPromptEnabled
-
-                val hiddenContext = buildString {
-                    if (includeAccuracy) {
-                        appendLine("ACCURACY_POLICY:")
-                        appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-                        appendLine()
-                    }
-                    if (extraNotes.isNotBlank()) {
-                        appendLine("EXTRA_NOTES:")
-                        appendLine(extraNotes)
-                        appendLine()
-                    }
-                    if (memoryXml.isNotBlank()) {
-                        appendLine("SHARED_MEMORIES_XML:")
-                        appendLine(memoryXml)
-                        appendLine()
-                    }
-                }.trim()
-
-                val finalText =
-                    if (hiddenContext.isBlank()) {
-                        question
-                    } else {
-                        "<!-- aichat_hidden_context\n$hiddenContext\n-->\n\n$question"
-                    }
+                // ✅ يقلل فشل الإرسال عند إعادة الفتح: لا ترسل أثناء التحميل
+                if (isLoading) {
+                    Toast.makeText(context, "⏳ انتظر حتى تكتمل الصفحة ثم أرسل", Toast.LENGTH_SHORT).show()
+                    return@WebSendBar
+                }
 
                 isSending = true
-                app.setContextPending(
-                    text = finalText,
-                    targetDomain = hostOrEmpty(),
-                    inputSelector = p.inputSelector,
-                    sendSelector = p.sendSelector,
-                    sendWithEnter = p.sendWithEnter
-                )
 
-                query = ""
-                enhancedQuery = null
+                scope.launch {
+                    try {
+                        val memoryAllowed =
+                            memoryInjectionEnabled && includeMemory && p.memoryEnabled && vm != null
+
+                        // ✅ الإصلاح الأساسي: بناء الذاكرة وقت الإرسال إذا لم تكن جاهزة بعد
+                        val memoryXml: String =
+                            if (!memoryAllowed) {
+                                ""
+                            } else {
+                                // إذا كانت نتائج curation جاهزة لنفس النص استخدمها
+                                if (curatedForText == question &&
+                                    selectedIds.isNotEmpty() &&
+                                    searchResults.isNotEmpty()
+                                ) {
+                                    memoryWindowBuilder.build(
+                                        selectedIds = selectedIds,
+                                        candidates = searchResults
+                                    )
+                                } else {
+                                    // وإلا ابنِها الآن لضمان عدم إرسال بدون ذاكرة
+                                    val candidates = vm!!.searchSharedMemories(question)
+                                    if (candidates.isEmpty()) "" else {
+                                        val curator = memoryCuratorService.curateSelection(question, candidates)
+                                        if (curator.selectedIds.isEmpty()) "" else {
+                                            memoryWindowBuilder.build(
+                                                selectedIds = curator.selectedIds,
+                                                candidates = candidates
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                        val extraNotes = aiSettings.customSystemInstruction.trim()
+                        val includeAccuracy = aiSettings.accuracyPromptEnabled
+
+                        val hiddenContext = buildString {
+                            if (includeAccuracy) {
+                                appendLine("ACCURACY_POLICY:")
+                                appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
+                                appendLine()
+                            }
+                            if (extraNotes.isNotBlank()) {
+                                appendLine("EXTRA_NOTES:")
+                                appendLine(extraNotes)
+                                appendLine()
+                            }
+                            if (memoryXml.isNotBlank()) {
+                                appendLine("SHARED_MEMORIES_XML:")
+                                appendLine(memoryXml)
+                                appendLine()
+                            }
+                        }.trim()
+
+                        val finalText =
+                            if (hiddenContext.isBlank()) {
+                                question
+                            } else {
+                                "<!-- aichat_hidden_context\n$hiddenContext\n-->\n\n$question"
+                            }
+
+                        app.setContextPending(
+                            text = finalText,
+                            targetDomain = targetDomainStable(),
+                            inputSelector = p.inputSelector,
+                            sendSelector = p.sendSelector,
+                            sendWithEnter = p.sendWithEnter
+                        )
+
+                        query = ""
+                        enhancedQuery = null
+                    } catch (e: Exception) {
+                        isSending = false
+                        Toast.makeText(context, "⚠️ فشل تجهيز الإرسال: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         )
     }
