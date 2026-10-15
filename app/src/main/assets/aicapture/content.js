@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.0.42";
+  var VERSION = "1.0.43";
   var HOST = String((location && location.hostname) || "");
   var HREF = String((location && location.href) || "");
 
@@ -9,35 +9,58 @@
   var ALLOW_GENERIC_DIAGNOSTICS = false;
 
   // -------------------- Platforms --------------------
+  // ✅ أضفنا userSelectors + userTextSelector لاستخدامها في "تنظيف" رسالة المستخدم بعد الإرسال
   var PLATFORMS = {
     chatgpt: {
       id: "chatgpt",
       name: "ChatGPT",
-      matches: function () { return HOST === "chatgpt.com" || HOST === "chat.openai.com"; },
-      responseSelectors: ['[data-message-author-role="assistant"]', '[data-role="assistant"]', '[data-message-author="assistant"]', ".agent-turn"],
+      matches: function () {
+        return HOST === "chatgpt.com" || HOST === "chat.openai.com";
+      },
+      responseSelectors: [
+        '[data-message-author-role="assistant"]',
+        '[data-role="assistant"]',
+        '[data-message-author="assistant"]',
+        ".agent-turn"
+      ],
+      userSelectors: [
+        '[data-message-author-role="user"]',
+        '[data-role="user"]',
+        '[data-message-author="user"]'
+      ],
+      // ملاحظة: ChatGPT غالباً يضع نص user هنا
+      userTextSelector: ".whitespace-pre-wrap, .markdown, [data-message-content]",
       extractResponse: function (el) {
         if (!el) return "";
-        var md = null; try { md = el.querySelector(".markdown"); } catch (e) {}
+        var md = null;
+        try { md = el.querySelector(".markdown"); } catch (e) {}
         return getElementText(md || el);
       },
       legacyContainerMode: true
     },
+
     venice: {
       id: "venice",
       name: "Venice",
       matches: function () { return HOST === "venice.ai"; },
       responseSelectors: [".prose", "[data-message-author-role='assistant']", ".assistant-message", ".ai-message"],
+      userSelectors: ["[data-message-author-role='user']", ".user-message", ".human-message", ".message.user"],
+      userTextSelector: ".prose, .message-content, .content, [data-message-content]",
       extractResponse: function (el) { return getElementText(el); },
       legacyContainerMode: false
     },
+
     arena: {
       id: "arena",
       name: "Arena",
       matches: function () { return HOST === "arena.ai"; },
       responseSelectors: ["main .prose", ".prose.prose-base", "div.prose"],
+      userSelectors: ["[data-message-author-role='user']", ".user-message", ".human-message", ".message.user"],
+      userTextSelector: "main .prose, .prose, .message-content, [data-message-content]",
       extractResponse: function (el) { return getElementText(el); },
       legacyContainerMode: false
     },
+
     generic: {
       id: "generic",
       name: "Generic Web AI",
@@ -46,6 +69,11 @@
         '[data-message-author-role="assistant"]', '[data-role="assistant"]', '[data-message-author="assistant"]',
         ".assistant-message", ".ai-message", ".model-response", ".response-container", ".prose"
       ],
+      userSelectors: [
+        '[data-message-author-role="user"]', '[data-role="user"]', '[data-message-author="user"]',
+        ".user-message", ".human-message", ".message.user"
+      ],
+      userTextSelector: ".prose, .message-content, [data-message-content]",
       extractResponse: function (el) { return getElementText(el); },
       legacyContainerMode: false
     }
@@ -83,14 +111,16 @@
     sendToBackground({ type: "DEBUG_INFO", info: String(msg || "") });
   }
 
-  log("content.js loaded v=" + VERSION);
-  log("Platform detected: " + CURRENT_PLATFORM.name + " (" + CURRENT_PLATFORM.id + ") host=" + HOST);
+  log("🧪 content.js loaded v=" + VERSION);
+  log("🌐 Platform detected: " + CURRENT_PLATFORM.name + " (" + CURRENT_PLATFORM.id + ") host=" + HOST);
 
   // -------------------- DOM helpers --------------------
   function getElementText(el) {
     try {
       return (el && (el.innerText || el.textContent) ? (el.innerText || el.textContent) : "")
-        .replace(/\u00a0/g, " ").replace(/\r/g, "").trim();
+        .replace(/\u00a0/g, " ")
+        .replace(/\r/g, "")
+        .trim();
     } catch (e) { return ""; }
   }
 
@@ -216,7 +246,7 @@
       });
       document.documentElement.appendChild(toggleBtn);
       updateToggleBtn();
-    } catch (e) { log("installToggleButton failed: " + e); }
+    } catch (e) { log("❌ installToggleButton failed: " + e); }
   }
 
   function startComposerController() {
@@ -261,10 +291,7 @@
         }
       }
       return true;
-    } catch (e3) {
-      log("Text injection failed: " + (e3 && e3.message ? e3.message : String(e3)));
-      return false;
-    }
+    } catch (e3) { log("❌ Text injection failed: " + (e3 && e3.message ? e3.message : String(e3))); return false; }
   }
 
   // -------------------- Send controls --------------------
@@ -294,18 +321,16 @@
       target.dispatchEvent(new KeyboardEvent("keyup", opt));
       try { target.blur(); } catch (e2) {}
       return true;
-    } catch (e3) {
-      log("Enter dispatch failed: " + (e3 && e3.message ? e3.message : String(e3)));
-      return false;
-    }
+    } catch (e3) { log("❌ Enter dispatch failed: " + (e3 && e3.message ? e3.message : String(e3))); return false; }
   }
 
-  // -------------------- Sanitizer (hide hidden context from UI) --------------------
+  // -------------------- Hide injected memory from UI (Sanitizer) --------------------
+  // ✅ هذا الجزء مهم: المنصات ستعرض النص حرفياً. لذا نقوم "بتنظيف" أي bubble تحتوي marker/ذاكرة.
   var HIDDEN_MARKER = "aichat_hidden_context";
   var sanitizeObserver = null;
+  var sanitizeThrottleTimer = 0;
   var sanitizeAggressiveTimer = 0;
   var sanitizeAggressiveUntil = 0;
-  var sanitizeThrottleTimer = 0;
 
   function looksLikeHasHiddenContext(t) {
     if (!t) return false;
@@ -316,237 +341,286 @@
     );
   }
 
-  function stripLeadingYouSaid(s) {
-    var txt = String(s || "").trim();
-    if (!txt) return txt;
-
-    var lines = txt.split(/\n+/);
-    while (lines.length) {
-      var first = (lines[0] || "").trim().toLowerCase();
-      // عربي + إنجليزي (بدون مخاطرة كبيرة)
-      if (
-        first === "you said" || first === "you said:" ||
-        first === "you said :" ||
-        first === "أنت قلت" || first === "أنت قلت:" || first === "أنت قلت :" ||
-        first === "انت قلت" || first === "انت قلت:" || first === "انت قلت :"
-      ) {
-        lines.shift();
-        continue;
-      }
-      break;
-    }
-    return lines.join("\n").trim();
-  }
-
   function stripHiddenContextFromText(s) {
     var out = String(s || "");
 
-    // remove the hidden HTML comment block
+    // remove HTML comment block
     out = out.replace(/<!--\s*aichat_hidden_context[\s\S]*?-->\s*/ig, "");
 
-    // remove raw xml (fallback)
+    // remove raw xml block (fallback)
     out = out.replace(/SHARED_MEMORIES_XML:\s*<shared_memories>[\s\S]*?<\/shared_memories>\s*/ig, "");
 
-    // optional: if these appear
+    // optional: remove other blocks if they appear
     out = out.replace(/ACCURACY_POLICY:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
     out = out.replace(/EXTRA_NOTES:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
 
-    out = out.replace(/\n{3,}/g, "\n\n").trim();
-    out = stripLeadingYouSaid(out);
     return out.trim();
   }
 
-  function getUserContainerFromElement(el) {
-    if (!el || !el.closest) return null;
-    try {
-      return el.closest(
-        // common user message containers across platforms
-        '[data-message-author-role="user"], [data-role="user"], [data-message-author="user"], .user-message, .human-message, .message.user, .message--user'
-      );
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function findUserTextNodeWithinContainer(container) {
-    if (!container || !container.querySelector) return null;
-
-    // prefer "content/text" areas, not wrappers
-    var selectors = [];
-    if (CURRENT_PLATFORM.id === "chatgpt") {
-      selectors = [
-        ".whitespace-pre-wrap",
-        "[data-message-content]",
-        ".markdown"
-      ];
-    } else {
-      selectors = [
-        ".prose",
-        ".message-content",
-        ".content",
-        "[data-message-content]"
-      ];
-    }
-
-    for (var i = 0; i < selectors.length; i++) {
-      try {
-        var n = container.querySelector(selectors[i]);
-        if (n) return n;
-      } catch (e) {}
-    }
-    return null;
-  }
-
-  function safeSetNodeText(node, newText) {
-    if (!node) return false;
-
-    // avoid nuking big wrappers that likely include buttons/controls
-    try {
-      // إذا العنصر يحتوي على أزرار/نماذج كثيرة لا نلمسه
-      if (node.querySelector && node.querySelector("button, form, textarea, input, select, [role='button']")) {
-        // still allow if it's a small text-only node; but if it contains button => skip
-        // (we prefer inner text nodes only)
-      }
-    } catch (_) {}
-
-    try {
-      node.textContent = newText;
-      try { node.setAttribute("data-aichat-sanitized", "1"); } catch (_) {}
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function sanitizeContainer(container) {
-    if (!container) return 0;
-
-    var fullText = getElementText(container);
-    if (!looksLikeHasHiddenContext(fullText)) return 0;
-
-    var cleaned = stripHiddenContextFromText(fullText);
-    if (!cleaned) return 0;
-
-    // pick best text node inside container
-    var target = findUserTextNodeWithinContainer(container);
-    if (!target) {
-      // fallback: try to find the closest paragraph-like element inside
-      try {
-        target = container.querySelector("p, div, span");
-      } catch (_) {}
-    }
-    if (!target) target = container;
-
-    // IMPORTANT: don't overwrite container if it has buttons; try inner target only
-    // if target has buttons too, try a deeper leaf
-    try {
-      if (target !== container && target.querySelector && target.querySelector("button, [role='button']")) {
-        // fallback to container text node areas
-        target = findUserTextNodeWithinContainer(container) || target;
-      }
-    } catch (_) {}
-
-    // if target looks like wrapper (has buttons), avoid breaking UI: just return 0
-    try {
-      if (target && target.querySelector && target.querySelector("button, form, textarea, input, [role='button']")) {
-        // do not destroy UI controls
-        return 0;
-      }
-    } catch (_) {}
-
-    // final apply
-    return safeSetNodeText(target, cleaned) ? 1 : 0;
-  }
-
-  function uniquePush(arr, el) {
-    if (!el) return;
-    if (arr.indexOf(el) === -1) arr.push(el);
-  }
-
-  function getUserContainersBySelectors() {
+  // (1) طريقة 1: استهداف عناصر "رسائل المستخدم" المتوقعة
+  function getUserMessageElements() {
     var out = [];
-    var sels = [
+    var sels = (CURRENT_PLATFORM.userSelectors || []).concat([
       '[data-message-author-role="user"]',
       '[data-role="user"]',
       '[data-message-author="user"]',
       ".user-message",
       ".human-message",
-      ".message.user",
-      ".message--user"
-    ];
+      ".message.user"
+    ]);
 
     for (var i = 0; i < sels.length; i++) {
       try {
         var els = document.querySelectorAll(sels[i]);
-        for (var j = 0; j < els.length; j++) uniquePush(out, els[j]);
+        for (var j = 0; j < els.length; j++) if (out.indexOf(els[j]) === -1) out.push(els[j]);
       } catch (e) {}
     }
     return out;
   }
 
-  function sanitizeByContainerScan() {
-    var containers = getUserContainersBySelectors();
-    if (!containers.length) return 0;
+  function pickEditableTextNode(msgEl) {
+    if (!msgEl) return null;
 
-    // scan last N only
-    var N = 12;
-    var start = containers.length > N ? (containers.length - N) : 0;
+    // ChatGPT: نحاول دائماً أولاً whitespace-pre-wrap داخل bubble (الأكثر أماناً)
+    if (CURRENT_PLATFORM.id === "chatgpt") {
+      try {
+        var w = msgEl.querySelector(".whitespace-pre-wrap");
+        if (w) return w;
+      } catch (e0) {}
+    }
+
+    var sel = String(CURRENT_PLATFORM.userTextSelector || "").trim();
+    if (sel) {
+      try {
+        var inner = msgEl.querySelector(sel);
+        if (inner) return inner;
+      } catch (e) {}
+    }
+
+    // fallback (قد يكون خطير لأنه قد يمسح أزرار/عناصر داخل bubble)
+    return msgEl;
+  }
+
+  function sanitizeOneNodeText(node) {
+    if (!node) return false;
+    var t = getElementText(node);
+    if (!looksLikeHasHiddenContext(t)) return false;
+
+    var cleaned = stripHiddenContextFromText(t);
+    if (!cleaned || cleaned === t) return false;
+
+    try {
+      // textContent أقل تداخل مع layout وأحياناً أفضل مع React
+      node.textContent = cleaned;
+      try { node.setAttribute("data-aichat-sanitized", "1"); } catch (_) {}
+      return true;
+    } catch (e2) {
+      log("❌ sanitizeOneNodeText failed: " + e2);
+      return false;
+    }
+  }
+
+  // -------------------- ChatGPT-only sanitizer (does NOT affect Venice) --------------------
+// الهدف: حل مشكلة ChatGPT فقط بدون لمس Venice/Arena.
+// الفكرة: نبحث داخل conversation-turn عن أصغر عنصر يحتوي الماركر ثم ننظفه.
+function isSafeTextElement(el) {
+  if (!el || !el.querySelector) return true;
+  try {
+    // لا نلمس عناصر تحتوي أزرار/تحكمات حتى لا تظهر "أنت قلت" أو نخرب UI
+    if (el.querySelector("button, [role='button'], form, textarea, input, select")) return false;
+  } catch (_) {}
+  return true;
+}
+
+function pickBestMarkerElement(container) {
+  if (!container) return null;
+
+  // جرّب أولاً عناصر معتادة لنص المستخدم في ChatGPT
+  var preferred = [".whitespace-pre-wrap", "[data-message-content]", ".markdown", "p", "div", "span"];
+  for (var i = 0; i < preferred.length; i++) {
+    try {
+      var el = container.querySelector(preferred[i]);
+      if (!el) continue;
+      if (!isSafeTextElement(el)) continue;
+      var t = getElementText(el);
+      if (looksLikeHasHiddenContext(t)) return el;
+    } catch (_) {}
+  }
+
+  // fallback: امشِ على عناصر داخل container واختر "أصغر" عنصر نصّي يحتوي الماركر
+  var best = null;
+  var bestLen = 1e9;
+
+  try {
+    var walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT);
+    var visited = 0;
+
+    while (walker.nextNode()) {
+      visited++;
+      if (visited > 900) break;
+
+      var el2 = walker.currentNode;
+      if (!el2) continue;
+
+      // تجاهل العناصر الضخمة جداً
+      if (!isSafeTextElement(el2)) continue;
+
+      var txt = getElementText(el2);
+      if (!looksLikeHasHiddenContext(txt)) continue;
+
+      var len = txt.length || 0;
+      if (len > 0 && len < bestLen) {
+        best = el2;
+        bestLen = len;
+        // إذا صار صغير جدًا غالبًا هو نص الرسالة مباشرة
+        if (bestLen < 800) break;
+      }
+    }
+  } catch (_) {}
+
+  return best;
+}
+
+function sanitizeChatGPTOnly() {
+  if (CURRENT_PLATFORM.id !== "chatgpt") return 0;
+
+  var turns = [];
+  try {
+    var list = document.querySelectorAll('article[data-testid="conversation-turn"], div[data-testid="conversation-turn"]');
+    for (var i = 0; i < list.length; i++) turns.push(list[i]);
+  } catch (_) {}
+
+  // fallback: لو ما وجدنا turns لأي سبب
+  if (!turns.length) {
+    try {
+      var main = document.querySelector("main");
+      if (main) turns.push(main);
+    } catch (_) {}
+  }
+  if (!turns.length) return 0;
+
+  // افحص آخر 10 turns فقط
+  var start = turns.length > 10 ? (turns.length - 10) : 0;
+
+  for (var ti = turns.length - 1; ti >= start; ti--) {
+    var turn = turns[ti];
+    if (!turn) continue;
+
+    // حاول تحديد جزء user داخل turn
+    var userBlocks = [];
+    try {
+      var ub = turn.querySelectorAll('[data-message-author-role="user"], [data-role="user"], [data-message-author="user"]');
+      for (var j = 0; j < ub.length; j++) userBlocks.push(ub[j]);
+    } catch (_) {}
+
+    if (!userBlocks.length) userBlocks.push(turn);
+
+    for (var ui = 0; ui < userBlocks.length; ui++) {
+      var block = userBlocks[ui];
+      if (!block) continue;
+
+      // لو block ما يحتوي الماركر، لا نضيّع وقت
+      var blockText = "";
+      try { blockText = getElementText(block); } catch (_) {}
+      if (!looksLikeHasHiddenContext(blockText)) continue;
+
+      var best = pickBestMarkerElement(block);
+      if (best) {
+        // استخدم sanitizeOneNodeText الموجودة عندك (تنظيف النص)
+        if (sanitizeOneNodeText(best)) return 1;
+
+        // fallback أخير: جرّب تنظيف block نفسه (لكن فقط إذا آمن)
+        if (isSafeTextElement(block) && sanitizeOneNodeText(block)) return 1;
+      }
+    }
+  }
+
+  return 0;
+    }
+  function sanitizeByUserElements() {
+    var els = getUserMessageElements();
+    if (!els.length) return 0;
+
+    // فقط آخر N
+    var N = 16;
+    var start = els.length > N ? (els.length - N) : 0;
 
     var changed = 0;
-    for (var i = start; i < containers.length; i++) {
-      changed += sanitizeContainer(containers[i]);
+    for (var i = start; i < els.length; i++) {
+      var target = pickEditableTextNode(els[i]);
+      if (sanitizeOneNodeText(target)) {
+        try { els[i].setAttribute("data-aichat-sanitized", "1"); } catch (_) {}
+        changed++;
+      }
     }
     return changed;
   }
 
-  // TreeWalker fallback: find marker text node, then sanitize its user container
-  function sanitizeByTreeWalkerFallback() {
-    var root = null;
-    try { root = document.querySelector("main") || document.body || document.documentElement; } catch (_) {}
-    if (!root) return 0;
+  // (2) طريقة 2 (أقوى): مسح مرشحين للنص داخل منطقة المحادثة نفسها (خصوصاً ChatGPT)
+  // هذه تعالج حالات لم تنطبق فيها userSelectors.
+  function getSanitizeCandidateTextNodes() {
+    var out = [];
+    var sels = [];
 
-    var walker = null;
-    try { walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); } catch (_) { return 0; }
-
-    var visited = 0;
-    var changed = 0;
-    var node;
-
-    while ((node = walker.nextNode())) {
-      visited++;
-      if (visited > 4000) break;
-      var v = node.nodeValue || "";
-      if (!v) continue;
-
-      if (
-        v.indexOf(HIDDEN_MARKER) === -1 &&
-        v.indexOf("<shared_memories>") === -1 &&
-        v.indexOf("SHARED_MEMORIES_XML:") === -1
-      ) continue;
-
-      var pe = node.parentElement;
-      var container = getUserContainerFromElement(pe);
-      if (container) {
-        changed += sanitizeContainer(container);
-        if (changed >= 2) break;
-      }
+    if (CURRENT_PLATFORM.id === "chatgpt") {
+      sels = [
+        // الأكثر احتمالاً لنص رسالة user
+        'main [data-message-author-role="user"] .whitespace-pre-wrap',
+        'main [data-message-author-role="user"] [data-message-content]',
+        'main [data-message-author-role="user"]',
+        // fallback عام داخل main
+        "main .whitespace-pre-wrap",
+        "main [data-message-content]"
+      ];
+    } else {
+      sels = [
+        "main .prose",
+        ".prose",
+        "[data-message-content]",
+        ".message-content",
+        ".content"
+      ];
     }
 
-    if (changed > 0) log("TreeWalker fallback sanitized=" + changed + " visited=" + visited + " platform=" + CURRENT_PLATFORM.id);
+    for (var i = 0; i < sels.length; i++) {
+      try {
+        var els = document.querySelectorAll(sels[i]);
+        for (var j = 0; j < els.length; j++) if (out.indexOf(els[j]) === -1) out.push(els[j]);
+      } catch (e) {}
+    }
+    return out;
+  }
+
+  function sanitizeByCandidatesScan() {
+    var nodes = getSanitizeCandidateTextNodes();
+    if (!nodes.length) return 0;
+
+    var N = 60; // نفحص آخر 60 عنصر فقط لتخفيف الحمل
+    var start = nodes.length > N ? (nodes.length - N) : 0;
+
+    var changed = 0;
+    for (var i = start; i < nodes.length; i++) {
+      if (sanitizeOneNodeText(nodes[i])) changed++;
+    }
     return changed;
   }
 
   function sanitizeAllNow(reason) {
-    var changed = 0;
-    try { changed += sanitizeByContainerScan(); } catch (_) {}
+  var changedGpt = 0;
+  if (CURRENT_PLATFORM.id === "chatgpt") {
+    try { changedGpt = sanitizeChatGPTOnly(); } catch (_) { changedGpt = 0; }
+  }
 
-    // fallback only if needed
-    if (changed === 0) {
-      try { changed += sanitizeByTreeWalkerFallback(); } catch (_) {}
-    }
+  var changed1 = 0, changed2 = 0;
+  try { changed1 = sanitizeByUserElements(); } catch (e1) {}
+  try { changed2 = sanitizeByCandidatesScan(); } catch (e2) {}
 
-    if (changed > 0) log("Sanitized nodes=" + changed + " reason=" + (reason || "") + " platform=" + CURRENT_PLATFORM.id);
-    return changed;
+  var changed = changedGpt + changed1 + changed2;
+
+  if (changed > 0) {
+    log("🧼 Sanitized " + changed + " node(s) reason=" + (reason || "") + " platform=" + CURRENT_PLATFORM.id);
+  }
+  return changed;
   }
 
   function requestSanitizeSoon() {
@@ -557,7 +631,7 @@
     }, 120);
   }
 
-  function startSanitizerObserver() {
+  function startSanitizer() {
     sanitizeAllNow("startup");
 
     if (sanitizeObserver) return;
@@ -570,32 +644,38 @@
         }
       });
       sanitizeObserver.observe(document.documentElement, { childList: true, subtree: true });
-      log("Sanitizer observer installed");
+      log("🧼 Sanitizer observer installed");
     } catch (e) {
-      log("Sanitizer observer failed: " + e);
+      log("❌ Sanitizer observer failed: " + e);
     }
   }
 
-  startSanitizerObserver();
+  startSanitizer();
 
   function scheduleSanitizeAfterSend(injectedText) {
-    sanitizeAggressiveUntil = Date.now() + 10000;
+    // aggressive mode for 12 seconds
+    sanitizeAggressiveUntil = Date.now() + 12000;
 
     var changedNow = sanitizeAllNow("after_send_now");
-    log("scheduleSanitizeAfterSend marker=" + (String(injectedText || "").indexOf(HIDDEN_MARKER) !== -1 ? "yes" : "no") +
-      " changedNow=" + changedNow + " platform=" + CURRENT_PLATFORM.id);
 
-    if (sanitizeAggressiveTimer) { try { clearInterval(sanitizeAggressiveTimer); } catch (_) {} sanitizeAggressiveTimer = 0; }
-
+    // كرر لمدة 12 ثانية لأن ChatGPT قد يعيد render
+    if (sanitizeAggressiveTimer) { try { clearInterval(sanitizeAggressiveTimer); } catch (_) {} }
     var tries = 0;
     sanitizeAggressiveTimer = setInterval(function () {
       tries++;
       sanitizeAllNow("after_send_tick_" + tries);
-      if (tries >= 40) {
+      if (tries >= 48) { // 48 * 250ms = 12s
         clearInterval(sanitizeAggressiveTimer);
         sanitizeAggressiveTimer = 0;
       }
     }, 250);
+
+    // تشخيص: إذا لم يُغيّر شيء فوراً، غالباً selectors لا تمسك bubble بعد (أو DOM مختلف)
+    if (changedNow === 0) {
+      try {
+        log("🧼 scheduleSanitizeAfterSend: changedNow=0 marker=" + (String(injectedText || "").indexOf(HIDDEN_MARKER) !== -1 ? "yes" : "no"));
+      } catch (e) {}
+    }
   }
 
   // -------------------- Context feedback --------------------
@@ -729,7 +809,7 @@
     lastCandidate = "";
     stableSince = 0;
     baselineAssistant = getCurrentAssistantText();
-    log("Capture started platform=" + CURRENT_PLATFORM.id + " baselineLen=" + (baselineAssistant ? baselineAssistant.length : 0));
+    log("🧪 Capture started platform=" + CURRENT_PLATFORM.id + " baselineLen=" + (baselineAssistant ? baselineAssistant.length : 0));
     watchForResponse();
   }
 
@@ -737,7 +817,7 @@
     if (captureFinished) return;
 
     if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(answer)) {
-      log("FinishCapture blocked (Arena rejected candidate) — keep watching");
+      log("⚠️ FinishCapture blocked (Arena rejected candidate) — keep watching");
       lastCandidate = "";
       stableSince = 0;
       return setTimeout(watchForResponse, 900);
@@ -750,7 +830,7 @@
     if (!answer) return;
 
     sendToBackground({ type: "ASSISTANT_RESPONSE", text: answer, source: CURRENT_PLATFORM.id });
-    log("ASSISTANT_RESPONSE sent source=" + CURRENT_PLATFORM.id + " len=" + answer.length);
+    log("📤 ASSISTANT_RESPONSE sent source=" + CURRENT_PLATFORM.id + " len=" + answer.length);
   }
 
   function watchForResponse() {
@@ -812,14 +892,14 @@
           // Arena: Enter only (+ Ctrl+Enter fallback)
           if (CURRENT_PLATFORM.id === "arena") {
             if (!opts.sendWithEnter) return sendContextWritten(false, contextId, "send_failed", "arena_sendWithEnter_disabled");
-            log("Arena: send via Enter");
+            log("🎯 Arena: send via Enter");
             if (dispatchEnter(input, false)) {
               sendContextWritten(true, contextId, "enter_sent", "arena_enter");
               sendContextConsumed(contextId);
               scheduleSanitizeAfterSend(text);
               return;
             }
-            log("Arena: Enter failed, try Ctrl+Enter");
+            log("🎯 Arena: Enter failed, try Ctrl+Enter");
             if (dispatchEnter(input, true)) {
               sendContextWritten(true, contextId, "ctrl_enter_sent", "arena_ctrl_enter");
               sendContextConsumed(contextId);
@@ -839,7 +919,7 @@
               sendContextConsumed(contextId);
               scheduleSanitizeAfterSend(text);
               return;
-            } catch (e1) { log("clickSend failed: " + e1); }
+            } catch (e1) { log("❌ clickSend failed: " + e1); }
           }
 
           if (opts.sendWithEnter && dispatchEnter(input, false)) {
@@ -864,7 +944,7 @@
       if (!message || !message.type) return Promise.resolve({ ok: false, reason: "no_type" });
 
       if (message.type === "MANUAL_CAPTURE") {
-        log("MANUAL_CAPTURE received");
+        log("🎯 MANUAL_CAPTURE received");
         captureCurrentResponse();
         return Promise.resolve({ ok: true, type: "MANUAL_CAPTURE" });
       }
@@ -873,7 +953,7 @@
         var text = String(message.text || "");
         var contextId = message.contextId || 0;
 
-        log("CONTEXT_TO_PAGE len=" + text.length + " platform=" + CURRENT_PLATFORM.id +
+        log("📥 CONTEXT_TO_PAGE len=" + text.length + " platform=" + CURRENT_PLATFORM.id +
             " inputSel=" + (message.inputSelector || "") + " sendSel=" + (message.sendSelector || ""));
 
         if (!text.trim()) {
@@ -902,8 +982,10 @@
   // -------------------- READY --------------------
   if (shouldSendDiagnostics()) {
     sendToBackground({ type: "CONTENT_READY" });
-    log("CONTENT_READY sent");
+    log("📡 CONTENT_READY sent");
   } else {
     try { console.log("[AiChat] generic page - skip CONTENT_READY/DEBUG (host=" + HOST + ")"); } catch (_) {}
   }
 })();
+
+ 
