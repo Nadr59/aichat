@@ -28,13 +28,21 @@ import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.QueryStyle
+import com.example.aichat.ui.components.AgentPickerDialog
+import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(viewModel: ChatViewModel, settings: AiSettings, onBack: () -> Unit) {
+fun ChatScreen(
+    viewModel: ChatViewModel,
+    agentsViewModel: AgentsViewModel,
+    settings: AiSettings,
+    onBack: () -> Unit,
+    onOpenAgents: () -> Unit
+) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -44,6 +52,14 @@ fun ChatScreen(viewModel: ChatViewModel, settings: AiSettings, onBack: () -> Uni
     val enhancedQuery by viewModel.enhancedQuery.collectAsState()
     val isEnhancing by viewModel.isEnhancing.collectAsState()
     val conversationId by viewModel.currentConversationId.collectAsState()
+    val currentAgentId by viewModel.currentAgentId.collectAsState()
+
+    val agents by agentsViewModel.agents.collectAsState()
+    val currentAgentName = remember(currentAgentId, agents) {
+        currentAgentId?.let { id -> agents.firstOrNull { it.id == id }?.name }
+    }
+
+    var showAgentDialog by remember { mutableStateOf(false) }
 
     var userInput by remember { mutableStateOf("") }
     val displayedText = enhancedQuery ?: userInput
@@ -102,6 +118,13 @@ fun ChatScreen(viewModel: ChatViewModel, settings: AiSettings, onBack: () -> Uni
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        currentAgentName?.let {
+                            Text(
+                                "🤖 $it",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         if (settings.provider.trim().lowercase() == "custom") {
                             Text(
                                 "الطلبات: $customRequestCount",
@@ -112,11 +135,13 @@ fun ChatScreen(viewModel: ChatViewModel, settings: AiSettings, onBack: () -> Uni
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع")
-                    }
+                    IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع") }
                 },
                 actions = {
+                    IconButton(onClick = { showAgentDialog = true }) {
+                        Icon(Icons.Filled.SmartToy, contentDescription = "Agent")
+                    }
+
                     IconButton(onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }) {
                         Icon(
                             Icons.Filled.Memory,
@@ -183,6 +208,25 @@ fun ChatScreen(viewModel: ChatViewModel, settings: AiSettings, onBack: () -> Uni
         }
     }
 
+    if (showAgentDialog) {
+        AgentPickerDialog(
+            title = "Agent لهذه المحادثة",
+            agents = agents,
+            selectedId = currentAgentId,
+            onDismiss = { showAgentDialog = false },
+            onSelect = { id ->
+                viewModel.setConversationAgent(id)
+                showAgentDialog = false
+            },
+            extraTopContent = {
+                TextButton(onClick = {
+                    showAgentDialog = false
+                    onOpenAgents()
+                }) { Text("إدارة/استيراد Agents") }
+            }
+        )
+    }
+
     memoryMessage?.let { msg ->
         SaveMemoryDialog(
             message = msg,
@@ -206,318 +250,5 @@ fun ChatScreen(viewModel: ChatViewModel, settings: AiSettings, onBack: () -> Uni
     }
 }
 
-@Composable
-private fun WebPageImportDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var url by remember { mutableStateOf("") }
-    val isValid by remember(url) {
-        mutableStateOf(url.isBlank() || url.startsWith("http://") || url.startsWith("https://"))
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("استيراد صفحة ويب") },
-        text = {
-            OutlinedTextField(
-                value = url,
-                onValueChange = { url = it },
-                label = { Text("https://example.com") },
-                leadingIcon = { Icon(Icons.Filled.Language, null) },
-                singleLine = true,
-                isError = !isValid,
-                supportingText = { if (!isValid) Text("يجب أن يبدأ الرابط بـ http:// أو https://") },
-                modifier = Modifier.fillMaxWidth()
-            )
-        },
-        confirmButton = {
-            Button(
-                enabled = url.trim().isNotBlank() && isValid,
-                onClick = { onConfirm(url.trim()) }
-            ) { Text("استيراد") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
-    )
-}
-
-@Composable
-private fun EmptyChatView(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Surface(
-                modifier = Modifier.size(64.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Chat, null, modifier = Modifier.size(30.dp))
-            } }
-            Spacer(Modifier.height(12.dp))
-            Text("كيف يمكنني مساعدتك؟", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text("اكتب رسالتك لبدء المحادثة", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun SaveMemoryDialog(
-    message: Message,
-    conversationId: Long?,
-    onDismiss: () -> Unit,
-    onSave: (String, Boolean) -> Unit
-) {
-    var category by remember { mutableStateOf("OTHER") }
-    var isShared by remember { mutableStateOf(true) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Filled.Memory, null) },
-        title = { Text("حفظ في الذاكرة") },
-        text = {
-            Column {
-                Text(message.content, maxLines = 8)
-                Spacer(Modifier.height(10.dp))
-
-                Text("التصنيف", fontWeight = FontWeight.SemiBold)
-                MemoryOption("معرفة", category == "KNOWLEDGE") { category = "KNOWLEDGE" }
-                MemoryOption("مشروع", category == "PROJECT") { category = "PROJECT" }
-                MemoryOption("تفضيل", category == "PREFERENCE") { category = "PREFERENCE" }
-                MemoryOption("أخرى", category == "OTHER") { category = "OTHER" }
-
-                Spacer(Modifier.height(8.dp))
-                Text("النطاق", fontWeight = FontWeight.SemiBold)
-                MemoryOption("مشترك", isShared) { isShared = true }
-                MemoryOption("هذه المحادثة فقط", !isShared) { isShared = false }
-
-                if (conversationId == null) {
-                    Text(
-                        "سيتم ربط الذاكرة بالمحادثة الحالية عند توفرها.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(category, isShared) }) { Text("حفظ") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
-    )
-}
-
-@Composable
-private fun MemoryOption(text: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Text(text)
-    }
-}
-
-@Composable
-private fun InputBar(
-    isLoading: Boolean,
-    hasSelectedImage: Boolean,
-    userInput: String,
-    displayedText: String,
-    isEnhanced: Boolean,
-    isEnhancing: Boolean,
-    hasIdentity: Boolean,
-    onUserInputChange: (String) -> Unit,
-    onOpenGallery: () -> Unit,
-    onOpenCamera: () -> Unit,
-    onOpenFile: () -> Unit,
-    onOpenWebImport: () -> Unit,
-    onRemoveImage: () -> Unit,
-    onSend: () -> Unit,
-    onEnhance: () -> Unit,
-    onClearEnhanced: () -> Unit,
-    onUpdateEnhancedQuery: (String) -> Unit,
-    onRefineStyle: (QueryStyle) -> Unit
-) {
-    var showAttach by remember { mutableStateOf(false) }
-    var showStyle by remember { mutableStateOf(false) }
-
-    Surface(
-        Modifier.fillMaxWidth().imePadding().navigationBarsPadding(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        Column(Modifier.padding(10.dp, 8.dp)) {
-
-            if (hasSelectedImage) {
-                Row(
-                    Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Filled.Image, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("صورة جاهزة للإرسال", modifier = Modifier.weight(1f))
-                    IconButton(onClick = onRemoveImage) { Icon(Icons.Filled.Close, "إزالة") }
-                }
-            }
-
-            Row(verticalAlignment = Alignment.Bottom) {
-                Box {
-                    IconButton(onClick = { showAttach = true }, enabled = !isLoading) {
-                        Icon(Icons.Filled.AttachFile, contentDescription = "إرفاق")
-                    }
-                    DropdownMenu(showAttach, onDismissRequest = { showAttach = false }) {
-                        DropdownMenuItem(text = { Text("الكاميرا") }, onClick = { showAttach = false; onOpenCamera() })
-                        DropdownMenuItem(text = { Text("المعرض") }, onClick = { showAttach = false; onOpenGallery() })
-                        DropdownMenuItem(text = { Text("ملف (TXT/PDF)") }, onClick = { showAttach = false; onOpenFile() })
-                        DropdownMenuItem(text = { Text("صفحة ويب") }, onClick = { showAttach = false; onOpenWebImport() })
-                    }
-                }
-
-                OutlinedTextField(
-                    value = displayedText,
-                    onValueChange = { if (isEnhanced) onUpdateEnhancedQuery(it) else onUserInputChange(it) },
-                    enabled = !isLoading,
-                    modifier = Modifier.weight(1f),
-                    minLines = 1,
-                    maxLines = 6,
-                    label = { Text(if (isEnhanced) "السؤال المُحسّن" else "اكتب رسالة...") },
-                    trailingIcon = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-
-                            if (!isEnhanced && userInput.isNotBlank() && !isLoading) {
-                                Box {
-                                    IconButton(onClick = { showStyle = true }, enabled = !isEnhancing) {
-                                        if (isEnhancing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                        else Icon(Icons.Filled.Palette, contentDescription = "تنقيح")
-                                    }
-                                    DropdownMenu(showStyle, onDismissRequest = { showStyle = false }) {
-                                        QueryStyle.entries.forEach { style ->
-                                            DropdownMenuItem(
-                                                text = { Text("${style.emoji} ${style.displayName}") },
-                                                onClick = { showStyle = false; onRefineStyle(style) }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (hasIdentity && !isEnhanced && userInput.isNotBlank() && !isLoading) {
-                                IconButton(onClick = onEnhance, enabled = !isEnhancing) {
-                                    if (isEnhancing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                    else Icon(Icons.Filled.AutoAwesome, contentDescription = "توسيع")
-                                }
-                            }
-
-                            if (isEnhanced) {
-                                IconButton(onClick = onClearEnhanced, enabled = !isLoading) {
-                                    Icon(Icons.Filled.Undo, contentDescription = "رجوع")
-                                }
-                            }
-
-                            IconButton(
-                                onClick = onSend,
-                                enabled = displayedText.isNotBlank() && !isLoading && !isEnhancing
-                            ) { Icon(Icons.Filled.Send, contentDescription = "إرسال") }
-                        }
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ThinkingBubble() {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text("جاري التفكير...", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun MessageBubble(
-    message: Message,
-    onCopy: (String) -> Unit,
-    onSaveMemory: (Message) -> Unit
-) {
-    val isUser = message.role == "user"
-    var showActions by remember { mutableStateOf(false) }
-    var copied by remember { mutableStateOf(false) }
-
-    LaunchedEffect(copied) {
-        if (copied) {
-            delay(1200)
-            copied = false
-        }
-    }
-
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
-        Surface(
-            modifier = Modifier.widthIn(max = if (isUser) 320.dp else 360.dp)
-                .combinedClickable(onClick = {}, onLongClick = { showActions = true }),
-            shape = RoundedCornerShape(14.dp),
-            color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Column(Modifier.padding(12.dp)) {
-                Text(
-                    message.content,
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (copied) Text("تم النسخ", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-
-    if (showActions) {
-        MessageActionsDialog(
-            onDismiss = { showActions = false },
-            onCopy = { onCopy(message.content); copied = true; showActions = false },
-            onSaveMemory = { showActions = false; onSaveMemory(message) }
-        )
-    }
-}
-
-@Composable
-private fun MessageActionsDialog(
-    onDismiss: () -> Unit,
-    onCopy: () -> Unit,
-    onSaveMemory: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("خيارات الرسالة") },
-        text = {
-            Column {
-                TextButton(onClick = onCopy, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.ContentCopy, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("نسخ")
-                }
-                TextButton(onClick = onSaveMemory, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.Memory, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("حفظ في الذاكرة")
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
-    )
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ErrorMessage(error: String, onDismiss: () -> Unit, onCopy: () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)
-            .combinedClickable(onClick = {}, onLongClick = onCopy),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(error, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.Close, contentDescription = "إغلاق", tint = MaterialTheme.colorScheme.onErrorContainer)
-            }
-        }
-    }
-}
+/* باقي الدوال المساعدة (WebPageImportDialog/EmptyChatView/SaveMemoryDialog/…)
+   انسخها من ملفك الحالي كما هي بدون تغيير */
