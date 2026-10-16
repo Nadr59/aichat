@@ -1,4 +1,4 @@
- // app/src/main/java/com/example/aichat/ui/screens/ChatScreen.kt
+// app/src/main/java/com/example/aichat/ui/screens/ChatScreen.kt
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -19,11 +19,15 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -33,6 +37,7 @@ import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
 
@@ -63,29 +68,33 @@ fun ChatScreen(
 
     var showAgentDialog by remember { mutableStateOf(false) }
 
-    // ✅ FIX: استخدم TextFieldValue لتجنب مشكلة "أول حرف فقط" مع composing text من الكيبورد
+    // ✅ FIX: استخدام TextFieldValue لمنع "أول حرف فقط" مع composing text
     var userInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
+
+    // عند التحسين نحرر نسخة محلية، ولا نعتمد على String مباشرة
     var enhancedInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
 
     val isEnhanced = enhancedQuery != null
-    val displayedValue: TextFieldValue = if (isEnhanced) enhancedInput else userInput
-    val displayedText: String = displayedValue.text
-
     val hasIdentity = settings.mediatorIdentityText.isNotBlank()
+
+    // الحقل المعروض فعليًا
+    val displayedValue = if (isEnhanced) enhancedInput else userInput
 
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val scope = rememberCoroutineScope()
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
     var showWebImportDialog by remember { mutableStateOf(false) }
 
-    // مزامنة نص التحسين القادم من الـ ViewModel إلى الحقل (مرة كل تغيير)
+    // مزامنة نص التحسين القادم من ViewModel إلى الحقل (مرة عندما يتغير enhancedQuery)
     LaunchedEffect(enhancedQuery) {
         if (enhancedQuery != null) {
             enhancedInput = TextFieldValue(enhancedQuery!!)
@@ -116,24 +125,30 @@ fun ChatScreen(
         cb.setPrimaryClip(ClipData.newPlainText("message", text))
     }
 
+    // ✅ FIX: clearFocus + انتظار فريم لضمان commit من IME قبل قراءة النص
     fun send() {
-        // ✅ مهم: هذا يجبر الـ IME يعتمد النص قبل الإرسال (حل قوي مع TextFieldValue)
-        focusManager.clearFocus(force = true)
+        if (isLoading) return
 
-        val textToSend = displayedText.trim()
-        if (textToSend.isBlank()) return
+        scope.launch {
+            keyboardController?.hide()
+            focusManager.clearFocus(force = true)
 
-        viewModel.sendChatMessage(textToSend)
+            // انتظر فريم واحد حتى يقوم الـ IME بعمل commit للنص المركّب
+            withFrameNanos { }
 
-        userInput = TextFieldValue("")
-        viewModel.clearEnhancedQuery() // سيعيد isEnhanced=false + يفرغ enhancedInput عبر LaunchedEffect
+            val textToSend = (if (isEnhanced) enhancedInput.text else userInput.text).trim()
+            if (textToSend.isBlank()) return@launch
+
+            viewModel.sendChatMessage(textToSend)
+
+            userInput = TextFieldValue("")
+            viewModel.clearEnhancedQuery() // سيجعل isEnhanced=false ويفرغ enhancedInput عبر LaunchedEffect
+        }
     }
 
     LaunchedEffect(messages.size, isLoading) {
         val total = messages.size + if (isLoading) 1 else 0
-        if (total > 0) {
-            runCatching { listState.animateScrollToItem(total - 1) }
-        }
+        if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
     }
 
     Scaffold(
@@ -210,9 +225,7 @@ fun ChatScreen(
                             onSaveMemory = { memoryMessage = msg }
                         )
                     }
-                    if (isLoading) {
-                        item("thinking") { ThinkingBubble() }
-                    }
+                    if (isLoading) item("thinking") { ThinkingBubble() }
                 }
             }
 
@@ -239,6 +252,7 @@ fun ChatScreen(
                 onValueChange = { tfv ->
                     if (isEnhanced) {
                         enhancedInput = tfv
+                        // إبقاء ViewModel متزامن (اختياري لكنه مفيد)
                         viewModel.updateEnhancedQuery(tfv.text)
                     } else {
                         userInput = tfv
@@ -348,11 +362,8 @@ private fun MessageBubble(
     onSaveMemory: () -> Unit,
 ) {
     val isUser = remember(message) { guessIsUser(message) }
-
-    val bg =
-        if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-    val fg =
-        if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    val bg = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     val align = if (isUser) Alignment.End else Alignment.Start
 
     Column(
@@ -365,16 +376,11 @@ private fun MessageBubble(
             tonalElevation = 1.dp,
             modifier = Modifier
                 .widthIn(max = 520.dp)
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = { onCopy() }
-                )
+                .combinedClickable(onClick = {}, onLongClick = { onCopy() })
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(message.content, color = fg)
-
                 Spacer(Modifier.height(10.dp))
-
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     AssistChip(
                         onClick = onCopy,
@@ -409,36 +415,16 @@ private fun ErrorMessage(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                Icons.Filled.ErrorOutline,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onErrorContainer
-            )
+            Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "خطأ",
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-                Text(
-                    error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
+                Text("خطأ", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
             }
             IconButton(onClick = onCopy) {
-                Icon(
-                    Icons.Filled.ContentCopy,
-                    contentDescription = "Copy",
-                    tint = MaterialTheme.colorScheme.onErrorContainer
-                )
+                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onErrorContainer)
             }
             IconButton(onClick = onDismiss) {
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = "Dismiss",
-                    tint = MaterialTheme.colorScheme.onErrorContainer
-                )
+                Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onErrorContainer)
             }
         }
     }
@@ -465,7 +451,6 @@ private fun InputBar(
     modifier: Modifier = Modifier
 ) {
     var styleMenu by remember { mutableStateOf(false) }
-
     val displayedText = value.text
 
     Column(
@@ -494,6 +479,10 @@ private fun InputBar(
                 minLines = 2,
                 maxLines = 6,
                 label = { Text(if (isEnhanced) "النص المُحسَّن" else "اكتب رسالتك") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSend = { onSend() }
+                ),
                 supportingText = {
                     val bits = buildList {
                         if (hasIdentity) add("Identity")
@@ -513,22 +502,13 @@ private fun InputBar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onOpenGallery, enabled = !isLoading) {
-                Icon(Icons.Filled.Image, contentDescription = "Gallery")
-            }
-            IconButton(onClick = onOpenCamera, enabled = !isLoading) {
-                Icon(Icons.Filled.CameraAlt, contentDescription = "Camera")
-            }
-            IconButton(onClick = onOpenFile, enabled = !isLoading) {
-                Icon(Icons.Filled.AttachFile, contentDescription = "File")
-            }
-            IconButton(onClick = onOpenWebImport, enabled = !isLoading) {
-                Icon(Icons.Filled.Language, contentDescription = "Web")
-            }
+            IconButton(onClick = onOpenGallery, enabled = !isLoading) { Icon(Icons.Filled.Image, contentDescription = "Gallery") }
+            IconButton(onClick = onOpenCamera, enabled = !isLoading) { Icon(Icons.Filled.CameraAlt, contentDescription = "Camera") }
+            IconButton(onClick = onOpenFile, enabled = !isLoading) { Icon(Icons.Filled.AttachFile, contentDescription = "File") }
+            IconButton(onClick = onOpenWebImport, enabled = !isLoading) { Icon(Icons.Filled.Language, contentDescription = "Web") }
 
             Spacer(Modifier.weight(1f))
 
-            // Refine style menu
             Box {
                 IconButton(onClick = { styleMenu = true }, enabled = !isLoading) {
                     Icon(Icons.Filled.Tune, contentDescription = "Refine style")
@@ -546,7 +526,6 @@ private fun InputBar(
                 }
             }
 
-            // Enhance controls
             if (isEnhanced) {
                 TextButton(onClick = onClearEnhanced, enabled = !isLoading) { Text("إلغاء التحسين") }
             } else {
@@ -596,9 +575,7 @@ private fun SaveMemoryDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(category.trim().ifBlank { "OTHER" }, isShared) }) {
-                Text("حفظ")
-            }
+            TextButton(onClick = { onSave(category.trim().ifBlank { "OTHER" }, isShared) }) { Text("حفظ") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
     )
@@ -630,10 +607,7 @@ private fun WebPageImportDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onConfirm(url.trim()) },
-                enabled = url.isNotBlank()
-            ) { Text("متابعة") }
+            TextButton(onClick = { onConfirm(url.trim()) }, enabled = url.isNotBlank()) { Text("متابعة") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
     )
