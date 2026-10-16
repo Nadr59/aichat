@@ -173,10 +173,14 @@ fun MainNavigation(app: AichatApp) {
                     }
 
                     GeckoTestScreen(
-                        webPlatformRepository = app.webPlatformRepository,
-                        aiSettings = settings,
-                        agentRepository = agentRepository,
-                    )
+    webPlatformRepository = app.webPlatformRepository,
+    aiSettings = settings,
+    agentRepository = agentRepository,
+    chatViewModel = chatViewModel,
+    initialPlatformId = platformId,
+    onBack = { navController.popBackStack() },
+    onHome = { navController.popBackStack("conversations", false) }
+)
                 }
             }
         }
