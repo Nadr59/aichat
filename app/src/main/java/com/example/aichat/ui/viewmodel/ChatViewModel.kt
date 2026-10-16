@@ -156,8 +156,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateMemory(memory: MemoryItem) { viewModelScope.launch { memoryRepository.updateMemory(memory) } }
-    fun deleteMemory(memory: MemoryItem) { viewModelScope.launch { memoryRepository.deleteMemory(memory) } }
+    fun updateMemory(memory: MemoryItem) {
+        viewModelScope.launch { memoryRepository.updateMemory(memory) }
+    }
+
+    fun deleteMemory(memory: MemoryItem) {
+        viewModelScope.launch { memoryRepository.deleteMemory(memory) }
+    }
 
     suspend fun searchSharedMemories(query: String): List<MemoryItem> =
         memoryRepository.searchSharedMemories(query)
@@ -263,8 +268,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateEnhancedQuery(newText: String) { _enhancedQuery.value = newText }
-    fun clearEnhancedQuery() { _enhancedQuery.value = null }
+    fun updateEnhancedQuery(newText: String) {
+        _enhancedQuery.value = newText
+    }
+
+    fun clearEnhancedQuery() {
+        _enhancedQuery.value = null
+    }
 
     // =========================
     // Sending messages (API)
@@ -423,7 +433,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         isShared = true
                     )
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -435,7 +446,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _selectedImageBase64.value = imageProcessor.uriToBase64(uri)
-                    ?: run { _error.value = "تعذر قراءة الصورة"; null }
+                    ?: run {
+                        _error.value = "تعذر قراءة الصورة"
+                        null
+                    }
             } catch (e: Exception) {
                 _error.value = "فشل تحميل الصورة: ${e.message}"
             }
@@ -444,17 +458,159 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectBitmap(bitmap: Bitmap) {
         viewModelScope.launch {
-            try { _selectedImageBase64.value = imageProcessor.bitmapToBase64(bitmap) }
-            catch (e: Exception) { _error.value = "فشل تحميل الصورة: ${e.message}" }
+            try {
+                _selectedImageBase64.value = imageProcessor.bitmapToBase64(bitmap)
+            } catch (e: Exception) {
+                _error.value = "فشل تحميل الصورة: ${e.message}"
+            }
         }
     }
 
-    fun processAndSaveFile(uri: Uri) { /* كما عندك بدون تغيير */ viewModelScope.launch { /* ... */ } }
-    fun saveWebPage(url: String) { /* كما عندك بدون تغيير */ viewModelScope.launch { /* ... */ } }
+    // =========================
+    // File → Memory (Batch embeddings)  (من الملف الأصلي كما هو)
+    // =========================
+    fun processAndSaveFile(uri: Uri) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            _successMessage.value = null
 
-    fun clearSelectedImage() { _selectedImageBase64.value = null }
-    fun clearError() { _error.value = null }
-    fun clearSuccessMessage() { _successMessage.value = null }
+            try {
+                val content = fileProcessor.readFile(uri)
+                if (content.isBlank()) {
+                    _error.value = "⚠️ الملف فارغ أو لا يحتوي على نص قابل للقراءة"
+                    return@launch
+                }
+
+                val chunks =
+                    if (content.length > 1000) {
+                        fileProcessor.chunkText(content, maxChunkSize = 800, overlap = 100)
+                    } else {
+                        listOf(content)
+                    }
+
+                val limitedChunks = chunks.take(20)
+
+                val newChunks = mutableListOf<String>()
+                var skipped = 0
+                for (chunk in limitedChunks) {
+                    if (memoryRepository.existsByHash(calculateHash(chunk))) skipped++ else newChunks.add(chunk)
+                }
+
+                var saved = 0
+                if (newChunks.isNotEmpty()) {
+                    val embeddings = try {
+                        embeddingService.getBatchEmbeddings(newChunks)
+                    } catch (_: Exception) {
+                        newChunks.map { emptyList() }
+                    }
+
+                    newChunks.forEachIndexed { i, chunk ->
+                        val emb = embeddings.getOrElse(i) { emptyList() }
+                        val id = memoryRepository.addMemoryWithEmbedding(
+                            content = chunk,
+                            embedding = emb,
+                            category = "KNOWLEDGE",
+                            isShared = true
+                        )
+                        if (id > 0) saved++
+                    }
+                }
+
+                _successMessage.value = buildString {
+                    append("✅ تم حفظ $saved جزء في الذاكرة")
+                    if (skipped > 0) append("\n⚠️ تم تخطي $skipped (موجودة مسبقاً)")
+                    if (chunks.size > 20) append("\n📌 من أصل ${chunks.size} (الحد الأقصى 20)")
+                    if (newChunks.isNotEmpty()) append("\n🚀 Batch: طلب API واحد")
+                }
+
+            } catch (e: Exception) {
+                _error.value = "❌ ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    // =========================
+    // Web page → Memory (Batch embeddings) (من الملف الأصلي كما هو)
+    // =========================
+    fun saveWebPage(url: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            _successMessage.value = null
+
+            try {
+                val result = webPageFetcher.fetchAndClean(url)
+
+                val fullText = buildString {
+                    append(result.title)
+                    append("\n\n")
+                    append(result.content)
+                }
+
+                val chunks = fileProcessor.chunkText(fullText, maxChunkSize = 800, overlap = 100)
+                val limited = chunks.take(20)
+
+                val newChunks = mutableListOf<String>()
+                var skipped = 0
+                for (chunk in limited) {
+                    if (memoryRepository.existsByHash(calculateHash(chunk))) skipped++ else newChunks.add(chunk)
+                }
+
+                var saved = 0
+                if (newChunks.isNotEmpty()) {
+                    val embeddings = try {
+                        embeddingService.getBatchEmbeddings(newChunks)
+                    } catch (_: Exception) {
+                        newChunks.map { emptyList() }
+                    }
+
+                    newChunks.forEachIndexed { i, chunk ->
+                        val emb = embeddings.getOrElse(i) { emptyList() }
+                        val id = memoryRepository.addMemoryWithEmbedding(
+                            content = chunk,
+                            embedding = emb,
+                            category = "WEB",
+                            isShared = true
+                        )
+                        if (id > 0) saved++
+                    }
+                }
+
+                _successMessage.value = buildString {
+                    append("✅ تم حفظ $saved جزء من:\n📄 ${result.title}")
+                    if (skipped > 0) append("\n⚠️ تم تخطي $skipped (موجودة مسبقاً)")
+                    if (chunks.size > 20) append("\n📌 من أصل ${chunks.size} (الحد الأقصى 20)")
+                    append("\n📊 ${result.wordCount} كلمة")
+                    if (newChunks.isNotEmpty()) append("\n🚀 Batch: طلب API واحد")
+                }
+
+            } catch (e: Exception) {
+                _error.value = when {
+                    e.message?.contains("Unable to resolve host") == true -> "❌ لا يوجد اتصال بالإنترنت"
+                    e.message?.contains("timeout", ignoreCase = true) == true -> "❌ انتهت مهلة الاتصال"
+                    e.message?.contains("URL") == true -> "❌ رابط غير صالح"
+                    else -> "❌ فشل جلب الصفحة: ${e.message}"
+                }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun clearSelectedImage() {
+        _selectedImageBase64.value = null
+    }
+
+    fun clearError() {
+        _error.value = null
+    }
+
+    fun clearSuccessMessage() {
+        _successMessage.value = null
+    }
 
     private fun calculateHash(content: String): String {
         return try {
@@ -466,7 +622,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun getDisplayName(uri: Uri): String { /* كما عندك */ return uri.lastPathSegment ?: "ملف" }
+    private fun getDisplayName(uri: Uri): String {
+        return try {
+            val resolver = getApplication<Application>().contentResolver
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (idx >= 0) cursor.getString(idx) else null
+                    } else null
+                }
+                ?: (uri.lastPathSegment ?: "ملف")
+        } catch (_: Exception) {
+            uri.lastPathSegment ?: "ملف"
+        }
+    }
 
     fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {
