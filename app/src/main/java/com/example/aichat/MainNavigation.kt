@@ -1,3 +1,4 @@
+// app/src/main/java/com/example/aichat/MainNavigation.kt
 package com.example.aichat
 
 import androidx.compose.foundation.layout.Box
@@ -18,8 +19,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.aichat.data.local.AiSettings
-import com.example.aichat.data.model.WebEngine
-import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.data.local.ChatDatabase
+import com.example.aichat.repository.AgentRepository
 import com.example.aichat.ui.screens.AgentsScreen
 import com.example.aichat.ui.screens.ChatScreen
 import com.example.aichat.ui.screens.ConversationsScreen
@@ -42,6 +43,10 @@ fun MainNavigation(app: AichatApp) {
 
     val webPlatformsViewModel: WebPlatformsViewModel =
         viewModel(factory = WebPlatformsViewModel.Factory(app.webPlatformRepository))
+
+    // ✅ AgentRepository (لا نعتمد على AgentsViewModel داخليًا عشان GeckoTestScreen يحتاج Repository مباشرة)
+    val db = remember(app) { ChatDatabase.getDatabase(app) }
+    val agentRepository = remember(db) { AgentRepository(db.agentDao()) }
 
     val platforms by webPlatformsViewModel.platforms.collectAsState(initial = emptyList())
     val enabledPlatforms = remember(platforms) { platforms.filter { it.isEnabled } }
@@ -67,7 +72,9 @@ fun MainNavigation(app: AichatApp) {
 
     Scaffold(
         snackbarHost = {
-            SnackbarHost(hostState = snackbarHostState) { data -> Snackbar(snackbarData = data) }
+            SnackbarHost(hostState = snackbarHostState) { data ->
+                Snackbar(snackbarData = data)
+            }
         }
     ) { padding ->
 
@@ -154,53 +161,22 @@ fun MainNavigation(app: AichatApp) {
                     arguments = listOf(navArgument("platformId") { type = NavType.StringType })
                 ) { backStackEntry ->
 
-                    val platformId = backStackEntry.arguments?.getString("platformId") ?: return@composable
+                    // ملاحظة: GeckoTestScreen الآن self-contained ويقرأ المنصات من repo،
+                    // لذلك لا نمرر (url/title/availablePlatforms...) كما كان سابقاً.
+                    val platformId = backStackEntry.arguments?.getString("platformId")
 
-                    var platform by remember(platformId) { mutableStateOf<WebPlatform?>(null) }
-
-                    LaunchedEffect(platformId) {
-                        platform = app.webPlatformRepository.getById(platformId)
+                    if (platformId == null) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                        return@composable
                     }
 
-                    platform?.let { p ->
-                        val engine = remember(p.preferredEngine) {
-                            runCatching { WebEngine.valueOf(p.preferredEngine) }.getOrDefault(WebEngine.GECKO)
-                        }
-
-                        when (engine) {
-                            WebEngine.GECKO -> GeckoTestScreen(
-                                url = p.url,
-                                title = p.name,
-                                onBack = { navController.popBackStack() },
-                                platform = p,
-                                chatViewModel = chatViewModel,
-                                availablePlatforms = enabledPlatforms,
-                                onSwitchPlatform = { targetPlatform ->
-                                    if (targetPlatform.id != p.id) {
-                                        navController.navigate("web/${targetPlatform.id}") { launchSingleTop = true }
-                                    }
-                                },
-                                onHome = { navController.popBackStack("conversations", false) }
-                            )
-
-                            WebEngine.WEBVIEW, WebEngine.EXTERNAL -> GeckoTestScreen(
-                                url = p.url,
-                                title = p.name,
-                                onBack = { navController.popBackStack() },
-                                platform = null,
-                                chatViewModel = null,
-                                availablePlatforms = enabledPlatforms,
-                                onSwitchPlatform = { targetPlatform ->
-                                    if (targetPlatform.id != p.id) {
-                                        navController.navigate("web/${targetPlatform.id}") { launchSingleTop = true }
-                                    }
-                                },
-                                onHome = { navController.popBackStack("conversations", false) }
-                            )
-                        }
-                    } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+                    GeckoTestScreen(
+                        webPlatformRepository = app.webPlatformRepository,
+                        aiSettings = settings,
+                        agentRepository = agentRepository,
+                    )
                 }
             }
         }
