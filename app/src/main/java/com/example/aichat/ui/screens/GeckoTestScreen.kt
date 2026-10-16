@@ -507,7 +507,7 @@ fun GeckoTestScreen(
                     val isSelected = tabPlatform.id == platform.id
                     Tab(
                         selected = isSelected,
-                        onClick = { if (!isSelected) onSwitchPlatform(tabPlatform) },
+                        onClick = { if (!isSelected) activePlatformId = tabPlatform.id },
                         text = {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
