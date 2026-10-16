@@ -14,12 +14,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -37,6 +37,7 @@ import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
@@ -68,12 +69,12 @@ fun ChatScreen(
 
     var showAgentDialog by remember { mutableStateOf(false) }
 
-    // ✅ FIX: استخدام TextFieldValue لمنع "أول حرف فقط" مع composing text
+    // ✅ FIX: استخدم TextFieldValue (يعالج composing text)
     var userInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
 
-    // عند التحسين نحرر نسخة محلية، ولا نعتمد على String مباشرة
+    // ✅ FIX: في وضع التحسين نخزن نسخة محلية فقط (بدون حلقة updateEnhancedQuery)
     var enhancedInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
@@ -81,20 +82,20 @@ fun ChatScreen(
     val isEnhanced = enhancedQuery != null
     val hasIdentity = settings.mediatorIdentityText.isNotBlank()
 
-    // الحقل المعروض فعليًا
+    // الحقل الذي نعرضه فعليًا
     val displayedValue = if (isEnhanced) enhancedInput else userInput
 
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val scope = rememberCoroutineScope()
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
     var showWebImportDialog by remember { mutableStateOf(false) }
 
-    // مزامنة نص التحسين القادم من ViewModel إلى الحقل (مرة عندما يتغير enhancedQuery)
+    // عندما تأتي نتيجة التحسين من ViewModel نضعها في enhancedInput مرة واحدة
     LaunchedEffect(enhancedQuery) {
         if (enhancedQuery != null) {
             enhancedInput = TextFieldValue(enhancedQuery!!)
@@ -125,7 +126,12 @@ fun ChatScreen(
         cb.setPrimaryClip(ClipData.newPlainText("message", text))
     }
 
-    // ✅ FIX: clearFocus + انتظار فريم لضمان commit من IME قبل قراءة النص
+    /**
+     * ✅ FIX قوي:
+     * - نخفي الكيبورد + نزيل الفوكس
+     * - ننتظر قليلًا حتى يلتقط Compose/IME آخر composing ويعمل commit
+     * - ثم نقرأ النص من state ونرسله
+     */
     fun send() {
         if (isLoading) return
 
@@ -133,16 +139,17 @@ fun ChatScreen(
             keyboardController?.hide()
             focusManager.clearFocus(force = true)
 
-            // انتظر فريم واحد حتى يقوم الـ IME بعمل commit للنص المركّب
-            withFrameNanos { }
+            // هذا التأخير حل عملي جدًا مع بعض لوحات المفاتيح التي لا تعمل commit فورًا
+            delay(80)
 
             val textToSend = (if (isEnhanced) enhancedInput.text else userInput.text).trim()
             if (textToSend.isBlank()) return@launch
 
             viewModel.sendChatMessage(textToSend)
 
+            // reset
             userInput = TextFieldValue("")
-            viewModel.clearEnhancedQuery() // سيجعل isEnhanced=false ويفرغ enhancedInput عبر LaunchedEffect
+            viewModel.clearEnhancedQuery() // سيخرج من وضع التحسين
         }
     }
 
@@ -225,7 +232,9 @@ fun ChatScreen(
                             onSaveMemory = { memoryMessage = msg }
                         )
                     }
-                    if (isLoading) item("thinking") { ThinkingBubble() }
+                    if (isLoading) {
+                        item("thinking") { ThinkingBubble() }
+                    }
                 }
             }
 
@@ -250,13 +259,7 @@ fun ChatScreen(
                 isEnhancing = isEnhancing,
                 hasIdentity = hasIdentity,
                 onValueChange = { tfv ->
-                    if (isEnhanced) {
-                        enhancedInput = tfv
-                        // إبقاء ViewModel متزامن (اختياري لكنه مفيد)
-                        viewModel.updateEnhancedQuery(tfv.text)
-                    } else {
-                        userInput = tfv
-                    }
+                    if (isEnhanced) enhancedInput = tfv else userInput = tfv
                 },
                 onOpenGallery = { galleryLauncher.launch("image/*") },
                 onOpenCamera = { openCamera() },
@@ -362,8 +365,11 @@ private fun MessageBubble(
     onSaveMemory: () -> Unit,
 ) {
     val isUser = remember(message) { guessIsUser(message) }
-    val bg = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+
+    val bg =
+        if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    val fg =
+        if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     val align = if (isUser) Alignment.End else Alignment.Start
 
     Column(
@@ -376,11 +382,16 @@ private fun MessageBubble(
             tonalElevation = 1.dp,
             modifier = Modifier
                 .widthIn(max = 520.dp)
-                .combinedClickable(onClick = {}, onLongClick = { onCopy() })
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { onCopy() }
+                )
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(message.content, color = fg)
+
                 Spacer(Modifier.height(10.dp))
+
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     AssistChip(
                         onClick = onCopy,
@@ -415,7 +426,11 @@ private fun ErrorMessage(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+            Icon(
+                Icons.Filled.ErrorOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Text("خطأ", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onErrorContainer)
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
@@ -479,17 +494,22 @@ private fun InputBar(
                 minLines = 2,
                 maxLines = 6,
                 label = { Text(if (isEnhanced) "النص المُحسَّن" else "اكتب رسالتك") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                    onSend = { onSend() }
-                ),
                 supportingText = {
                     val bits = buildList {
                         if (hasIdentity) add("Identity")
                         if (isEnhanced) add("Enhanced")
                     }
                     if (bits.isNotEmpty()) Text(bits.joinToString(" • "))
-                }
+                },
+                keyboardOptions = KeyboardOptions(
+                    imeAction = ImeAction.Send,
+                    // إذا أردت إبقاء autocorrect، اجعلها true.
+                    // false أحيانًا يحل مشاكل composing مع بعض الكيبوردات.
+                    autoCorrect = false
+                ),
+                keyboardActions = KeyboardActions(
+                    onSend = { onSend() }
+                )
             )
 
             IconButton(onClick = onSend, enabled = !isLoading && displayedText.isNotBlank()) {
