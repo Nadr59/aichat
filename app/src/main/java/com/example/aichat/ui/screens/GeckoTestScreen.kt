@@ -1,4 +1,3 @@
-// app/src/main/java/com/example/aichat/ui/screens/GeckoTestScreen.kt
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package com.example.aichat.ui.screens
@@ -86,8 +85,6 @@ import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
 import com.example.aichat.repository.WebPlatformRepository
 import com.example.aichat.ui.viewmodel.ChatViewModel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
@@ -98,13 +95,10 @@ import org.mozilla.geckoview.WebRequestError
 import java.util.Locale
 
 /**
- * نسخة “ترجع الشكل القديم” (Tabs + WebView + SendBar) مع إضافة واحدة فقط:
- * ✅ Web Agent مستقل يُحقن في السياق قبل إرسال الرسالة للويب.
+ * UI القديم (Tabs + GeckoView + SendBar) + إضافة واحدة فقط:
+ * ✅ Web Agent مستقل (aiSettings.webAgentId) يتم حقنه ضمن السياق عند الإرسال.
  *
- * - Arena: حقن فقط بدون إرسال تلقائي (sendWithEnter=false + sendSelector="")
- * - ChatGPT/Venice: نترك نفس أسلوب "hidden context" القديم (HTML comment) حفاظاً على توافق content.js عندك.
- *
- * ملاحظة: لا يوجد DebugLog UI هنا.
+ * المنصات تُقرأ من: WebPlatformRepository.enabledPlatforms (بدون platformsFlow).
  */
 @Composable
 fun GeckoTestScreen(
@@ -117,66 +111,45 @@ fun GeckoTestScreen(
     onHome: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    // نحصل على المنصات بدون افتراض اسم property داخل WebPlatformRepository
-    val platformsFlow = remember(webPlatformRepository) { platformsFlowCompat(webPlatformRepository) }
-    val platformsAll by platformsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
-    val availablePlatforms: List<WebPlatform> = remember(platformsAll) { platformsAll.filter { p -> p.isEnabled } }
-
-    var activePlatformId by rememberSaveable { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(availablePlatforms, initialPlatformId) {
-        if (availablePlatforms.isEmpty()) return@LaunchedEffect
-
-        val wanted = initialPlatformId?.takeIf { it.isNotBlank() }
-        activePlatformId = when {
-            activePlatformId != null && availablePlatforms.any { it.id == activePlatformId } -> activePlatformId
-            wanted != null && availablePlatforms.any { it.id == wanted } -> wanted
-            else -> availablePlatforms.first().id
-        }
-    }
-
-    val platform: WebPlatform? = remember(availablePlatforms, activePlatformId) {
-        activePlatformId?.let { id -> availablePlatforms.firstOrNull { it.id == id } }
-            ?: availablePlatforms.firstOrNull()
-    }
-
-    if (platform == null) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
-        return
-    }
-
-    GeckoTestScreenContent(
-        platform = platform,
-        availablePlatforms = availablePlatforms,
-        onSwitchPlatform = { p -> activePlatformId = p.id },
-        chatViewModel = chatViewModel,
-        aiSettings = aiSettings,
-        agentRepository = agentRepository,
-        onBack = onBack,
-        onHome = onHome,
-        modifier = modifier
-    )
-}
-
-@Composable
-private fun GeckoTestScreenContent(
-    platform: WebPlatform,
-    availablePlatforms: List<WebPlatform>,
-    onSwitchPlatform: (WebPlatform) -> Unit,
-    chatViewModel: ChatViewModel?,
-    aiSettings: AiSettings,
-    agentRepository: AgentRepository,
-    onBack: () -> Unit,
-    onHome: () -> Unit,
-    modifier: Modifier = Modifier
-) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val app = context.applicationContext as AichatApp
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val scope = rememberCoroutineScope()
+
+    // ✅ مهم: ضمان وجود المنصات الافتراضية (بدون فتح شاشة إدارة المنصات)
+    LaunchedEffect(webPlatformRepository) {
+        runCatching { webPlatformRepository.seedDefaults() }
+    }
+
+    // ✅ هذا هو الـ Flow الصحيح في WebPlatformRepository عندك
+    val enabledPlatforms by webPlatformRepository.enabledPlatforms.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    var activePlatformId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(enabledPlatforms, initialPlatformId) {
+        if (enabledPlatforms.isEmpty()) return@LaunchedEffect
+
+        val wanted = initialPlatformId?.takeIf { it.isNotBlank() }
+        activePlatformId = when {
+            activePlatformId != null && enabledPlatforms.any { it.id == activePlatformId } -> activePlatformId
+            wanted != null && enabledPlatforms.any { it.id == wanted } -> wanted
+            else -> enabledPlatforms.first().id
+        }
+    }
+
+    val platform: WebPlatform? = remember(enabledPlatforms, activePlatformId) {
+        activePlatformId?.let { id -> enabledPlatforms.firstOrNull { it.id == id } }
+            ?: enabledPlatforms.firstOrNull()
+    }
+
+    if (platform == null) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (enabledPlatforms.isEmpty()) Text("لا توجد منصات مفعلة بعد.")
+            else CircularProgressIndicator()
+        }
+        return
+    }
 
     val runtime = remember { app.getOrCreateGeckoRuntime() }
     if (runtime == null) {
@@ -192,13 +165,18 @@ private fun GeckoTestScreenContent(
         return
     }
 
-    // ===== Web Agent (independent) =====
+    // =========================
+    // Web Agent (independent)
+    // =========================
     val webAgentId: String? = remember(aiSettings) { readWebAgentIdCompat(aiSettings) }
     val webAgent: AgentProfile? by produceState<AgentProfile?>(initialValue = null, webAgentId) {
         value = webAgentId?.let { id -> runCatching { agentRepository.getById(id) }.getOrNull() }
     }
     val webAgentPrompt = remember(webAgent) { webAgent?.let { AgentPromptBuilder.build(it) }.orEmpty() }
 
+    // =========================
+    // Session state (مثل السابق)
+    // =========================
     val sessionKey = platform.id
     val session = remember(sessionKey) { GeckoSessionManager.getOrCreate(sessionKey) }
 
@@ -213,7 +191,7 @@ private fun GeckoTestScreenContent(
     var isSavingMemory by remember(sessionKey) { mutableStateOf(false) }
     var timeoutRunnable by remember(sessionKey) { mutableStateOf<Runnable?>(null) }
 
-    // toggle memory injection
+    // memory injection toggle
     var memoryInjectionEnabled by remember(sessionKey) { mutableStateOf(true) }
 
     // send bar state
@@ -367,7 +345,7 @@ private fun GeckoTestScreenContent(
     }
 
     // ============================================================
-    // Memory search + curator selection (UI only)
+    // Memory search + curator selection (للـ UI فقط)
     // ============================================================
 
     LaunchedEffect(includeMemory, displayedText, memoryInjectionEnabled, platform.id) {
@@ -520,12 +498,12 @@ private fun GeckoTestScreenContent(
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
         )
 
-        if (availablePlatforms.isNotEmpty()) {
+        if (enabledPlatforms.isNotEmpty()) {
             val selectedIndex =
-                availablePlatforms.indexOfFirst { it.id == platform.id }.let { if (it >= 0) it else 0 }
+                enabledPlatforms.indexOfFirst { it.id == platform.id }.let { if (it >= 0) it else 0 }
 
             ScrollableTabRow(selectedTabIndex = selectedIndex, edgePadding = 8.dp) {
-                availablePlatforms.forEach { tabPlatform: WebPlatform ->
+                enabledPlatforms.forEach { tabPlatform ->
                     val isSelected = tabPlatform.id == platform.id
                     Tab(
                         selected = isSelected,
@@ -545,6 +523,7 @@ private fun GeckoTestScreenContent(
         }
 
         Box(modifier = Modifier.weight(1f)) {
+            // مهم: key(sessionKey) لمنع إعادة استخدام GeckoView مع session قديم عند التبديل
             key(sessionKey) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -668,7 +647,7 @@ private fun GeckoTestScreenContent(
                         val includeAccuracy = aiSettings.accuracyPromptEnabled
                         val kind = webKind()
 
-                        val hiddenContext = buildString {
+                        val contextBlock = buildString {
                             // ✅ NEW: Web Agent Persona
                             if (webAgentPrompt.isNotBlank()) {
                                 appendLine("AGENT_PERSONA:")
@@ -692,8 +671,9 @@ private fun GeckoTestScreenContent(
                             }
                         }.trim()
 
-                        val finalText = buildFinalTextForPlatform(kind = kind, hiddenContext = hiddenContext, question = question)
+                        val finalText = buildFinalTextForPlatform(kind = kind, contextBlock = contextBlock, question = question)
 
+                        // Arena: inject فقط (بدون auto-send)
                         val sendWithEnterFinal = if (kind == WebKind.ARENA) false else platform.sendWithEnter
                         val sendSelectorFinal = if (kind == WebKind.ARENA) "" else platform.sendSelector
 
@@ -813,6 +793,10 @@ private fun WebSendBar(
 
 private enum class WebKind { CHATGPT, VENICE, ARENA, OTHER }
 
+// (لو content.js عندك يعتمد على markers بدل comment تقدر تبدل هنا بسهولة)
+private const val AICHAT_CTX_BEGIN = "<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>"
+private const val AICHAT_CTX_END = "<<<AICHAT_HIDDEN_CONTEXT_END>>>"
+
 private fun classifyHost(host: String): WebKind {
     val h = host.lowercase(Locale.ROOT)
     return when {
@@ -823,8 +807,8 @@ private fun classifyHost(host: String): WebKind {
     }
 }
 
-private fun buildFinalTextForPlatform(kind: WebKind, hiddenContext: String, question: String): String {
-    val ctx = hiddenContext.trim()
+private fun buildFinalTextForPlatform(kind: WebKind, contextBlock: String, question: String): String {
+    val ctx = contextBlock.trim()
     if (ctx.isBlank()) return question
 
     return when (kind) {
@@ -832,12 +816,18 @@ private fun buildFinalTextForPlatform(kind: WebKind, hiddenContext: String, ques
             // Arena: visible + manual send
             "### Context (visible)\n$ctx\n### End Context\n\n$question"
         }
-        else -> {
-            // حافظ على نفس الصيغة القديمة كي لا نكسر content.js
-            "<!-- aichat_hidden_context\n$ctx\n-->\n\n$question"
+        WebKind.CHATGPT, WebKind.VENICE -> {
+            // الأفضل (إذا content.js عندك sanitizer يعتمد على markers)
+            "$AICHAT_CTX_BEGIN\n$ctx\n$AICHAT_CTX_END\n\n$question"
+        }
+        WebKind.OTHER -> {
+            // fallback
+            "$ctx\n\n$question"
         }
     }
 }
+
+/* ============================ AiSettings compat ============================ */
 
 private fun readWebAgentIdCompat(aiSettings: AiSettings): String? {
     val getters = listOf("getWebAgentId", "webAgentId")
@@ -851,47 +841,11 @@ private fun readWebAgentIdCompat(aiSettings: AiSettings): String? {
 
     val v = runCatching {
         val f = aiSettings.javaClass.declaredFields.firstOrNull { it.name == "webAgentId" } ?: return@runCatching null
-        f.isAccessible = true
+        f.setAccessible(true)
         f.get(aiSettings) as? String
     }.getOrNull()
 
     return v?.takeIf { it.isNotBlank() }
-}
-
-/* ============================ Repo compat ============================ */
-
-@Suppress("UNCHECKED_CAST")
-private fun platformsFlowCompat(repo: WebPlatformRepository): Flow<List<WebPlatform>> {
-    // try methods
-    val methodNames = listOf(
-        "getPlatformsFlow",
-        "getPlatforms",
-        "platformsFlow",
-        "platforms",
-        "observePlatforms",
-        "observeAll"
-    )
-    for (name in methodNames) {
-        val flow = runCatching {
-            val m = repo.javaClass.methods.firstOrNull { it.name == name && it.parameterTypes.isEmpty() }
-                ?: return@runCatching null
-            m.invoke(repo) as? Flow<List<WebPlatform>>
-        }.getOrNull()
-        if (flow != null) return flow
-    }
-
-    // try fields
-    val fieldNames = listOf("platformsFlow", "platforms")
-    for (fname in fieldNames) {
-        val flow = runCatching {
-            val f = repo.javaClass.declaredFields.firstOrNull { it.name == fname } ?: return@runCatching null
-            f.isAccessible = true
-            f.get(repo) as? Flow<List<WebPlatform>>
-        }.getOrNull()
-        if (flow != null) return flow
-    }
-
-    return flowOf(emptyList())
 }
 
 /* ============================ Helpers / dialogs ============================ */
