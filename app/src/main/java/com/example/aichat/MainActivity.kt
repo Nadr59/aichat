@@ -10,12 +10,10 @@ import androidx.compose.ui.Modifier
 import com.example.aichat.ui.theme.AiChatTheme
 
 class MainActivity : ComponentActivity() {
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // الحصول على AichatApp مباشرة بدل AiSettings
         val app = application as AichatApp
 
         setContent {
