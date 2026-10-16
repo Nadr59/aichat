@@ -4,6 +4,7 @@
 package com.example.aichat.ui.screens
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Handler
@@ -24,8 +25,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,9 +32,12 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -53,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -83,6 +86,8 @@ import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
 import com.example.aichat.repository.WebPlatformRepository
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
@@ -93,15 +98,13 @@ import org.mozilla.geckoview.WebRequestError
 import java.util.Locale
 
 /**
- * ✅ هذه النسخة تُرجّع تصميم/تجربة الشاشة القديمة (Tabs + GeckoView + شريط إرسال سفلي)
- * مع إضافة واحدة فقط: Web Agent مستقل يُحقن ضمن السياق عند الإرسال.
+ * نسخة “ترجع الشكل القديم” (Tabs + WebView + SendBar) مع إضافة واحدة فقط:
+ * ✅ Web Agent مستقل يُحقن في السياق قبل إرسال الرسالة للويب.
  *
- * - ChatGPT/Venice: يتم حقن السياق بعلامات خاصة ليقوم content.js بإخفائها (DOM sanitizer).
- * - Arena: يتم حقن النص فقط بدون إرسال تلقائي (sendWithEnter=false) والسياق يكون مرئيًا.
- * - لا يوجد Debug log UI هنا (تم إزالته كما طلبت).
+ * - Arena: حقن فقط بدون إرسال تلقائي (sendWithEnter=false + sendSelector="")
+ * - ChatGPT/Venice: نترك نفس أسلوب "hidden context" القديم (HTML comment) حفاظاً على توافق content.js عندك.
  *
- * ملاحظة مهمة: هذه الشاشة Self-contained وتقرأ المنصات من WebPlatformRepository،
- * بدل الاعتماد على بارامترات url/title القديمة.
+ * ملاحظة: لا يوجد DebugLog UI هنا.
  */
 @Composable
 fun GeckoTestScreen(
@@ -114,17 +117,11 @@ fun GeckoTestScreen(
     onHome: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val app = context.applicationContext as AichatApp
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val scope = rememberCoroutineScope()
+    // نحصل على المنصات بدون افتراض اسم property داخل WebPlatformRepository
+    val platformsFlow = remember(webPlatformRepository) { platformsFlowCompat(webPlatformRepository) }
+    val platformsAll by platformsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val availablePlatforms: List<WebPlatform> = remember(platformsAll) { platformsAll.filter { p -> p.isEnabled } }
 
-    // منصات الويب
-    val platformsAll by webPlatformRepository.platformsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
-    val availablePlatforms = remember(platformsAll) { platformsAll.filter { it.isEnabled } }
-
-    // اختيار المنصة الحالية (String لأن web_platforms.id TEXT)
     var activePlatformId by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(availablePlatforms, initialPlatformId) {
@@ -150,17 +147,44 @@ fun GeckoTestScreen(
         return
     }
 
-    val url = platform.url
-    val title = platform.name
+    GeckoTestScreenContent(
+        platform = platform,
+        availablePlatforms = availablePlatforms,
+        onSwitchPlatform = { p -> activePlatformId = p.id },
+        chatViewModel = chatViewModel,
+        aiSettings = aiSettings,
+        agentRepository = agentRepository,
+        onBack = onBack,
+        onHome = onHome,
+        modifier = modifier
+    )
+}
 
-    // Gecko runtime
+@Composable
+private fun GeckoTestScreenContent(
+    platform: WebPlatform,
+    availablePlatforms: List<WebPlatform>,
+    onSwitchPlatform: (WebPlatform) -> Unit,
+    chatViewModel: ChatViewModel?,
+    aiSettings: AiSettings,
+    agentRepository: AgentRepository,
+    onBack: () -> Unit,
+    onHome: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val app = context.applicationContext as AichatApp
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val scope = rememberCoroutineScope()
+
     val runtime = remember { app.getOrCreateGeckoRuntime() }
     if (runtime == null) {
         GeckoUnavailableDialog(
-            platformTitle = title,
-            platformUrl = url,
+            platformTitle = platform.name,
+            platformUrl = platform.url,
             onOpenBrowser = {
-                openExternal(context, url)
+                openExternal(context, platform.url)
                 onBack()
             },
             onBack = onBack
@@ -168,20 +192,12 @@ fun GeckoTestScreen(
         return
     }
 
-    // ============ Web Agent (independent) ============
-    val webAgentId: String? by remember(aiSettings) {
-        mutableStateOf(readWebAgentIdCompat(aiSettings))
-    }
-
-    var webAgent by remember { mutableStateOf<AgentProfile?>(null) }
-    LaunchedEffect(webAgentId) {
-        webAgent = webAgentId?.let { id ->
-            runCatching { agentRepository.getById(id) }.getOrNull()
-        }
+    // ===== Web Agent (independent) =====
+    val webAgentId: String? = remember(aiSettings) { readWebAgentIdCompat(aiSettings) }
+    val webAgent: AgentProfile? by produceState<AgentProfile?>(initialValue = null, webAgentId) {
+        value = webAgentId?.let { id -> runCatching { agentRepository.getById(id) }.getOrNull() }
     }
     val webAgentPrompt = remember(webAgent) { webAgent?.let { AgentPromptBuilder.build(it) }.orEmpty() }
-
-    // ========= session / UI state (نفس التصميم القديم) =========
 
     val sessionKey = platform.id
     val session = remember(sessionKey) { GeckoSessionManager.getOrCreate(sessionKey) }
@@ -189,8 +205,8 @@ fun GeckoTestScreen(
     var isLoading by remember(sessionKey) { mutableStateOf(!session.isOpen) }
     var progress by remember(sessionKey) { mutableIntStateOf(0) }
     var canGoBack by remember(sessionKey) { mutableStateOf(false) }
-    var currentUrl by remember(sessionKey) { mutableStateOf(url) }
-    var currentTitle by remember(sessionKey) { mutableStateOf(title) }
+    var currentUrl by remember(sessionKey) { mutableStateOf(platform.url) }
+    var currentTitle by remember(sessionKey) { mutableStateOf(platform.name) }
     var loadError by remember(sessionKey) { mutableStateOf<String?>(null) }
 
     // capture
@@ -210,8 +226,6 @@ fun GeckoTestScreen(
     var searchResults by remember(sessionKey) { mutableStateOf(emptyList<MemoryItem>()) }
     var selectedIds by remember(sessionKey) { mutableStateOf(emptyList<Long>()) }
     var curatorReasoning by remember(sessionKey) { mutableStateOf("") }
-
-    // ✅ مهم: نتأكد أن selectedIds الحالية تخص نفس النص
     var curatedForText by remember(sessionKey) { mutableStateOf("") }
 
     val displayedText = enhancedQuery ?: query
@@ -224,10 +238,8 @@ fun GeckoTestScreen(
     fun hostOrEmptyFrom(urlStr: String): String =
         runCatching { Uri.parse(urlStr).host.orEmpty() }.getOrDefault("")
 
-    fun targetDomainStable(): String {
-        // ثابت: نعتمد على رابط المنصة
-        return if (platform.url.isNotBlank()) hostOrEmptyFrom(platform.url) else hostOrEmptyFrom(currentUrl)
-    }
+    fun targetDomainStable(): String =
+        if (platform.url.isNotBlank()) hostOrEmptyFrom(platform.url) else hostOrEmptyFrom(currentUrl)
 
     fun webKind(): WebKind = classifyHost(targetDomainStable())
 
@@ -274,7 +286,6 @@ fun GeckoTestScreen(
                     val uri = Uri.parse(request.uri)
                     val scheme = uri.scheme?.lowercase()
 
-                    // منع روابط capture marker
                     if (scheme == "https" || scheme == "http") {
                         if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
                             return GeckoResult.deny()
@@ -356,7 +367,7 @@ fun GeckoTestScreen(
     }
 
     // ============================================================
-    // Memory search + curator selection (للـ UI فقط)
+    // Memory search + curator selection (UI only)
     // ============================================================
 
     LaunchedEffect(includeMemory, displayedText, memoryInjectionEnabled, platform.id) {
@@ -451,7 +462,7 @@ fun GeckoTestScreen(
     }
 
     // ============================================================
-    // UI (نفس الهيكل القديم)
+    // UI
     // ============================================================
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -459,13 +470,13 @@ fun GeckoTestScreen(
             title = {
                 Column {
                     Text(
-                        text = title,
+                        text = platform.name,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (currentTitle != title && currentTitle.isNotBlank()) {
+                    if (currentTitle != platform.name && currentTitle.isNotBlank()) {
                         Text(
                             text = currentTitle,
                             style = MaterialTheme.typography.labelSmall,
@@ -509,17 +520,16 @@ fun GeckoTestScreen(
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
         )
 
-        // Tabs للمنصات (مثل السابق)
         if (availablePlatforms.isNotEmpty()) {
             val selectedIndex =
                 availablePlatforms.indexOfFirst { it.id == platform.id }.let { if (it >= 0) it else 0 }
 
             ScrollableTabRow(selectedTabIndex = selectedIndex, edgePadding = 8.dp) {
-                availablePlatforms.forEach { tabPlatform ->
+                availablePlatforms.forEach { tabPlatform: WebPlatform ->
                     val isSelected = tabPlatform.id == platform.id
                     Tab(
                         selected = isSelected,
-                        onClick = { if (!isSelected) activePlatformId = tabPlatform.id },
+                        onClick = { if (!isSelected) onSwitchPlatform(tabPlatform) },
                         text = {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -534,7 +544,6 @@ fun GeckoTestScreen(
             }
         }
 
-        // WebView area
         Box(modifier = Modifier.weight(1f)) {
             key(sessionKey) {
                 AndroidView(
@@ -552,7 +561,7 @@ fun GeckoTestScreen(
                                 session.open(runtime)
                                 session.setActive(true)
                                 isLoading = true
-                                session.loadUri(url)
+                                session.loadUri(platform.url)
                             } else {
                                 session.setActive(true)
                             }
@@ -587,7 +596,6 @@ fun GeckoTestScreen(
             }
         }
 
-        // شريط الإرسال السفلي (مع إضافة Web Agent فقط)
         WebSendBar(
             modifier = Modifier
                 .fillMaxWidth()
@@ -660,26 +668,23 @@ fun GeckoTestScreen(
                         val includeAccuracy = aiSettings.accuracyPromptEnabled
                         val kind = webKind()
 
-                        val contextBlock = buildString {
-                            // ✅ Web Agent persona (NEW)
+                        val hiddenContext = buildString {
+                            // ✅ NEW: Web Agent Persona
                             if (webAgentPrompt.isNotBlank()) {
                                 appendLine("AGENT_PERSONA:")
                                 appendLine(webAgentPrompt.trim())
                                 appendLine()
                             }
-
                             if (includeAccuracy) {
                                 appendLine("ACCURACY_POLICY:")
                                 appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
                                 appendLine()
                             }
-
                             if (extraNotes.isNotBlank()) {
                                 appendLine("EXTRA_NOTES:")
                                 appendLine(extraNotes)
                                 appendLine()
                             }
-
                             if (memoryXml.isNotBlank()) {
                                 appendLine("SHARED_MEMORIES_XML:")
                                 appendLine(memoryXml)
@@ -687,19 +692,16 @@ fun GeckoTestScreen(
                             }
                         }.trim()
 
-                        val finalText = buildFinalTextForPlatform(kind = kind, contextBlock = contextBlock, question = question)
+                        val finalText = buildFinalTextForPlatform(kind = kind, hiddenContext = hiddenContext, question = question)
 
-                        // Arena: inject only (no auto send)
-                        val sendWithEnterFinal = when (kind) {
-                            WebKind.ARENA -> false
-                            else -> platform.sendWithEnter
-                        }
+                        val sendWithEnterFinal = if (kind == WebKind.ARENA) false else platform.sendWithEnter
+                        val sendSelectorFinal = if (kind == WebKind.ARENA) "" else platform.sendSelector
 
                         app.setContextPending(
                             text = finalText,
                             targetDomain = targetDomainStable(),
                             inputSelector = platform.inputSelector,
-                            sendSelector = platform.sendSelector,
+                            sendSelector = sendSelectorFinal,
                             sendWithEnter = sendWithEnterFinal
                         )
 
@@ -811,9 +813,6 @@ private fun WebSendBar(
 
 private enum class WebKind { CHATGPT, VENICE, ARENA, OTHER }
 
-private const val AICHAT_CTX_BEGIN = "<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>"
-private const val AICHAT_CTX_END = "<<<AICHAT_HIDDEN_CONTEXT_END>>>"
-
 private fun classifyHost(host: String): WebKind {
     val h = host.lowercase(Locale.ROOT)
     return when {
@@ -824,30 +823,22 @@ private fun classifyHost(host: String): WebKind {
     }
 }
 
-private fun buildFinalTextForPlatform(kind: WebKind, contextBlock: String, question: String): String {
-    val ctx = contextBlock.trim()
+private fun buildFinalTextForPlatform(kind: WebKind, hiddenContext: String, question: String): String {
+    val ctx = hiddenContext.trim()
     if (ctx.isBlank()) return question
 
     return when (kind) {
-        WebKind.CHATGPT, WebKind.VENICE -> {
-            // سيتم إخفاؤه عبر content.js sanitizer بعد الإرسال
-            "$AICHAT_CTX_BEGIN\n$ctx\n$AICHAT_CTX_END\n\n$question"
-        }
         WebKind.ARENA -> {
-            // Arena: لا Sanitizer + لا auto send => اجعل السياق مرئيًا
+            // Arena: visible + manual send
             "### Context (visible)\n$ctx\n### End Context\n\n$question"
         }
-        WebKind.OTHER -> {
-            // منصات أخرى: نضع سياق مرئي كي لا يظهر كنص غريب بدون Sanitizer
-            "### Context\n$ctx\n### Question\n$question"
+        else -> {
+            // حافظ على نفس الصيغة القديمة كي لا نكسر content.js
+            "<!-- aichat_hidden_context\n$ctx\n-->\n\n$question"
         }
     }
 }
 
-/**
- * AiSettings.webAgentId قد لا يكون موجودًا في بعض النسخ أثناء الدمج.
- * نحاول قراءته بأمان بدون كسر الـ build.
- */
 private fun readWebAgentIdCompat(aiSettings: AiSettings): String? {
     val getters = listOf("getWebAgentId", "webAgentId")
     for (g in getters) {
@@ -865,6 +856,42 @@ private fun readWebAgentIdCompat(aiSettings: AiSettings): String? {
     }.getOrNull()
 
     return v?.takeIf { it.isNotBlank() }
+}
+
+/* ============================ Repo compat ============================ */
+
+@Suppress("UNCHECKED_CAST")
+private fun platformsFlowCompat(repo: WebPlatformRepository): Flow<List<WebPlatform>> {
+    // try methods
+    val methodNames = listOf(
+        "getPlatformsFlow",
+        "getPlatforms",
+        "platformsFlow",
+        "platforms",
+        "observePlatforms",
+        "observeAll"
+    )
+    for (name in methodNames) {
+        val flow = runCatching {
+            val m = repo.javaClass.methods.firstOrNull { it.name == name && it.parameterTypes.isEmpty() }
+                ?: return@runCatching null
+            m.invoke(repo) as? Flow<List<WebPlatform>>
+        }.getOrNull()
+        if (flow != null) return flow
+    }
+
+    // try fields
+    val fieldNames = listOf("platformsFlow", "platforms")
+    for (fname in fieldNames) {
+        val flow = runCatching {
+            val f = repo.javaClass.declaredFields.firstOrNull { it.name == fname } ?: return@runCatching null
+            f.isAccessible = true
+            f.get(repo) as? Flow<List<WebPlatform>>
+        }.getOrNull()
+        if (flow != null) return flow
+    }
+
+    return flowOf(emptyList())
 }
 
 /* ============================ Helpers / dialogs ============================ */
@@ -898,7 +925,7 @@ private fun LoadErrorView(
             Text("⚠️", style = MaterialTheme.typography.displaySmall)
             Text(text = message, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             Spacer(Modifier.height(4.dp))
-            androidx.compose.material3.Button(onClick = onRetry) { Text("إعادة المحاولة") }
+            Button(onClick = onRetry) { Text("إعادة المحاولة") }
             OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
         }
     }
@@ -921,11 +948,7 @@ private fun GeckoUnavailableDialog(
                     platformUrl
             )
         },
-        confirmButton = {
-            androidx.compose.material3.Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onBack) { Text("رجوع") }
-        }
+        confirmButton = { Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") } },
+        dismissButton = { OutlinedButton(onClick = onBack) { Text("رجوع") } }
     )
 }
