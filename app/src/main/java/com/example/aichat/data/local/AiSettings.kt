@@ -350,6 +350,16 @@ class AiSettings(context: Context) {
             )
             .apply()
 
+                /**
+     * ✅ Web Agent مستقل عن محادثات الـ API
+     * يخزن ID من جدول agents.
+     */
+    var webAgentId: String
+        get() = prefs.getString("web_agent_id", "")?.trim().orEmpty()
+        set(value) = prefs.edit()
+            .putString("web_agent_id", value.trim())
+            .apply()
+
     // ============================================================
     // Helpers
     // ============================================================
