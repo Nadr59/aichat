@@ -35,29 +35,18 @@ class ChatRepository(context: Context) {
 
     private val modelCatalogRepository = ModelCatalogRepository(settings)
 
-    // ── بناء System Prompt ────────────────────────────────────────────────────
-
-    /**
-     * @param memoryContext سياق منقّى من الذاكرة (من MemoryCuratorService.curate)،
-     *        أو فارغ إن لم توجد ذاكرة ذات صلة. هذا **منفصل** عن تحسين السؤال —
-     *        يُحقَن في SystemPrompt بجانب السؤال (سواء كان محسّناً أم لا).
-     * 
-     * @param hasMemorySource يحدد ما إذا كان memoryContext يحوي فعلاً ذاكرة
-     *        مسترجَعة (true) أم لا (false). يُستخدَم لاختيار الصياغة الصحيحة
-     *        في SystemPrompt.build().
-     */
     private fun buildSystemPrompt(
         memoryContext: String,
-        hasMemorySource: Boolean
+        hasMemorySource: Boolean,
+        agentPrompt: String
     ): String =
         SystemPrompt.build(
             memoryContext     = memoryContext,
             customInstruction = settings.customSystemInstruction,
             includeAccuracy   = settings.accuracyPromptEnabled,
-            hasMemorySource   = hasMemorySource
+            hasMemorySource   = hasMemorySource,
+            agentPrompt       = agentPrompt
         )
-
-    // ── جلب النماذج ───────────────────────────────────────────────────────────
 
     suspend fun getAvailableModels(
         provider:  String,
@@ -76,21 +65,13 @@ class ChatRepository(context: Context) {
         modelCatalogRepository.getModels(provider = provider, apiKey = apiKey)
     }
 
-    // ── إرسال الرسالة ─────────────────────────────────────────────────────────
-
-    /**
-     * إرسال رسالة للنموذج المُجيب.
-     * 
-     * @param userMessage السؤال الفعلي (قد يكون أصلياً أو محسّناً — لا يهم هنا)
-     * @param memoryContext سياق منقّى من الذاكرة (من curate)، يُحقَن في SystemPrompt
-     * @param hasMemorySource هل memoryContext يحوي ذاكرة فعلية (true) أم لا (false)
-     */
     suspend fun sendMessage(
         history:         List<Message>,
         userMessage:     String,
         imageBase64:     String?  = null,
         memoryContext:   String   = "",
-        hasMemorySource: Boolean  = false
+        hasMemorySource: Boolean  = false,
+        agentPrompt:     String   = ""     // ✅ جديد
     ): String = withContext(Dispatchers.IO) {
 
         val providerId = settings.provider.lowercase().trim()
@@ -102,7 +83,7 @@ class ChatRepository(context: Context) {
             history      = history,
             userMessage  = userMessage,
             imageBase64  = imageBase64,
-            systemPrompt = buildSystemPrompt(memoryContext, hasMemorySource)
+            systemPrompt = buildSystemPrompt(memoryContext, hasMemorySource, agentPrompt)
         )
 
         provider.send(request)
