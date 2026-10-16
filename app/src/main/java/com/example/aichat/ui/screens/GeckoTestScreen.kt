@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
@@ -24,9 +25,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.aichat.AichatApp
+import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.AgentProfile
 import com.example.aichat.data.model.WebPlatform
-import com.example.aichat.providers.AiSettings
 import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.AgentRepository
 import com.example.aichat.repository.WebPlatformRepository
@@ -41,13 +42,12 @@ import java.util.UUID
 /**
  * Gecko web chat screen (ChatGPT/Venice/Arena).
  *
- * متوافق مع AichatApp الحالي:
+ * ✅ متوافق مع AichatApp الحالي:
  * - الإرسال للويب عبر: app.setContextPending(text, targetDomain, ..., sendWithEnter)
- * - لا يوجد "mode" في الرسالة، لذلك نعتمد قواعد:
- *   - Arena: نمنع الإرسال التلقائي (sendWithEnter=false + لا sendSelector).
- *   - ChatGPT/Venice: نسمح بالإرسال التلقائي.
- * - Web Agent مستقل (من AiSettings.webAgentId) يتم دمجه داخل block مخفي لـ ChatGPT/Venice
- *   (ثم content.js يقوم بإخفائه/إزالته بعد الإرسال عبر sanitizer).
+ * - Arena: نمنع الإرسال التلقائي (sendWithEnter=false) لتفادي مشاكل الأمان/الـ captcha.
+ * - Web Agent مستقل (AiSettings.webAgentId) يُدمج ضمن السياق للويب.
+ *
+ * ملاحظة: WebPlatform.id عندك TEXT (String) لذلك كل التعامل هنا String وليس Long.
  */
 @Composable
 fun GeckoTestScreen(
@@ -55,36 +55,43 @@ fun GeckoTestScreen(
     aiSettings: AiSettings,
     agentRepository: AgentRepository,
     modifier: Modifier = Modifier,
+    initialPlatformId: String? = null, // اختياري (لو أردت فتح منصة معينة من الـ Navigation)
 ) {
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as AichatApp }
     val scope = rememberCoroutineScope()
 
-    // Ensure runtime exists (and extension loads) using app API.
+    // Ensure runtime exists (and extension loads)
     val runtime = remember(app) { app.getOrCreateGeckoRuntime() }
     if (runtime == null) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("GeckoRuntime غير جاهز.")
         }
         return
     }
 
-    // ------- Platforms (repo compat) -------
+    // ------- Platforms -------
     val platformsFlow = remember(webPlatformRepository) { platformsFlowCompat(webPlatformRepository) }
     val platforms by platformsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    var selectedPlatformId by rememberSaveable { mutableStateOf<Long?>(null) }
-    val selectedPlatform: WebPlatform? = remember(platforms, selectedPlatformId) {
-        val chosen = selectedPlatformId?.let { id -> platforms.firstOrNull { it.id == id } }
-        chosen ?: platforms.firstOrNull()
+    var selectedPlatformId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // pick initial platform
+    LaunchedEffect(platforms, initialPlatformId) {
+        if (platforms.isEmpty()) return@LaunchedEffect
+
+        val want = initialPlatformId?.takeIf { it.isNotBlank() }
+        val exists = want?.let { id -> platforms.any { it.id == id } } == true
+
+        selectedPlatformId = when {
+            selectedPlatformId != null && platforms.any { it.id == selectedPlatformId } -> selectedPlatformId
+            exists -> want
+            else -> platforms.first().id
+        }
     }
 
-    LaunchedEffect(platforms) {
-        if (selectedPlatformId == null) {
-            selectedPlatformId = platforms.firstOrNull()?.id
-        } else if (selectedPlatformId != null && platforms.none { it.id == selectedPlatformId }) {
-            selectedPlatformId = platforms.firstOrNull()?.id
-        }
+    val selectedPlatform: WebPlatform? = remember(platforms, selectedPlatformId) {
+        selectedPlatformId?.let { id -> platforms.firstOrNull { it.id == id } } ?: platforms.firstOrNull()
     }
 
     // ------- Gecko session management -------
@@ -107,14 +114,14 @@ fun GeckoTestScreen(
 
                 override fun onPageStop(session: GeckoSession, success: Boolean) {
                     isLoading = false
+                    // currentUrl usually already set by onPageStart
                 }
             }
 
+            // IMPORTANT:
+            // بعض إصدارات GeckoView تغيّر توقيع onLocationChange،
+            // لذلك نتجنب override له لتفادي "overrides nothing" ونكتفي بـ canGoBack/Forward.
             navigationDelegate = object : GeckoSession.NavigationDelegate {
-                override fun onLocationChange(session: GeckoSession, url: String?) {
-                    currentUrl = url
-                }
-
                 override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
                     canGoBack = canGoBack_
                 }
@@ -137,7 +144,7 @@ fun GeckoTestScreen(
     }
 
     // ------- Web Agent (independent) -------
-    // نقرأه بـ compat حتى لا نعتمد 100% على شكل AiSettings الحالي أثناء الدمج.
+    // نقرأه بـ compat حتى لو AiSettings لسه ما تم تحديثه بالكامل في كل البيئات.
     val webAgentId: String? by produceState<String?>(initialValue = null, aiSettings) {
         value = readWebAgentIdCompat(aiSettings)
     }
@@ -157,14 +164,14 @@ fun GeckoTestScreen(
     var extraContext by rememberSaveable { mutableStateOf("") }
     var userText by rememberSaveable { mutableStateOf("") }
 
-    // Manual capture result dialog
+    // Manual capture dialog
     var captureDialogOpen by rememberSaveable { mutableStateOf(false) }
     var captureText by rememberSaveable { mutableStateOf("") }
     var captureSuccess by rememberSaveable { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Hook callbacks (and restore on dispose)
+    // Hook callbacks (restore on dispose)
     DisposableEffect(app) {
         val oldManual = app.onManualCaptureResult
         val oldWritten = app.onContextWritten
@@ -195,10 +202,7 @@ fun GeckoTestScreen(
         return (fromPlatform ?: fromCurrent ?: "").lowercase(Locale.ROOT)
     }
 
-    fun kind(): WebKind {
-        val h = stableDomain()
-        return classifyHost(h)
-    }
+    fun kind(): WebKind = classifyHost(stableDomain())
 
     fun buildFinalText(): String {
         val text = userText.trim()
@@ -217,10 +221,7 @@ fun GeckoTestScreen(
         }
 
         val finalText = buildFinalText()
-        val k = kind()
-
-        // Arena: ممنوع إرسال تلقائي لتفادي مشاكل الأمان/الاختبارات.
-        val sendWithEnter = k != WebKind.ARENA
+        val sendWithEnter = kind() != WebKind.ARENA // Arena: inject only
 
         app.setContextPending(
             text = finalText,
@@ -270,7 +271,7 @@ fun GeckoTestScreen(
                         isLoading = false
                         canGoBack = false
                         canGoForward = false
-                        sessionKey = UUID.randomUUID().toString()
+                        sessionKey = UUID.randomUUID().toString() // ✅ لا تعيد استخدام session قديم
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -340,7 +341,7 @@ fun GeckoTestScreen(
                 supportingText = {
                     when (kind()) {
                         WebKind.ARENA -> Text("Arena: سيتم الحقن بدون إرسال تلقائي، والسياق سيكون مرئيًا (بدون sanitizer).")
-                        WebKind.CHATGPT, WebKind.VENICE -> Text("ChatGPT/Venice: سيتم حقن السياق بعلامات مخفية ليقوم content.js بإخفائه بعد الإرسال.")
+                        WebKind.CHATGPT, WebKind.VENICE -> Text("ChatGPT/Venice: سيتم حقن السياق بعلامات ليقوم content.js بإخفائه بعد الإرسال.")
                         WebKind.OTHER -> Text("قد تختلف سلوكيات الحقن حسب المنصة.")
                     }
                 }
@@ -361,9 +362,7 @@ fun GeckoTestScreen(
                     maxLines = 6,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(
-                        onSend = {
-                            if (!isLoading) sendToWeb()
-                        }
+                        onSend = { if (!isLoading) sendToWeb() }
                     )
                 )
 
@@ -393,11 +392,7 @@ fun GeckoTestScreen(
                 TextButton(onClick = { captureDialogOpen = false }) { Text("إغلاق") }
             },
             title = { Text(if (captureSuccess) "Manual Capture ✅" else "Manual Capture ❌") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(captureText.ifBlank { "(فارغ)" })
-                }
-            }
+            text = { Text(captureText.ifBlank { "(فارغ)" }) }
         )
     }
 }
@@ -426,6 +421,7 @@ private fun PlatformDropdown(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.menuAnchor()
         )
+
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
@@ -524,29 +520,27 @@ private fun hostFromUrl(url: String): String? =
 private fun platformsFlowCompat(repo: WebPlatformRepository): Flow<List<WebPlatform>> {
     // Preferred: property platformsFlow: Flow<List<WebPlatform>>
     runCatching {
-        val f = repo.javaClass.methods.firstOrNull { it.name == "getPlatformsFlow" && it.parameterTypes.isEmpty() }
-        if (f != null) return f.invoke(repo) as Flow<List<WebPlatform>>
+        val m = repo.javaClass.methods.firstOrNull {
+            it.name == "getPlatformsFlow" && it.parameterTypes.isEmpty()
+        }
+        if (m != null) return m.invoke(repo) as Flow<List<WebPlatform>>
     }
 
     runCatching {
-        val prop = repo.javaClass.methods.firstOrNull { it.name == "getPlatformsFlow" && it.parameterTypes.isEmpty() }
-        if (prop != null) return prop.invoke(repo) as Flow<List<WebPlatform>>
-    }
-
-    runCatching {
-        val m = repo.javaClass.methods.firstOrNull { it.name == "platformsFlow" && it.parameterTypes.isEmpty() }
+        val m = repo.javaClass.methods.firstOrNull {
+            it.name == "platformsFlow" && it.parameterTypes.isEmpty()
+        }
         if (m != null) return m.invoke(repo) as Flow<List<WebPlatform>>
     }
 
     runCatching {
         val field = repo.javaClass.declaredFields.firstOrNull { it.name == "platformsFlow" }
         if (field != null) {
-            field.isAccessible = true
+            field.setAccessible(true)
             return field.get(repo) as Flow<List<WebPlatform>>
         }
     }
 
-    // Worst-case fallback
     return flowOf(emptyList())
 }
 
@@ -564,7 +558,7 @@ private fun readWebAgentIdCompat(aiSettings: AiSettings): String? {
     // Try field
     val v = runCatching {
         val f = aiSettings.javaClass.declaredFields.firstOrNull { it.name == "webAgentId" } ?: return@runCatching null
-        f.isAccessible = true
+        f.setAccessible(true)
         f.get(aiSettings) as? String
     }.getOrNull()
 
