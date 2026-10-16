@@ -1,3 +1,4 @@
+// app/src/main/java/com/example/aichat/ui/screens/ChatScreen.kt
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -7,16 +8,25 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,7 +41,7 @@ import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.ChatViewModel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,6 +65,7 @@ fun ChatScreen(
     val currentAgentId by viewModel.currentAgentId.collectAsState()
 
     val agents by agentsViewModel.agents.collectAsState()
+
     val currentAgentName = remember(currentAgentId, agents) {
         currentAgentId?.let { id -> agents.firstOrNull { it.id == id }?.name }
     }
@@ -68,6 +79,7 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
@@ -104,7 +116,9 @@ fun ChatScreen(
 
     LaunchedEffect(messages.size, isLoading) {
         val total = messages.size + if (isLoading) 1 else 0
-        if (total > 0) listState.animateScrollToItem(total - 1)
+        if (total > 0) {
+            runCatching { listState.animateScrollToItem(total - 1) }
+        }
     }
 
     Scaffold(
@@ -114,13 +128,13 @@ fun ChatScreen(
                     Column {
                         Text("المحادثة", fontWeight = FontWeight.SemiBold)
                         Text(
-                            settings.getActiveModel().take(35),
+                            settings.getActiveModel().take(40),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         currentAgentName?.let {
                             Text(
-                                "🤖 $it",
+                                "Agent: $it",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -135,7 +149,9 @@ fun ChatScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع") }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع")
+                    }
                 },
                 actions = {
                     IconButton(onClick = { showAgentDialog = true }) {
@@ -145,46 +161,59 @@ fun ChatScreen(
                     IconButton(onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }) {
                         Icon(
                             Icons.Filled.Memory,
-                            contentDescription = null,
+                            contentDescription = "Memory access",
                             tint = if (memoryAccessEnabled) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f)
                         )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                }
             )
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
 
-            if (messages.isEmpty()) {
-                EmptyChatView(Modifier.weight(1f))
+            // Messages
+            if (messages.isEmpty() && !isLoading) {
+                EmptyChatView(modifier = Modifier.weight(1f))
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
                     contentPadding = PaddingValues(12.dp, 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(messages, key = { it.id }) { msg ->
                         MessageBubble(
                             message = msg,
-                            onCopy = ::copyToClipboard,
-                            onSaveMemory = { memoryMessage = it }
+                            onCopy = { copyToClipboard(msg.content) },
+                            onSaveMemory = { memoryMessage = msg }
                         )
                     }
-                    if (isLoading) item("thinking") { ThinkingBubble() }
+                    if (isLoading) {
+                        item("thinking") { ThinkingBubble() }
+                    }
                 }
             }
 
-            error?.let {
+            // Error
+            error?.let { err ->
                 ErrorMessage(
-                    error = it,
+                    error = err,
                     onDismiss = viewModel::clearError,
-                    onCopy = { copyToClipboard(it) }
+                    onCopy = { copyToClipboard(err) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
 
+            // Input
             InputBar(
                 isLoading = isLoading,
                 hasSelectedImage = selectedImage != null,
@@ -195,7 +224,7 @@ fun ChatScreen(
                 hasIdentity = hasIdentity,
                 onUserInputChange = { userInput = it },
                 onOpenGallery = { galleryLauncher.launch("image/*") },
-                onOpenCamera = ::openCamera,
+                onOpenCamera = { openCamera() },
                 onOpenFile = { fileLauncher.launch("*/*") },
                 onOpenWebImport = { showWebImportDialog = true },
                 onRemoveImage = viewModel::clearSelectedImage,
@@ -203,11 +232,13 @@ fun ChatScreen(
                 onEnhance = { viewModel.enhanceUserQuery(userInput) },
                 onClearEnhanced = viewModel::clearEnhancedQuery,
                 onUpdateEnhancedQuery = viewModel::updateEnhancedQuery,
-                onRefineStyle = { viewModel.refineQueryStyle(userInput, it) }
+                onRefineStyle = { style -> viewModel.refineQueryStyle(userInput, style) },
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
 
+    // Agent picker (per conversation)
     if (showAgentDialog) {
         AgentPickerDialog(
             title = "Agent لهذه المحادثة",
@@ -219,36 +250,373 @@ fun ChatScreen(
                 showAgentDialog = false
             },
             extraTopContent = {
-                TextButton(onClick = {
-                    showAgentDialog = false
-                    onOpenAgents()
-                }) { Text("إدارة/استيراد Agents") }
+                TextButton(
+                    onClick = {
+                        showAgentDialog = false
+                        onOpenAgents()
+                    }
+                ) { Text("إدارة/استيراد Agents") }
             }
         )
     }
 
+    // Save to memory dialog
     memoryMessage?.let { msg ->
         SaveMemoryDialog(
             message = msg,
             conversationId = conversationId,
             onDismiss = { memoryMessage = null },
             onSave = { category, isShared ->
+                // signature must match your ChatViewModel.addMemory(...)
                 viewModel.addMemory(msg.content, category, isShared, msg.id)
                 memoryMessage = null
             }
         )
     }
 
+    // Web page import dialog
     if (showWebImportDialog) {
         WebPageImportDialog(
             onDismiss = { showWebImportDialog = false },
-            onConfirm = {
-                viewModel.saveWebPage(it)
+            onConfirm = { url ->
+                viewModel.saveWebPage(url)
                 showWebImportDialog = false
             }
         )
     }
 }
 
-/* باقي الدوال المساعدة (WebPageImportDialog/EmptyChatView/SaveMemoryDialog/…)
-   انسخها من ملفك الحالي كما هي بدون تغيير */
+/* ----------------------------- UI components ----------------------------- */
+
+@Composable
+private fun EmptyChatView(modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("ابدأ محادثة جديدة", fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "اكتب سؤالك بالأسفل.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThinkingBubble() {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            Text("يفكّر…", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MessageBubble(
+    message: Message,
+    onCopy: () -> Unit,
+    onSaveMemory: () -> Unit,
+) {
+    // We avoid referencing unknown fields (role/isUser) مباشرة.
+    // If you have role/isUser, we try to read via reflection safely.
+    val isUser = remember(message) { guessIsUser(message) }
+
+    val bg = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    val align = if (isUser) Alignment.End else Alignment.Start
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = align
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = bg,
+            tonalElevation = 1.dp,
+            modifier = Modifier
+                .widthIn(max = 520.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { onCopy() }
+                )
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(message.content, color = fg)
+
+                Spacer(Modifier.height(10.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AssistChip(
+                        onClick = onCopy,
+                        label = { Text("نسخ") },
+                        leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
+                    )
+                    AssistChip(
+                        onClick = onSaveMemory,
+                        label = { Text("حفظ كذاكرة") },
+                        leadingIcon = { Icon(Icons.Filled.Memory, contentDescription = null) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorMessage(
+    error: String,
+    onDismiss: () -> Unit,
+    onCopy: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.errorContainer
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+            Column(modifier = Modifier.weight(1f)) {
+                Text("خطأ", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+            IconButton(onClick = onCopy) {
+                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onErrorContainer)
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+    }
+}
+
+@Composable
+private fun InputBar(
+    isLoading: Boolean,
+    hasSelectedImage: Boolean,
+    userInput: String,
+    displayedText: String,
+    isEnhanced: Boolean,
+    isEnhancing: Boolean,
+    hasIdentity: Boolean,
+    onUserInputChange: (String) -> Unit,
+    onOpenGallery: () -> Unit,
+    onOpenCamera: () -> Unit,
+    onOpenFile: () -> Unit,
+    onOpenWebImport: () -> Unit,
+    onRemoveImage: () -> Unit,
+    onSend: () -> Unit,
+    onEnhance: () -> Unit,
+    onClearEnhanced: () -> Unit,
+    onUpdateEnhancedQuery: (String) -> Unit,
+    onRefineStyle: (QueryStyle) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var styleMenu by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier.padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (hasSelectedImage) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                AssistChip(onClick = {}, label = { Text("📎 صورة مرفقة") })
+                TextButton(onClick = onRemoveImage) { Text("إزالة") }
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = displayedText,
+                onValueChange = {
+                    if (isEnhanced) onUpdateEnhancedQuery(it) else onUserInputChange(it)
+                },
+                modifier = Modifier.weight(1f),
+                minLines = 2,
+                maxLines = 6,
+                label = { Text(if (isEnhanced) "النص المُحسَّن" else "اكتب رسالتك") },
+                supportingText = {
+                    val bits = buildList {
+                        if (hasIdentity) add("Identity")
+                        if (isEnhanced) add("Enhanced")
+                    }
+                    if (bits.isNotEmpty()) Text(bits.joinToString(" • "))
+                }
+            )
+
+            IconButton(onClick = onSend, enabled = !isLoading && displayedText.isNotBlank()) {
+                Icon(Icons.Filled.Send, contentDescription = "Send")
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onOpenGallery, enabled = !isLoading) {
+                Icon(Icons.Filled.Image, contentDescription = "Gallery")
+            }
+            IconButton(onClick = onOpenCamera, enabled = !isLoading) {
+                Icon(Icons.Filled.CameraAlt, contentDescription = "Camera")
+            }
+            IconButton(onClick = onOpenFile, enabled = !isLoading) {
+                Icon(Icons.Filled.AttachFile, contentDescription = "File")
+            }
+            IconButton(onClick = onOpenWebImport, enabled = !isLoading) {
+                Icon(Icons.Filled.Language, contentDescription = "Web")
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // Refine style menu
+            Box {
+                IconButton(onClick = { styleMenu = true }, enabled = !isLoading) {
+                    Icon(Icons.Filled.Tune, contentDescription = "Refine style")
+                }
+                DropdownMenu(expanded = styleMenu, onDismissRequest = { styleMenu = false }) {
+                    enumValues<QueryStyle>().forEach { s ->
+                        DropdownMenuItem(
+                            text = { Text(s.name) },
+                            onClick = {
+                                styleMenu = false
+                                onRefineStyle(s)
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Enhance controls
+            if (isEnhanced) {
+                TextButton(onClick = onClearEnhanced, enabled = !isLoading) { Text("إلغاء التحسين") }
+            } else {
+                TextButton(onClick = onEnhance, enabled = !isLoading && !isEnhancing && userInput.isNotBlank()) {
+                    Text(if (isEnhancing) "جارٍ التحسين…" else "تحسين السؤال")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SaveMemoryDialog(
+    message: Message,
+    conversationId: Long?,
+    onDismiss: () -> Unit,
+    onSave: (category: String, isShared: Boolean) -> Unit
+) {
+    var category by remember { mutableStateOf("OTHER") }
+    var isShared by remember { mutableStateOf(true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("حفظ كذاكرة") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "المحادثة: ${conversationId ?: "-"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(message.content.take(500))
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Category") },
+                    singleLine = true
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = isShared, onCheckedChange = { isShared = it })
+                    Spacer(Modifier.width(8.dp))
+                    Text("Shared")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(category.trim().ifBlank { "OTHER" }, isShared) }) {
+                Text("حفظ")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+    )
+}
+
+@Composable
+private fun WebPageImportDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var url by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("استيراد صفحة ويب") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "أدخل رابط الصفحة لحفظها/تلخيصها ضمن الذاكرة.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("URL") },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(url.trim()) },
+                enabled = url.isNotBlank()
+            ) { Text("متابعة") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+    )
+}
+
+/* ----------------------------- Reflection helpers ----------------------------- */
+
+private fun guessIsUser(message: Message): Boolean {
+    // tries fields: isUser(Boolean) or role(String)
+    runCatching {
+        val f = message.javaClass.declaredFields.firstOrNull { it.name == "isUser" } ?: return@runCatching
+        f.isAccessible = true
+        val v = f.get(message) as? Boolean ?: return@runCatching
+        return v
+    }
+
+    runCatching {
+        val f = message.javaClass.declaredFields.firstOrNull { it.name == "role" } ?: return@runCatching
+        f.isAccessible = true
+        val role = (f.get(message) as? String)?.lowercase(Locale.ROOT) ?: return@runCatching
+        return role == "user"
+    }
+
+    // fallback: treat as assistant
+    return false
+}
