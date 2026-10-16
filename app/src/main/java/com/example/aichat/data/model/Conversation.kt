@@ -10,5 +10,6 @@ data class Conversation(
     val title: String,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-    val memoryAccessEnabled: Boolean = true   // ✅ جديد — تحكم لكل محادثة على حدة
+    val memoryAccessEnabled: Boolean = true,
+    val agentId: String? = null // ✅ جديد: Agent لكل محادثة (API)
 )
