@@ -8,59 +8,23 @@ import kotlinx.coroutines.flow.Flow
 class ConversationRepository(
     private val chatDao: ChatDao
 ) {
+    fun getAllConversations(): Flow<List<Conversation>> = chatDao.getAllConversations()
+    suspend fun insertConversation(conversation: Conversation): Long = chatDao.insertConversation(conversation)
+    suspend fun updateConversation(conversation: Conversation) = chatDao.updateConversation(conversation)
+    suspend fun deleteConversation(conversation: Conversation) = chatDao.deleteConversation(conversation)
 
-    // ============================================================
-    // Conversations
-    // ============================================================
-
-    fun getAllConversations(): Flow<List<Conversation>> {
-        return chatDao.getAllConversations()
-    }
-
-    suspend fun insertConversation(conversation: Conversation): Long {
-        return chatDao.insertConversation(conversation)
-    }
-
-    suspend fun updateConversation(conversation: Conversation) {
-        chatDao.updateConversation(conversation)
-    }
-
-    suspend fun deleteConversation(conversation: Conversation) {
-        chatDao.deleteConversation(conversation)
-    }
-
-    // ✅ جديد
-    suspend fun getConversationById(id: Long): Conversation? {
-        return chatDao.getConversationById(id)
-    }
-
-    // ✅ جديد
-    suspend fun updateTitleAndTimestamp(id: Long, title: String, updatedAt: Long) {
+    suspend fun getConversationById(id: Long): Conversation? = chatDao.getConversationById(id)
+    suspend fun updateTitleAndTimestamp(id: Long, title: String, updatedAt: Long) =
         chatDao.updateTitleAndTimestamp(id, title, updatedAt)
-    }
+
+    suspend fun updateMemoryAccess(id: Long, enabled: Boolean) = chatDao.updateMemoryAccess(id, enabled)
 
     // ✅ جديد
-    suspend fun updateMemoryAccess(id: Long, enabled: Boolean) {
-        chatDao.updateMemoryAccess(id, enabled)
-    }
+    suspend fun updateAgentId(id: Long, agentId: String?) =
+        chatDao.updateAgentId(id = id, agentId = agentId, updatedAt = System.currentTimeMillis())
 
-    // ============================================================
-    // Messages
-    // ============================================================
-
-    fun getMessages(conversationId: Long): Flow<List<Message>> {
-        return chatDao.getMessages(conversationId)
-    }
-
-    suspend fun getMessagesOnce(conversationId: Long): List<Message> {
-        return chatDao.getMessagesOnce(conversationId)
-    }
-
-    suspend fun insertMessage(message: Message): Long {
-        return chatDao.insertMessage(message)
-    }
-
-    suspend fun deleteMessages(conversationId: Long) {
-        chatDao.deleteMessages(conversationId)
-    }
+    fun getMessages(conversationId: Long): Flow<List<Message>> = chatDao.getMessages(conversationId)
+    suspend fun getMessagesOnce(conversationId: Long): List<Message> = chatDao.getMessagesOnce(conversationId)
+    suspend fun insertMessage(message: Message): Long = chatDao.insertMessage(message)
+    suspend fun deleteMessages(conversationId: Long) = chatDao.deleteMessages(conversationId)
 }
