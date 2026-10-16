@@ -3,150 +3,174 @@
 
 package com.example.aichat.ui.screens
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.layout.*
+import android.os.Handler
+import android.os.Looper
+import android.view.ViewGroup
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.aichat.AichatApp
+import com.example.aichat.GeckoSessionManager
 import com.example.aichat.data.local.AiSettings
+import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.AgentProfile
+import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.AgentRepository
+import com.example.aichat.repository.MemoryContextBuilder
+import com.example.aichat.repository.MemoryCuratorService
+import com.example.aichat.repository.MemoryWindowBuilder
 import com.example.aichat.repository.WebPlatformRepository
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
+import com.example.aichat.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.WebRequestError
 import java.util.Locale
-import java.util.UUID
 
 /**
- * Gecko web chat screen (ChatGPT/Venice/Arena).
+ * ✅ هذه النسخة تُرجّع تصميم/تجربة الشاشة القديمة (Tabs + GeckoView + شريط إرسال سفلي)
+ * مع إضافة واحدة فقط: Web Agent مستقل يُحقن ضمن السياق عند الإرسال.
  *
- * ✅ متوافق مع AichatApp الحالي:
- * - الإرسال للويب عبر: app.setContextPending(text, targetDomain, ..., sendWithEnter)
- * - Arena: نمنع الإرسال التلقائي (sendWithEnter=false) لتفادي مشاكل الأمان/الـ captcha.
- * - Web Agent مستقل (AiSettings.webAgentId) يُدمج ضمن السياق للويب.
+ * - ChatGPT/Venice: يتم حقن السياق بعلامات خاصة ليقوم content.js بإخفائها (DOM sanitizer).
+ * - Arena: يتم حقن النص فقط بدون إرسال تلقائي (sendWithEnter=false) والسياق يكون مرئيًا.
+ * - لا يوجد Debug log UI هنا (تم إزالته كما طلبت).
  *
- * ملاحظة: WebPlatform.id عندك TEXT (String) لذلك كل التعامل هنا String وليس Long.
+ * ملاحظة مهمة: هذه الشاشة Self-contained وتقرأ المنصات من WebPlatformRepository،
+ * بدل الاعتماد على بارامترات url/title القديمة.
  */
 @Composable
 fun GeckoTestScreen(
     webPlatformRepository: WebPlatformRepository,
     aiSettings: AiSettings,
     agentRepository: AgentRepository,
+    chatViewModel: ChatViewModel? = null,
+    initialPlatformId: String? = null,
+    onBack: () -> Unit = {},
+    onHome: () -> Unit = {},
     modifier: Modifier = Modifier,
-    initialPlatformId: String? = null, // اختياري (لو أردت فتح منصة معينة من الـ Navigation)
 ) {
     val context = LocalContext.current
-    val app = remember(context) { context.applicationContext as AichatApp }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val app = context.applicationContext as AichatApp
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val scope = rememberCoroutineScope()
 
-    // Ensure runtime exists (and extension loads)
-    val runtime = remember(app) { app.getOrCreateGeckoRuntime() }
-    if (runtime == null) {
+    // منصات الويب
+    val platformsAll by webPlatformRepository.platformsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val availablePlatforms = remember(platformsAll) { platformsAll.filter { it.isEnabled } }
+
+    // اختيار المنصة الحالية (String لأن web_platforms.id TEXT)
+    var activePlatformId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(availablePlatforms, initialPlatformId) {
+        if (availablePlatforms.isEmpty()) return@LaunchedEffect
+
+        val wanted = initialPlatformId?.takeIf { it.isNotBlank() }
+        activePlatformId = when {
+            activePlatformId != null && availablePlatforms.any { it.id == activePlatformId } -> activePlatformId
+            wanted != null && availablePlatforms.any { it.id == wanted } -> wanted
+            else -> availablePlatforms.first().id
+        }
+    }
+
+    val platform: WebPlatform? = remember(availablePlatforms, activePlatformId) {
+        activePlatformId?.let { id -> availablePlatforms.firstOrNull { it.id == id } }
+            ?: availablePlatforms.firstOrNull()
+    }
+
+    if (platform == null) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("GeckoRuntime غير جاهز.")
+            CircularProgressIndicator()
         }
         return
     }
 
-    // ------- Platforms -------
-    val platformsFlow = remember(webPlatformRepository) { platformsFlowCompat(webPlatformRepository) }
-    val platforms by platformsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val url = platform.url
+    val title = platform.name
 
-    var selectedPlatformId by rememberSaveable { mutableStateOf<String?>(null) }
-
-    // pick initial platform
-    LaunchedEffect(platforms, initialPlatformId) {
-        if (platforms.isEmpty()) return@LaunchedEffect
-
-        val want = initialPlatformId?.takeIf { it.isNotBlank() }
-        val exists = want?.let { id -> platforms.any { it.id == id } } == true
-
-        selectedPlatformId = when {
-            selectedPlatformId != null && platforms.any { it.id == selectedPlatformId } -> selectedPlatformId
-            exists -> want
-            else -> platforms.first().id
-        }
+    // Gecko runtime
+    val runtime = remember { app.getOrCreateGeckoRuntime() }
+    if (runtime == null) {
+        GeckoUnavailableDialog(
+            platformTitle = title,
+            platformUrl = url,
+            onOpenBrowser = {
+                openExternal(context, url)
+                onBack()
+            },
+            onBack = onBack
+        )
+        return
     }
 
-    val selectedPlatform: WebPlatform? = remember(platforms, selectedPlatformId) {
-        selectedPlatformId?.let { id -> platforms.firstOrNull { it.id == id } } ?: platforms.firstOrNull()
-    }
-
-    // ------- Gecko session management -------
-    var sessionKey by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
-
-    var currentUrl by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(false) }
-    var canGoBack by remember { mutableStateOf(false) }
-    var canGoForward by remember { mutableStateOf(false) }
-
-    val geckoSession = remember(sessionKey) {
-        GeckoSession().apply {
-            open(runtime)
-
-            progressDelegate = object : GeckoSession.ProgressDelegate {
-                override fun onPageStart(session: GeckoSession, url: String) {
-                    isLoading = true
-                    currentUrl = url
-                }
-
-                override fun onPageStop(session: GeckoSession, success: Boolean) {
-                    isLoading = false
-                    // currentUrl usually already set by onPageStart
-                }
-            }
-
-            // IMPORTANT:
-            // بعض إصدارات GeckoView تغيّر توقيع onLocationChange،
-            // لذلك نتجنب override له لتفادي "overrides nothing" ونكتفي بـ canGoBack/Forward.
-            navigationDelegate = object : GeckoSession.NavigationDelegate {
-                override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
-                    canGoBack = canGoBack_
-                }
-
-                override fun onCanGoForward(session: GeckoSession, canGoForward_: Boolean) {
-                    canGoForward = canGoForward_
-                }
-            }
-        }
-    }
-
-    DisposableEffect(geckoSession) {
-        onDispose { runCatching { geckoSession.close() } }
-    }
-
-    // Load URL when platform OR session changes.
-    LaunchedEffect(sessionKey, selectedPlatform?.url) {
-        val url = selectedPlatform?.url?.trim().orEmpty()
-        if (url.isNotEmpty()) geckoSession.loadUri(url)
-    }
-
-    // ------- Web Agent (independent) -------
-    // نقرأه بـ compat حتى لو AiSettings لسه ما تم تحديثه بالكامل في كل البيئات.
-    val webAgentId: String? by produceState<String?>(initialValue = null, aiSettings) {
-        value = readWebAgentIdCompat(aiSettings)
+    // ============ Web Agent (independent) ============
+    val webAgentId: String? by remember(aiSettings) {
+        mutableStateOf(readWebAgentIdCompat(aiSettings))
     }
 
     var webAgent by remember { mutableStateOf<AgentProfile?>(null) }
@@ -155,351 +179,640 @@ fun GeckoTestScreen(
             runCatching { agentRepository.getById(id) }.getOrNull()
         }
     }
+    val webAgentPrompt = remember(webAgent) { webAgent?.let { AgentPromptBuilder.build(it) }.orEmpty() }
 
-    val webAgentPrompt = remember(webAgent) {
-        webAgent?.let { AgentPromptBuilder.build(it) }.orEmpty()
+    // ========= session / UI state (نفس التصميم القديم) =========
+
+    val sessionKey = platform.id
+    val session = remember(sessionKey) { GeckoSessionManager.getOrCreate(sessionKey) }
+
+    var isLoading by remember(sessionKey) { mutableStateOf(!session.isOpen) }
+    var progress by remember(sessionKey) { mutableIntStateOf(0) }
+    var canGoBack by remember(sessionKey) { mutableStateOf(false) }
+    var currentUrl by remember(sessionKey) { mutableStateOf(url) }
+    var currentTitle by remember(sessionKey) { mutableStateOf(title) }
+    var loadError by remember(sessionKey) { mutableStateOf<String?>(null) }
+
+    // capture
+    var isSavingMemory by remember(sessionKey) { mutableStateOf(false) }
+    var timeoutRunnable by remember(sessionKey) { mutableStateOf<Runnable?>(null) }
+
+    // toggle memory injection
+    var memoryInjectionEnabled by remember(sessionKey) { mutableStateOf(true) }
+
+    // send bar state
+    var query by remember(sessionKey) { mutableStateOf("") }
+    var enhancedQuery by remember(sessionKey) { mutableStateOf<String?>(null) }
+    var isEnhancing by remember(sessionKey) { mutableStateOf(false) }
+    var includeMemory by remember(sessionKey) { mutableStateOf(false) }
+    var isSending by remember(sessionKey) { mutableStateOf(false) }
+
+    var searchResults by remember(sessionKey) { mutableStateOf(emptyList<MemoryItem>()) }
+    var selectedIds by remember(sessionKey) { mutableStateOf(emptyList<Long>()) }
+    var curatorReasoning by remember(sessionKey) { mutableStateOf("") }
+
+    // ✅ مهم: نتأكد أن selectedIds الحالية تخص نفس النص
+    var curatedForText by remember(sessionKey) { mutableStateOf("") }
+
+    val displayedText = enhancedQuery ?: query
+
+    val memoryCuratorService = remember {
+        MemoryCuratorService(settings = aiSettings, fallbackBuilder = MemoryContextBuilder())
+    }
+    val memoryWindowBuilder = remember { MemoryWindowBuilder() }
+
+    fun hostOrEmptyFrom(urlStr: String): String =
+        runCatching { Uri.parse(urlStr).host.orEmpty() }.getOrDefault("")
+
+    fun targetDomainStable(): String {
+        // ثابت: نعتمد على رابط المنصة
+        return if (platform.url.isNotBlank()) hostOrEmptyFrom(platform.url) else hostOrEmptyFrom(currentUrl)
     }
 
-    // ------- UI state -------
-    var extraContext by rememberSaveable { mutableStateOf("") }
-    var userText by rememberSaveable { mutableStateOf("") }
+    fun webKind(): WebKind = classifyHost(targetDomainStable())
 
-    // Manual capture dialog
-    var captureDialogOpen by rememberSaveable { mutableStateOf(false) }
-    var captureText by rememberSaveable { mutableStateOf("") }
-    var captureSuccess by rememberSaveable { mutableStateOf(false) }
+    // ============================================================
+    // Gecko delegates
+    // ============================================================
 
-    val snackbarHostState = remember { SnackbarHostState() }
+    DisposableEffect(session, sessionKey) {
+        session.progressDelegate =
+            object : GeckoSession.ProgressDelegate {
+                override fun onPageStart(session: GeckoSession, url: String) {
+                    isLoading = true
+                    progress = 0
+                    loadError = null
+                    currentUrl = url
+                }
 
-    // Hook callbacks (restore on dispose)
-    DisposableEffect(app) {
-        val oldManual = app.onManualCaptureResult
-        val oldWritten = app.onContextWritten
+                override fun onProgressChange(session: GeckoSession, progress_: Int) {
+                    progress = progress_
+                }
 
-        app.onManualCaptureResult = { success, text, _ ->
-            captureSuccess = success
-            captureText = text
-            captureDialogOpen = true
+                override fun onPageStop(session: GeckoSession, success: Boolean) {
+                    isLoading = false
+                }
+            }
+
+        session.contentDelegate =
+            object : GeckoSession.ContentDelegate {
+                override fun onTitleChange(session: GeckoSession, title: String?) {
+                    if (!title.isNullOrBlank()) currentTitle = title.take(60)
+                }
+            }
+
+        session.navigationDelegate =
+            object : GeckoSession.NavigationDelegate {
+                override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
+                    canGoBack = canGoBack_
+                }
+
+                override fun onLoadRequest(
+                    session: GeckoSession,
+                    request: GeckoSession.NavigationDelegate.LoadRequest
+                ): GeckoResult<AllowOrDeny>? {
+                    val uri = Uri.parse(request.uri)
+                    val scheme = uri.scheme?.lowercase()
+
+                    // منع روابط capture marker
+                    if (scheme == "https" || scheme == "http") {
+                        if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
+                            return GeckoResult.deny()
+                        }
+                    }
+
+                    return if (scheme in listOf("http", "https", "about", "blob", "data")) {
+                        GeckoResult.allow()
+                    } else {
+                        openExternal(context, request.uri)
+                        GeckoResult.deny()
+                    }
+                }
+
+                override fun onLoadError(
+                    session: GeckoSession,
+                    uri: String?,
+                    error: WebRequestError
+                ): GeckoResult<String>? {
+                    isLoading = false
+                    loadError =
+                        when (error.category) {
+                            WebRequestError.ERROR_CATEGORY_NETWORK -> "تعذر الاتصال بالإنترنت"
+                            WebRequestError.ERROR_CATEGORY_URI -> "الرابط غير صالح"
+                            WebRequestError.ERROR_CATEGORY_SECURITY -> "مشكلة في شهادة الأمان"
+                            else -> "حدث خطأ أثناء تحميل الصفحة"
+                        }
+                    return null
+                }
+            }
+
+        onDispose {
+            runCatching { session.setActive(false) }
+            runCatching { session.progressDelegate = null }
+            runCatching { session.contentDelegate = null }
+            runCatching { session.navigationDelegate = null }
         }
+    }
 
-        app.onContextWritten = { success, stage, detail ->
-            scope.launch {
-                snackbarHostState.showSnackbar(
-                    if (success) "✅ $stage" else "❌ $stage ($detail)"
-                )
+    // ============================================================
+    // Extension callbacks
+    // ============================================================
+
+    DisposableEffect(platform.id) {
+        val p = platform
+        val vm = chatViewModel
+
+        app.onContextWritten = { _, _, _ -> isSending = false }
+
+        if (vm != null && p.memoryEnabled) {
+            app.onAiResponseCaptured = { _, text ->
+                vm.onWebAiResponse(p.id, p.name, text)
+            }
+            app.onManualCaptureResult = { success, text, debug ->
+                timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+                timeoutRunnable = null
+                isSavingMemory = false
+
+                if (success && text.isNotBlank()) {
+                    vm.onWebAiResponse(p.id, p.name, text, forceSaveToMemory = true)
+                    Toast.makeText(context, "✅ تم الحفظ\n${text.take(50)}", Toast.LENGTH_LONG).show()
+                } else {
+                    val info =
+                        debug?.let {
+                            "assistant=${it.optInt("assistant")} bodyLen=${it.optInt("bodyLen")}"
+                        } ?: "no response"
+                    Toast.makeText(context, "⚠️ فشل الاستخراج\n$info", Toast.LENGTH_LONG).show()
+                }
             }
         }
 
         onDispose {
-            app.onManualCaptureResult = oldManual
-            app.onContextWritten = oldWritten
+            timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+            timeoutRunnable = null
+            app.onAiResponseCaptured = null
+            app.onManualCaptureResult = null
+            app.onContextWritten = null
         }
     }
 
-    fun stableDomain(): String {
-        val fromPlatform = selectedPlatform?.url?.let(::hostFromUrl)
-        val fromCurrent = currentUrl?.let(::hostFromUrl)
-        return (fromPlatform ?: fromCurrent ?: "").lowercase(Locale.ROOT)
-    }
+    // ============================================================
+    // Memory search + curator selection (للـ UI فقط)
+    // ============================================================
 
-    fun kind(): WebKind = classifyHost(stableDomain())
+    LaunchedEffect(includeMemory, displayedText, memoryInjectionEnabled, platform.id) {
+        val memoryAllowed = memoryInjectionEnabled && platform.memoryEnabled && chatViewModel != null
 
-    fun buildFinalText(): String {
-        val text = userText.trim()
-        val ctx = buildContextBlock(kind(), webAgentPrompt, extraContext)
-        return if (ctx.isBlank()) text else "$ctx\n\n$text"
-    }
-
-    fun sendToWeb() {
-        val domain = stableDomain()
-        val text = userText.trim()
-        if (text.isBlank()) return
-
-        if (domain.isBlank()) {
-            scope.launch { snackbarHostState.showSnackbar("تعذر تحديد الدومين الحالي.") }
-            return
+        if (!memoryAllowed) {
+            includeMemory = false
+            searchResults = emptyList()
+            selectedIds = emptyList()
+            curatorReasoning = ""
+            curatedForText = ""
+            return@LaunchedEffect
         }
 
-        val finalText = buildFinalText()
-        val sendWithEnter = kind() != WebKind.ARENA // Arena: inject only
+        val q = displayedText.trim()
+        if (!includeMemory || q.length <= 2) {
+            searchResults = emptyList()
+            selectedIds = emptyList()
+            curatorReasoning = ""
+            curatedForText = ""
+            return@LaunchedEffect
+        }
 
-        app.setContextPending(
-            text = finalText,
-            targetDomain = domain,
-            inputSelector = "",
-            sendSelector = "",
-            sendWithEnter = sendWithEnter
-        )
+        delay(350)
+
+        try {
+            val candidates = chatViewModel!!.searchSharedMemories(q)
+            searchResults = candidates
+
+            if (candidates.isEmpty()) {
+                selectedIds = emptyList()
+                curatorReasoning = ""
+                curatedForText = q
+            } else {
+                val curatorResult = memoryCuratorService.curateSelection(q, candidates)
+                selectedIds = curatorResult.selectedIds
+                curatorReasoning = curatorResult.reasoning
+                curatedForText = q
+            }
+        } catch (_: Exception) {
+            searchResults = emptyList()
+            selectedIds = emptyList()
+            curatorReasoning = ""
+            curatedForText = ""
+        }
     }
 
-    // ------- Screen -------
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = {
-                    val label = when (kind()) {
-                        WebKind.CHATGPT -> "ChatGPT"
-                        WebKind.VENICE -> "Venice"
-                        WebKind.ARENA -> "Arena"
-                        WebKind.OTHER -> "Web"
-                    }
-                    Text("Gecko • $label")
-                }
-            )
+    // ============================================================
+    // Capture action
+    // ============================================================
+
+    val saveToMemory: () -> Unit = save@{
+        if (isSavingMemory || isLoading) return@save
+        if (!platform.memoryEnabled || chatViewModel == null) return@save
+
+        timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        isSavingMemory = true
+
+        Toast.makeText(context, "🧠 جاري البحث في الصفحة...", Toast.LENGTH_SHORT).show()
+        app.triggerCapture()
+
+        val r = Runnable {
+            if (isSavingMemory) {
+                isSavingMemory = false
+                Toast.makeText(context, "❌ انتهت المهلة", Toast.LENGTH_LONG).show()
+            }
         }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-        ) {
-            // Platform row + nav
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PlatformDropdown(
-                    platforms = platforms,
-                    selected = selectedPlatform,
-                    onSelect = { p ->
-                        selectedPlatformId = p.id
-                        currentUrl = null
-                        isLoading = false
-                        canGoBack = false
-                        canGoForward = false
-                        sessionKey = UUID.randomUUID().toString() // ✅ لا تعيد استخدام session قديم
-                    },
-                    modifier = Modifier.weight(1f)
-                )
+        timeoutRunnable = r
+        mainHandler.postDelayed(r, 5000L)
+    }
 
-                IconButton(
-                    onClick = { if (canGoBack) geckoSession.goBack() },
-                    enabled = canGoBack
-                ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+    // ============================================================
+    // Back handling
+    // ============================================================
 
-                IconButton(
-                    onClick = { if (canGoForward) geckoSession.goForward() },
-                    enabled = canGoForward
-                ) { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Forward") }
+    val handleBack: () -> Unit = {
+        if (canGoBack) runCatching { session.goBack() }.onFailure { onBack() } else onBack()
+    }
+    BackHandler { handleBack() }
 
-                IconButton(onClick = { geckoSession.reload() }) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Reload")
-                }
-
-                IconButton(
-                    onClick = { app.triggerCapture() },
-                    enabled = !isLoading
-                ) {
-                    Icon(Icons.Filled.Psychology, contentDescription = "Manual Capture")
+    DisposableEffect(lifecycleOwner, session) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_STOP -> runCatching { session.setActive(false) }
+                    Lifecycle.Event.ON_START -> runCatching { session.setActive(true) }
+                    else -> Unit
                 }
             }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
-            // GeckoView
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            ) {
-                key(sessionKey) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            GeckoView(ctx).apply { setSession(geckoSession) }
-                        },
-                        update = { view ->
-                            if (view.session !== geckoSession) view.setSession(geckoSession)
+    // ============================================================
+    // UI (نفس الهيكل القديم)
+    // ============================================================
+
+    Column(modifier = modifier.fillMaxSize()) {
+        TopAppBar(
+            title = {
+                Column {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (currentTitle != title && currentTitle.isNotBlank()) {
+                        Text(
+                            text = currentTitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            },
+            navigationIcon = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IconButton(onClick = handleBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
+                    }
+                    IconButton(onClick = onHome) {
+                        Icon(Icons.Filled.Home, contentDescription = "الرئيسية")
+                    }
+                }
+            },
+            actions = {
+                if (chatViewModel != null && platform.memoryEnabled) {
+                    IconButton(onClick = saveToMemory, enabled = !isSavingMemory && !isLoading) {
+                        Text(if (isSavingMemory) "⏳" else "🧠")
+                    }
+                    IconButton(onClick = { memoryInjectionEnabled = !memoryInjectionEnabled }) {
+                        Text(if (memoryInjectionEnabled) "📄✅" else "📄❌")
+                    }
+                }
+
+                IconButton(onClick = { if (session.isOpen) session.reload() }) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
+                }
+                IconButton(onClick = { openExternal(context, currentUrl) }) {
+                    Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح خارجي")
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+        )
+
+        // Tabs للمنصات (مثل السابق)
+        if (availablePlatforms.isNotEmpty()) {
+            val selectedIndex =
+                availablePlatforms.indexOfFirst { it.id == platform.id }.let { if (it >= 0) it else 0 }
+
+            ScrollableTabRow(selectedTabIndex = selectedIndex, edgePadding = 8.dp) {
+                availablePlatforms.forEach { tabPlatform ->
+                    val isSelected = tabPlatform.id == platform.id
+                    Tab(
+                        selected = isSelected,
+                        onClick = { if (!isSelected) activePlatformId = tabPlatform.id },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (tabPlatform.iconEmoji.isNotBlank()) Text(tabPlatform.iconEmoji)
+                                Text(tabPlatform.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     )
                 }
+            }
+        }
+
+        // WebView area
+        Box(modifier = Modifier.weight(1f)) {
+            key(sessionKey) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        GeckoView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+
+                            setSession(session)
+
+                            if (!session.isOpen) {
+                                session.open(runtime)
+                                session.setActive(true)
+                                isLoading = true
+                                session.loadUri(url)
+                            } else {
+                                session.setActive(true)
+                            }
+                        }
+                    },
+                    update = { view ->
+                        runCatching { view.setSession(session) }
+                        runCatching { if (session.isOpen) session.setActive(true) }
+                    }
+                )
+            }
+
+            if (isLoading) {
+                LinearProgressIndicator(
+                    progress = { progress / 100f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .align(Alignment.TopCenter)
+                )
+            }
+
+            loadError?.let { message ->
+                LoadErrorView(
+                    message = message,
+                    onRetry = {
+                        loadError = null
+                        if (session.isOpen) session.reload()
+                    },
+                    onOpenBrowser = { openExternal(context, currentUrl) }
+                )
+            }
+        }
+
+        // شريط الإرسال السفلي (مع إضافة Web Agent فقط)
+        WebSendBar(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding(),
+            text = displayedText,
+            onTextChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
+            isEnhanced = enhancedQuery != null,
+            isEnhancing = isEnhancing,
+            isSending = isSending,
+            memoryEnabled = memoryInjectionEnabled && platform.memoryEnabled && chatViewModel != null,
+            includeMemory = includeMemory,
+            curatorReasoning = curatorReasoning,
+            onToggleMemory = { includeMemory = !includeMemory },
+            onEnhance = {
+                val t = displayedText.trim()
+                if (t.isBlank()) return@WebSendBar
+
+                isEnhancing = true
+                scope.launch {
+                    try {
+                        enhancedQuery = memoryCuratorService.enhanceQuery(
+                            userQuery = t,
+                            mediatorIdentityText = aiSettings.mediatorIdentityText
+                        )
+                    } finally {
+                        isEnhancing = false
+                    }
+                }
+            },
+            onClearEnhanced = { enhancedQuery = null },
+            onSend = {
+                val vm = chatViewModel
+                val question = displayedText.trim()
+                if (question.isBlank()) return@WebSendBar
+                if (isSending) return@WebSendBar
 
                 if (isLoading) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Toast.makeText(context, "⏳ انتظر حتى تكتمل الصفحة ثم أرسل", Toast.LENGTH_SHORT).show()
+                    return@WebSendBar
                 }
-            }
 
-            // Web agent line
-            Text(
-                text = "Web Agent: " + (webAgent?.name ?: "(بدون)"),
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-            )
+                isSending = true
 
-            // Extra context (optional)
-            OutlinedTextField(
-                value = extraContext,
-                onValueChange = { extraContext = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                minLines = 2,
-                maxLines = 5,
-                label = { Text("Context (اختياري)") },
-                supportingText = {
-                    when (kind()) {
-                        WebKind.ARENA -> Text("Arena: سيتم الحقن بدون إرسال تلقائي، والسياق سيكون مرئيًا (بدون sanitizer).")
-                        WebKind.CHATGPT, WebKind.VENICE -> Text("ChatGPT/Venice: سيتم حقن السياق بعلامات ليقوم content.js بإخفائه بعد الإرسال.")
-                        WebKind.OTHER -> Text("قد تختلف سلوكيات الحقن حسب المنصة.")
+                scope.launch {
+                    try {
+                        val memoryAllowed = memoryInjectionEnabled && includeMemory && platform.memoryEnabled && vm != null
+
+                        val memoryXml: String =
+                            if (!memoryAllowed) {
+                                ""
+                            } else {
+                                if (curatedForText == question && selectedIds.isNotEmpty() && searchResults.isNotEmpty()) {
+                                    memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
+                                } else {
+                                    val candidates = vm!!.searchSharedMemories(question)
+                                    if (candidates.isEmpty()) "" else {
+                                        val curator = memoryCuratorService.curateSelection(question, candidates)
+                                        if (curator.selectedIds.isEmpty()) "" else {
+                                            memoryWindowBuilder.build(
+                                                selectedIds = curator.selectedIds,
+                                                candidates = candidates
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                        val extraNotes = aiSettings.customSystemInstruction.trim()
+                        val includeAccuracy = aiSettings.accuracyPromptEnabled
+                        val kind = webKind()
+
+                        val contextBlock = buildString {
+                            // ✅ Web Agent persona (NEW)
+                            if (webAgentPrompt.isNotBlank()) {
+                                appendLine("AGENT_PERSONA:")
+                                appendLine(webAgentPrompt.trim())
+                                appendLine()
+                            }
+
+                            if (includeAccuracy) {
+                                appendLine("ACCURACY_POLICY:")
+                                appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
+                                appendLine()
+                            }
+
+                            if (extraNotes.isNotBlank()) {
+                                appendLine("EXTRA_NOTES:")
+                                appendLine(extraNotes)
+                                appendLine()
+                            }
+
+                            if (memoryXml.isNotBlank()) {
+                                appendLine("SHARED_MEMORIES_XML:")
+                                appendLine(memoryXml)
+                                appendLine()
+                            }
+                        }.trim()
+
+                        val finalText = buildFinalTextForPlatform(kind = kind, contextBlock = contextBlock, question = question)
+
+                        // Arena: inject only (no auto send)
+                        val sendWithEnterFinal = when (kind) {
+                            WebKind.ARENA -> false
+                            else -> platform.sendWithEnter
+                        }
+
+                        app.setContextPending(
+                            text = finalText,
+                            targetDomain = targetDomainStable(),
+                            inputSelector = platform.inputSelector,
+                            sendSelector = platform.sendSelector,
+                            sendWithEnter = sendWithEnterFinal
+                        )
+
+                        query = ""
+                        enhancedQuery = null
+                    } catch (e: Exception) {
+                        isSending = false
+                        Toast.makeText(context, "⚠️ فشل تجهيز الإرسال: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
                     }
                 }
-            )
+            }
+        )
+    }
+}
 
-            // Message + Send
+/* ============================ Send bar (كما كان) ============================ */
+
+@Composable
+private fun WebSendBar(
+    modifier: Modifier = Modifier,
+    text: String,
+    onTextChange: (String) -> Unit,
+    isEnhanced: Boolean,
+    isEnhancing: Boolean,
+    isSending: Boolean,
+    memoryEnabled: Boolean,
+    includeMemory: Boolean,
+    curatorReasoning: String,
+    onToggleMemory: () -> Unit,
+    onEnhance: () -> Unit,
+    onClearEnhanced: () -> Unit,
+    onSend: () -> Unit
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (includeMemory && curatorReasoning.isNotBlank()) {
+                Text(
+                    text = "🧠 اختيار الوسيط: $curatorReasoning",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (memoryEnabled) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clickable(enabled = !isSending && !isEnhancing, onClick = onToggleMemory)
+                            .padding(horizontal = 6.dp, vertical = 6.dp)
+                    ) {
+                        Checkbox(
+                            checked = includeMemory,
+                            onCheckedChange = { onToggleMemory() },
+                            enabled = !isSending && !isEnhancing
+                        )
+                        Text("ذاكرة", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+
                 OutlinedTextField(
-                    value = userText,
-                    onValueChange = { userText = it },
+                    value = text,
+                    onValueChange = onTextChange,
                     modifier = Modifier.weight(1f),
-                    label = { Text("رسالتك") },
-                    maxLines = 6,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(
-                        onSend = { if (!isLoading) sendToWeb() }
-                    )
+                    minLines = 1,
+                    maxLines = 5,
+                    enabled = !isSending,
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    label = { Text(if (isEnhanced) "مُحسّن ✨" else "اكتب رسالتك") }
                 )
 
-                Button(
-                    onClick = { sendToWeb() },
-                    enabled = userText.isNotBlank() && !isLoading
-                ) {
-                    Text("Send")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    IconButton(
+                        onClick = if (isEnhanced) onClearEnhanced else onEnhance,
+                        enabled = text.isNotBlank() && !isSending && !isEnhancing
+                    ) {
+                        if (!isEnhanced && isEnhancing) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(if (isEnhanced) "↩️" else "⚡")
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onSend,
+                        enabled = text.isNotBlank() && !isSending && !isEnhancing
+                    ) {
+                        Text(if (isSending) "⏳" else "📤")
+                    }
                 }
             }
-
-            // Debug log (آخر سطور)
-            DebugLogPanel(
-                lines = app.debugLog,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 0.dp, max = 160.dp)
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            )
-        }
-    }
-
-    if (captureDialogOpen) {
-        AlertDialog(
-            onDismissRequest = { captureDialogOpen = false },
-            confirmButton = {
-                TextButton(onClick = { captureDialogOpen = false }) { Text("إغلاق") }
-            },
-            title = { Text(if (captureSuccess) "Manual Capture ✅" else "Manual Capture ❌") },
-            text = { Text(captureText.ifBlank { "(فارغ)" }) }
-        )
-    }
-}
-
-/* -------------------------------- UI bits -------------------------------- */
-
-@Composable
-private fun PlatformDropdown(
-    platforms: List<WebPlatform>,
-    selected: WebPlatform?,
-    onSelect: (WebPlatform) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = modifier
-    ) {
-        OutlinedTextField(
-            value = selected?.name ?: "اختر منصة",
-            onValueChange = {},
-            readOnly = true,
-            singleLine = true,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.menuAnchor()
-        )
-
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            platforms.forEach { p ->
-                DropdownMenuItem(
-                    text = { Text(p.name) },
-                    onClick = {
-                        expanded = false
-                        onSelect(p)
-                    }
-                )
-            }
         }
     }
 }
 
-@Composable
-private fun DebugLogPanel(
-    lines: List<String>,
-    modifier: Modifier = Modifier,
-) {
-    if (lines.isEmpty()) return
-
-    Surface(
-        tonalElevation = 1.dp,
-        shape = MaterialTheme.shapes.medium,
-        modifier = modifier
-    ) {
-        LazyColumn(
-            contentPadding = PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            items(lines.take(12)) { line ->
-                Text(line, style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-}
-
-/* ------------------------------- Context rules ------------------------------- */
+/* ============================ Context formatting ============================ */
 
 private enum class WebKind { CHATGPT, VENICE, ARENA, OTHER }
 
-/**
- * يجب أن تطابق هذه العلامات ما يعتمد عليه content.js لإزالة/إخفاء السياق بعد الإرسال.
- */
 private const val AICHAT_CTX_BEGIN = "<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>"
 private const val AICHAT_CTX_END = "<<<AICHAT_HIDDEN_CONTEXT_END>>>"
-
-private fun buildContextBlock(
-    kind: WebKind,
-    agentPrompt: String,
-    extraContext: String,
-): String {
-    val agent = agentPrompt.trim()
-    val extra = extraContext.trim()
-
-    val merged = buildString {
-        if (agent.isNotBlank()) {
-            appendLine("## Agent Persona")
-            appendLine(agent)
-        }
-        if (extra.isNotBlank()) {
-            if (isNotEmpty()) appendLine()
-            appendLine("## Context / Memory")
-            appendLine(extra)
-        }
-    }.trim()
-
-    if (merged.isBlank()) return ""
-
-    return when (kind) {
-        WebKind.CHATGPT, WebKind.VENICE -> "$AICHAT_CTX_BEGIN\n$merged\n$AICHAT_CTX_END"
-        WebKind.ARENA -> "### Context (visible)\n$merged\n### End Context"
-        WebKind.OTHER -> merged
-    }
-}
 
 private fun classifyHost(host: String): WebKind {
     val h = host.lowercase(Locale.ROOT)
@@ -511,41 +824,31 @@ private fun classifyHost(host: String): WebKind {
     }
 }
 
-private fun hostFromUrl(url: String): String? =
-    runCatching { Uri.parse(url).host }.getOrNull()
+private fun buildFinalTextForPlatform(kind: WebKind, contextBlock: String, question: String): String {
+    val ctx = contextBlock.trim()
+    if (ctx.isBlank()) return question
 
-/* -------------------------- Repo/settings compat helpers -------------------------- */
-
-@Suppress("UNCHECKED_CAST")
-private fun platformsFlowCompat(repo: WebPlatformRepository): Flow<List<WebPlatform>> {
-    // Preferred: property platformsFlow: Flow<List<WebPlatform>>
-    runCatching {
-        val m = repo.javaClass.methods.firstOrNull {
-            it.name == "getPlatformsFlow" && it.parameterTypes.isEmpty()
+    return when (kind) {
+        WebKind.CHATGPT, WebKind.VENICE -> {
+            // سيتم إخفاؤه عبر content.js sanitizer بعد الإرسال
+            "$AICHAT_CTX_BEGIN\n$ctx\n$AICHAT_CTX_END\n\n$question"
         }
-        if (m != null) return m.invoke(repo) as Flow<List<WebPlatform>>
-    }
-
-    runCatching {
-        val m = repo.javaClass.methods.firstOrNull {
-            it.name == "platformsFlow" && it.parameterTypes.isEmpty()
+        WebKind.ARENA -> {
+            // Arena: لا Sanitizer + لا auto send => اجعل السياق مرئيًا
+            "### Context (visible)\n$ctx\n### End Context\n\n$question"
         }
-        if (m != null) return m.invoke(repo) as Flow<List<WebPlatform>>
-    }
-
-    runCatching {
-        val field = repo.javaClass.declaredFields.firstOrNull { it.name == "platformsFlow" }
-        if (field != null) {
-            field.setAccessible(true)
-            return field.get(repo) as Flow<List<WebPlatform>>
+        WebKind.OTHER -> {
+            // منصات أخرى: نضع سياق مرئي كي لا يظهر كنص غريب بدون Sanitizer
+            "### Context\n$ctx\n### Question\n$question"
         }
     }
-
-    return flowOf(emptyList())
 }
 
+/**
+ * AiSettings.webAgentId قد لا يكون موجودًا في بعض النسخ أثناء الدمج.
+ * نحاول قراءته بأمان بدون كسر الـ build.
+ */
 private fun readWebAgentIdCompat(aiSettings: AiSettings): String? {
-    // Try common getters
     val getters = listOf("getWebAgentId", "webAgentId")
     for (g in getters) {
         val v = runCatching {
@@ -555,12 +858,74 @@ private fun readWebAgentIdCompat(aiSettings: AiSettings): String? {
         if (!v.isNullOrBlank()) return v
     }
 
-    // Try field
     val v = runCatching {
         val f = aiSettings.javaClass.declaredFields.firstOrNull { it.name == "webAgentId" } ?: return@runCatching null
-        f.setAccessible(true)
+        f.isAccessible = true
         f.get(aiSettings) as? String
     }.getOrNull()
 
     return v?.takeIf { it.isNotBlank() }
+}
+
+/* ============================ Helpers / dialogs ============================ */
+
+private fun openExternal(context: Context, url: String) {
+    try {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "لا يوجد تطبيق لفتح هذا الرابط", Toast.LENGTH_SHORT).show()
+    }
+}
+
+@Composable
+private fun LoadErrorView(
+    message: String,
+    onRetry: () -> Unit,
+    onOpenBrowser: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("⚠️", style = MaterialTheme.typography.displaySmall)
+            Text(text = message, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(4.dp))
+            androidx.compose.material3.Button(onClick = onRetry) { Text("إعادة المحاولة") }
+            OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
+        }
+    }
+}
+
+@Composable
+private fun GeckoUnavailableDialog(
+    platformTitle: String,
+    platformUrl: String,
+    onOpenBrowser: () -> Unit,
+    onBack: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onBack,
+        title = { Text("⚠️ GeckoView غير متاح") },
+        text = {
+            Text(
+                "تعذر تهيئة محرك GeckoView.\n\n" +
+                    "يمكنك فتح $platformTitle في المتصفح الخارجي.\n\n" +
+                    platformUrl
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onBack) { Text("رجوع") }
+        }
+    )
 }
