@@ -1,4 +1,4 @@
-// app/src/main/java/com/example/aichat/ui/screens/ChatScreen.kt
+ // app/src/main/java/com/example/aichat/ui/screens/ChatScreen.kt
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -15,24 +15,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
@@ -41,7 +33,6 @@ import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.ChatViewModel
-import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
 
@@ -66,25 +57,42 @@ fun ChatScreen(
     val currentAgentId by viewModel.currentAgentId.collectAsState()
 
     val agents by agentsViewModel.agents.collectAsState()
-
     val currentAgentName = remember(currentAgentId, agents) {
         currentAgentId?.let { id -> agents.firstOrNull { it.id == id }?.name }
     }
 
     var showAgentDialog by remember { mutableStateOf(false) }
 
-    var userInput by remember { mutableStateOf("") }
-    val displayedText = enhancedQuery ?: userInput
+    // ✅ FIX: استخدم TextFieldValue لتجنب مشكلة "أول حرف فقط" مع composing text من الكيبورد
+    var userInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
+    var enhancedInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
+
     val isEnhanced = enhancedQuery != null
+    val displayedValue: TextFieldValue = if (isEnhanced) enhancedInput else userInput
+    val displayedText: String = displayedValue.text
+
     val hasIdentity = settings.mediatorIdentityText.isNotBlank()
 
     val listState = rememberLazyListState()
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
     var showWebImportDialog by remember { mutableStateOf(false) }
+
+    // مزامنة نص التحسين القادم من الـ ViewModel إلى الحقل (مرة كل تغيير)
+    LaunchedEffect(enhancedQuery) {
+        if (enhancedQuery != null) {
+            enhancedInput = TextFieldValue(enhancedQuery!!)
+        } else {
+            enhancedInput = TextFieldValue("")
+        }
+    }
 
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
         it?.let(viewModel::selectImage)
@@ -109,10 +117,16 @@ fun ChatScreen(
     }
 
     fun send() {
-        if (displayedText.isBlank()) return
-        viewModel.sendChatMessage(displayedText)
-        userInput = ""
-        viewModel.clearEnhancedQuery()
+        // ✅ مهم: هذا يجبر الـ IME يعتمد النص قبل الإرسال (حل قوي مع TextFieldValue)
+        focusManager.clearFocus(force = true)
+
+        val textToSend = displayedText.trim()
+        if (textToSend.isBlank()) return
+
+        viewModel.sendChatMessage(textToSend)
+
+        userInput = TextFieldValue("")
+        viewModel.clearEnhancedQuery() // سيعيد isEnhanced=false + يفرغ enhancedInput عبر LaunchedEffect
     }
 
     LaunchedEffect(messages.size, isLoading) {
@@ -218,22 +232,27 @@ fun ChatScreen(
             InputBar(
                 isLoading = isLoading,
                 hasSelectedImage = selectedImage != null,
-                userInput = userInput,
-                displayedText = displayedText,
+                value = displayedValue,
                 isEnhanced = isEnhanced,
                 isEnhancing = isEnhancing,
                 hasIdentity = hasIdentity,
-                onUserInputChange = { userInput = it },
+                onValueChange = { tfv ->
+                    if (isEnhanced) {
+                        enhancedInput = tfv
+                        viewModel.updateEnhancedQuery(tfv.text)
+                    } else {
+                        userInput = tfv
+                    }
+                },
                 onOpenGallery = { galleryLauncher.launch("image/*") },
                 onOpenCamera = { openCamera() },
                 onOpenFile = { fileLauncher.launch("*/*") },
                 onOpenWebImport = { showWebImportDialog = true },
                 onRemoveImage = viewModel::clearSelectedImage,
                 onSend = ::send,
-                onEnhance = { viewModel.enhanceUserQuery(userInput) },
+                onEnhance = { viewModel.enhanceUserQuery(userInput.text) },
                 onClearEnhanced = viewModel::clearEnhancedQuery,
-                onUpdateEnhancedQuery = viewModel::updateEnhancedQuery,
-                onRefineStyle = { style -> viewModel.refineQueryStyle(userInput, style) },
+                onRefineStyle = { style -> viewModel.refineQueryStyle(userInput.text, style) },
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -268,7 +287,6 @@ fun ChatScreen(
             conversationId = conversationId,
             onDismiss = { memoryMessage = null },
             onSave = { category, isShared ->
-                // signature must match your ChatViewModel.addMemory(...)
                 viewModel.addMemory(msg.content, category, isShared, msg.id)
                 memoryMessage = null
             }
@@ -329,12 +347,12 @@ private fun MessageBubble(
     onCopy: () -> Unit,
     onSaveMemory: () -> Unit,
 ) {
-    // We avoid referencing unknown fields (role/isUser) مباشرة.
-    // If you have role/isUser, we try to read via reflection safely.
     val isUser = remember(message) { guessIsUser(message) }
 
-    val bg = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    val bg =
+        if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    val fg =
+        if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     val align = if (isUser) Alignment.End else Alignment.Start
 
     Column(
@@ -391,16 +409,36 @@ private fun ErrorMessage(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+            Icon(
+                Icons.Filled.ErrorOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer
+            )
             Column(modifier = Modifier.weight(1f)) {
-                Text("خطأ", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onErrorContainer)
-                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(
+                    "خطأ",
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
             IconButton(onClick = onCopy) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onErrorContainer)
+                Icon(
+                    Icons.Filled.ContentCopy,
+                    contentDescription = "Copy",
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onErrorContainer)
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Dismiss",
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
         }
     }
@@ -410,12 +448,11 @@ private fun ErrorMessage(
 private fun InputBar(
     isLoading: Boolean,
     hasSelectedImage: Boolean,
-    userInput: String,
-    displayedText: String,
+    value: TextFieldValue,
     isEnhanced: Boolean,
     isEnhancing: Boolean,
     hasIdentity: Boolean,
-    onUserInputChange: (String) -> Unit,
+    onValueChange: (TextFieldValue) -> Unit,
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
     onOpenFile: () -> Unit,
@@ -424,11 +461,12 @@ private fun InputBar(
     onSend: () -> Unit,
     onEnhance: () -> Unit,
     onClearEnhanced: () -> Unit,
-    onUpdateEnhancedQuery: (String) -> Unit,
     onRefineStyle: (QueryStyle) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var styleMenu by remember { mutableStateOf(false) }
+
+    val displayedText = value.text
 
     Column(
         modifier = modifier.padding(12.dp),
@@ -450,10 +488,8 @@ private fun InputBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedTextField(
-                value = displayedText,
-                onValueChange = {
-                    if (isEnhanced) onUpdateEnhancedQuery(it) else onUserInputChange(it)
-                },
+                value = value,
+                onValueChange = onValueChange,
                 modifier = Modifier.weight(1f),
                 minLines = 2,
                 maxLines = 6,
@@ -514,7 +550,10 @@ private fun InputBar(
             if (isEnhanced) {
                 TextButton(onClick = onClearEnhanced, enabled = !isLoading) { Text("إلغاء التحسين") }
             } else {
-                TextButton(onClick = onEnhance, enabled = !isLoading && !isEnhancing && userInput.isNotBlank()) {
+                TextButton(
+                    onClick = onEnhance,
+                    enabled = !isLoading && !isEnhancing && displayedText.isNotBlank()
+                ) {
                     Text(if (isEnhancing) "جارٍ التحسين…" else "تحسين السؤال")
                 }
             }
@@ -603,7 +642,6 @@ private fun WebPageImportDialog(
 /* ----------------------------- Reflection helpers ----------------------------- */
 
 private fun guessIsUser(message: Message): Boolean {
-    // tries fields: isUser(Boolean) or role(String)
     runCatching {
         val f = message.javaClass.declaredFields.firstOrNull { it.name == "isUser" } ?: return@runCatching
         f.isAccessible = true
@@ -618,6 +656,5 @@ private fun guessIsUser(message: Message): Boolean {
         return role == "user"
     }
 
-    // fallback: treat as assistant
     return false
 }
