@@ -318,42 +318,42 @@ class AiSettings(context: Context) {
     // Web / الويب
     // ============================================================
 
-    var webPlatform: String
-        get() = prefs.getString(
+      // ============================================================
+// Web / الويب
+// ============================================================
+
+var webPlatform: String
+    get() = prefs.getString(
+        "web_platform",
+        "venice"
+    ) ?: "venice"
+    set(value) = prefs.edit()
+        .putString(
             "web_platform",
-            "venice"
-        ) ?: "venice"
-        set(value) = prefs.edit()
-            .putString(
-                "web_platform",
-                value.trim()
-            )
-            .apply()
+            value.trim()
+        )
+        .apply()
 
-    /**
-     * ✅ Web Agent مستقل عن محادثات الـ API
-     * يخزن ID من جدول agents.
-     *
-     * ملاحظة: القيمة الفارغة "" تعني "بدون وكيل".
-     */
-    var webAgentId: String
-        get() = prefs.getString("web_agent_id", "")?.trim().orEmpty()
-        set(value) = prefs.edit()
-            .putString("web_agent_id", value.trim())
-            .apply()
+/**
+ * ✅ Web Agent مستقل عن محادثات الـ API
+ * يخزن ID من جدول agents.
+ *
+ * ملاحظة: القيمة الفارغة "" تعني "بدون وكيل".
+ */
+var webAgentId: String
+    get() = prefs.getString("web_agent_id", "")?.trim().orEmpty()
+    set(value) = prefs.edit()
+        .putString("web_agent_id", value.trim())
+        .apply()
 
-    /**
-     * ✅ Helper: يعيد null إذا لم يكن هناك وكيل (بدل String فارغ)
-     */
-    val webAgentIdOrNull: String?
-        get() = webAgentId.takeIf { it.isNotBlank() }
+/** ✅ Helper: null إذا لا يوجد وكيل */
+val webAgentIdOrNull: String?
+    get() = webAgentId.takeIf { it.isNotBlank() }
 
-    /**
-     * ✅ Helper: setter يقبل null لمسح الوكيل
-     */
-    fun setWebAgentId(id: String?) {
-        webAgentId = id?.trim().orEmpty()
-    }
+/** ✅ Helper: setter يقبل null لمسح الوكيل */
+fun setWebAgentId(id: String?) {
+    webAgentId = id?.trim().orEmpty()
+}
 
     // ============================================================
     // Helpers
