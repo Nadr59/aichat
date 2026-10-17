@@ -33,10 +33,7 @@ class AiSettings(context: Context) {
             .apply()
 
     var geminiModel: String
-        get() = prefs.getString(
-            "gemini_model",
-            "gemini-3.6-flash"
-        )?.trim() ?: "gemini-3.6-flash"
+        get() = prefs.getString("gemini_model", "gemini-3.6-flash")?.trim() ?: "gemini-3.6-flash"
         set(value) = prefs.edit()
             .putString("gemini_model", value.trim())
             .apply()
@@ -52,10 +49,8 @@ class AiSettings(context: Context) {
             .apply()
 
     var openrouterModel: String
-        get() = prefs.getString(
-            "openrouter_model",
-            "google/gemini-2.5-flash:free"
-        )?.trim() ?: "google/gemini-2.5-flash:free"
+        get() = prefs.getString("openrouter_model", "google/gemini-2.5-flash:free")?.trim()
+            ?: "google/gemini-2.5-flash:free"
         set(value) = prefs.edit()
             .putString("openrouter_model", value.trim())
             .apply()
@@ -71,10 +66,7 @@ class AiSettings(context: Context) {
             .apply()
 
     var openaiModel: String
-        get() = prefs.getString(
-            "openai_model",
-            "gpt-4o-mini"
-        )?.trim() ?: "gpt-4o-mini"
+        get() = prefs.getString("openai_model", "gpt-4o-mini")?.trim() ?: "gpt-4o-mini"
         set(value) = prefs.edit()
             .putString("openai_model", value.trim())
             .apply()
@@ -90,10 +82,7 @@ class AiSettings(context: Context) {
             .apply()
 
     var mistralModel: String
-        get() = prefs.getString(
-            "mistral_model",
-            "pixtral-12b-2409"
-        )?.trim() ?: "pixtral-12b-2409"
+        get() = prefs.getString("mistral_model", "pixtral-12b-2409")?.trim() ?: "pixtral-12b-2409"
         set(value) = prefs.edit()
             .putString("mistral_model", value.trim())
             .apply()
@@ -109,10 +98,8 @@ class AiSettings(context: Context) {
             .apply()
 
     var groqModel: String
-        get() = prefs.getString(
-            "groq_model",
-            "llama-3.3-70b-versatile"
-        )?.trim() ?: "llama-3.3-70b-versatile"
+        get() = prefs.getString("groq_model", "llama-3.3-70b-versatile")?.trim()
+            ?: "llama-3.3-70b-versatile"
         set(value) = prefs.edit()
             .putString("groq_model", value.trim())
             .apply()
@@ -129,25 +116,16 @@ class AiSettings(context: Context) {
 
     var nvidiaModel: String
         get() {
-            val saved = prefs.getString(
-                "nvidia_model",
-                ""
-            )?.trim().orEmpty()
+            val saved = prefs.getString("nvidia_model", "")?.trim().orEmpty()
 
             if (
                 saved.isBlank() ||
-                saved.equals(
-                    "nvidia/nemotron-3-nano-30b-a3b",
-                    ignoreCase = true
-                )
+                saved.equals("nvidia/nemotron-3-nano-30b-a3b", ignoreCase = true)
             ) {
-                val replacement =
-                    "nvidia/llama-3.3-nemotron-super-49b-v1"
-
+                val replacement = "nvidia/llama-3.3-nemotron-super-49b-v1"
                 prefs.edit()
                     .putString("nvidia_model", replacement)
                     .apply()
-
                 return replacement
             }
 
@@ -168,10 +146,8 @@ class AiSettings(context: Context) {
             .apply()
 
     var huggingfaceModel: String
-        get() = prefs.getString(
-            "hf_model",
-            "mistralai/Mistral-7B-Instruct-v0.3"
-        )?.trim() ?: "mistralai/Mistral-7B-Instruct-v0.3"
+        get() = prefs.getString("hf_model", "mistralai/Mistral-7B-Instruct-v0.3")?.trim()
+            ?: "mistralai/Mistral-7B-Instruct-v0.3"
         set(value) = prefs.edit()
             .putString("hf_model", value.trim())
             .apply()
@@ -181,10 +157,7 @@ class AiSettings(context: Context) {
     // ============================================================
 
     var ollamaModel: String
-        get() = prefs.getString(
-            "ollama_model",
-            "qwen2.5:1.5b"
-        )?.trim() ?: "qwen2.5:1.5b"
+        get() = prefs.getString("ollama_model", "qwen2.5:1.5b")?.trim() ?: "qwen2.5:1.5b"
         set(value) = prefs.edit()
             .putString("ollama_model", value.trim())
             .apply()
@@ -206,10 +179,7 @@ class AiSettings(context: Context) {
             .apply()
 
     var customModel: String
-        get() = prefs.getString(
-            "custom_model",
-            ""
-        )?.trim() ?: ""
+        get() = prefs.getString("custom_model", "")?.trim() ?: ""
         set(value) = prefs.edit()
             .putString("custom_model", value.trim())
             .apply()
@@ -219,27 +189,15 @@ class AiSettings(context: Context) {
     // ============================================================
 
     var accuracyPromptEnabled: Boolean
-        get() = prefs.getBoolean(
-            "accuracy_prompt_enabled",
-            true
-        )
+        get() = prefs.getBoolean("accuracy_prompt_enabled", true)
         set(value) = prefs.edit()
-            .putBoolean(
-                "accuracy_prompt_enabled",
-                value
-            )
+            .putBoolean("accuracy_prompt_enabled", value)
             .apply()
 
     var customSystemInstruction: String
-        get() = prefs.getString(
-            "custom_system_instruction",
-            ""
-        ) ?: ""
+        get() = prefs.getString("custom_system_instruction", "") ?: ""
         set(value) = prefs.edit()
-            .putString(
-                "custom_system_instruction",
-                value
-            )
+            .putString("custom_system_instruction", value)
             .apply()
 
     // ============================================================
@@ -247,15 +205,9 @@ class AiSettings(context: Context) {
     // ============================================================
 
     var autoSave: Boolean
-        get() = prefs.getBoolean(
-            "auto_save",
-            false
-        )
+        get() = prefs.getBoolean("auto_save", false)
         set(value) = prefs.edit()
-            .putBoolean(
-                "auto_save",
-                value
-            )
+            .putBoolean("auto_save", value)
             .apply()
 
     // ============================================================
@@ -263,97 +215,73 @@ class AiSettings(context: Context) {
     // ============================================================
 
     var memoryCuratorEnabled: Boolean
-        get() = prefs.getBoolean(
-            "memory_curator_enabled",
-            true
-        )
+        get() = prefs.getBoolean("memory_curator_enabled", true)
         set(value) = prefs.edit()
-            .putBoolean(
-                "memory_curator_enabled",
-                value
-            )
+            .putBoolean("memory_curator_enabled", value)
             .apply()
 
+    /**
+     * مزوّد الوسيط الذكي.
+     *
+     * النموذج لا يُحفظ هنا بشكل مستقل.
+     * يتم أخذه ديناميكيًا من إعدادات النموذج الخاصة بالمزوّد.
+     */
     var memoryCuratorProvider: String
-        get() = prefs.getString(
-            "memory_curator_provider",
-            "gemini"
-        )
+        get() = prefs.getString("memory_curator_provider", "gemini")
             ?.trim()
             ?.lowercase()
             ?: "gemini"
         set(value) = prefs.edit()
-            .putString(
-                "memory_curator_provider",
-                value.trim().lowercase()
-            )
+            .putString("memory_curator_provider", value.trim().lowercase())
             .apply()
 
     fun getMemoryCuratorModel(): String {
         return when (memoryCuratorProvider) {
-
             "gemini" -> geminiModel
             "groq" -> groqModel
             "mistral" -> mistralModel
             "ollama" -> ollamaModel
             "custom" -> customModel
-
             else -> ""
         }.trim()
     }
 
+    /**
+     * نص هوية/أسلوب الوسيط — حقل حر اختياري.
+     */
     var mediatorIdentityText: String
-        get() = prefs.getString(
-            "mediator_identity_text",
-            ""
-        ) ?: ""
+        get() = prefs.getString("mediator_identity_text", "") ?: ""
         set(value) = prefs.edit()
-            .putString(
-                "mediator_identity_text",
-                value.trim()
-            )
+            .putString("mediator_identity_text", value.trim())
             .apply()
 
     // ============================================================
     // Web / الويب
     // ============================================================
 
-      // ============================================================
-// Web / الويب
-// ============================================================
+    var webPlatform: String
+        get() = prefs.getString("web_platform", "venice") ?: "venice"
+        set(value) = prefs.edit()
+            .putString("web_platform", value.trim())
+            .apply()
 
-var webPlatform: String
-    get() = prefs.getString(
-        "web_platform",
-        "venice"
-    ) ?: "venice"
-    set(value) = prefs.edit()
-        .putString(
-            "web_platform",
-            value.trim()
-        )
-        .apply()
+    /**
+     * ✅ Web Agent مستقل عن محادثات الـ API
+     * يخزن ID من جدول agents.
+     *
+     * ملاحظة: القيمة الفارغة "" تعني "بدون وكيل".
+     */
+    var webAgentId: String
+        get() = prefs.getString("web_agent_id", "")?.trim().orEmpty()
+        set(value) = prefs.edit()
+            .putString("web_agent_id", value.trim())
+            .apply()
 
-/**
- * ✅ Web Agent مستقل عن محادثات الـ API
- * يخزن ID من جدول agents.
- *
- * ملاحظة: القيمة الفارغة "" تعني "بدون وكيل".
- */
-var webAgentId: String
-    get() = prefs.getString("web_agent_id", "")?.trim().orEmpty()
-    set(value) = prefs.edit()
-        .putString("web_agent_id", value.trim())
-        .apply()
-
-/** ✅ Helper: null إذا لا يوجد وكيل */
-val webAgentIdOrNull: String?
-    get() = webAgentId.takeIf { it.isNotBlank() }
-
-/** ✅ Helper: setter يقبل null لمسح الوكيل */
-fun setWebAgentId(id: String?) {
-    webAgentId = id?.trim().orEmpty()
-}
+    /**
+     * ✅ Helper: null إذا لا يوجد وكيل
+     */
+    val webAgentIdOrNull: String?
+        get() = webAgentId.takeIf { it.isNotBlank() }
 
     // ============================================================
     // Helpers
@@ -361,57 +289,39 @@ fun setWebAgentId(id: String?) {
 
     fun getActiveKey(): String {
         return when (provider) {
-
             "gemini" -> geminiKey
             "openrouter" -> openrouterKey
             "openai" -> openaiKey
             "mistral" -> mistralKey
             "groq" -> groqKey
             "nvidia" -> nvidiaKey
-
-            "huggingface",
-            "hugging face",
-            "hf" -> huggingfaceKey
-
+            "huggingface", "hugging face", "hf" -> huggingfaceKey
             "ollama" -> ""
             "custom" -> customKey
-
             else -> ""
         }
     }
 
     fun getActiveModel(): String {
         return when (provider) {
-
             "gemini" -> geminiModel
             "openrouter" -> openrouterModel
             "openai" -> openaiModel
             "mistral" -> mistralModel
             "groq" -> groqModel
             "nvidia" -> nvidiaModel
-
-            "huggingface",
-            "hugging face",
-            "hf" -> huggingfaceModel
-
+            "huggingface", "hugging face", "hf" -> huggingfaceModel
             "ollama" -> ollamaModel
             "custom" -> customModel
-
             else -> ""
         }
     }
 
     fun isConfigured(): Boolean {
         return when (provider) {
-
-            "ollama" ->
-                ollamaModel.isNotBlank()
-
-            "custom" ->
-                customUrl.isNotBlank()
-
-            else ->
-                getActiveKey().isNotBlank()
+            "ollama" -> ollamaModel.isNotBlank()
+            "custom" -> customUrl.isNotBlank()
+            else -> getActiveKey().isNotBlank()
         }
     }
 }
