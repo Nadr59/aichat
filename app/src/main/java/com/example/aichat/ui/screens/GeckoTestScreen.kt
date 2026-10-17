@@ -743,7 +743,7 @@ fun GeckoTestScreen(
             onDismiss = { showWebAgentDialog = false },
             onSelect = { id ->
                 webAgentId = id
-                aiSettings.setWebAgentId(id)
+                aiSettings.webAgentId = id?.trim().orEmpty()
                 showWebAgentDialog = false
             },
             extraTopContent = {
@@ -751,7 +751,7 @@ fun GeckoTestScreen(
                     TextButton(
                         onClick = {
                             webAgentId = null
-                            aiSettings.setWebAgentId(null)
+                            aiSettings.webAgentId = ""
                             showWebAgentDialog = false
                         }
                     ) { Text("بدون وكيل") }
