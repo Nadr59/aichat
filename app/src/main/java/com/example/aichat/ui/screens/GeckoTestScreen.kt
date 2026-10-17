@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -84,6 +85,7 @@ import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
 import com.example.aichat.repository.WebPlatformRepository
+import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -95,10 +97,9 @@ import org.mozilla.geckoview.WebRequestError
 import java.util.Locale
 
 /**
- * UI القديم (Tabs + GeckoView + SendBar) + إضافة واحدة فقط:
- * ✅ Web Agent مستقل (aiSettings.webAgentId) يتم حقنه ضمن السياق عند الإرسال.
- *
- * المنصات تُقرأ من: WebPlatformRepository.enabledPlatforms (بدون platformsFlow).
+ * UI القديم (Tabs + GeckoView + SendBar) + إضافة:
+ * ✅ Web Agent (aiSettings.webAgentId) يتم حقنه ضمن السياق عند الإرسال.
+ * ✅ زر في الـ TopBar يفتح قائمة الوكلاء للتبديل بينهم.
  */
 @Composable
 fun GeckoTestScreen(
@@ -117,13 +118,16 @@ fun GeckoTestScreen(
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val scope = rememberCoroutineScope()
 
-    // ✅ مهم: ضمان وجود المنصات الافتراضية (بدون فتح شاشة إدارة المنصات)
+    // ✅ مهم: ضمان وجود المنصات الافتراضية
     LaunchedEffect(webPlatformRepository) {
         runCatching { webPlatformRepository.seedDefaults() }
     }
 
     // ✅ هذا هو الـ Flow الصحيح في WebPlatformRepository عندك
     val enabledPlatforms by webPlatformRepository.enabledPlatforms.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // ✅ قائمة الوكلاء (Agents) للـ Dialog
+    val agents by agentRepository.observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
 
     var activePlatformId by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -166,13 +170,35 @@ fun GeckoTestScreen(
     }
 
     // =========================
-    // Web Agent (independent)
+    // Web Agent (Picker + injection)
     // =========================
-    val webAgentId: String? = remember(aiSettings) { readWebAgentIdCompat(aiSettings) }
+    var showWebAgentDialog by rememberSaveable { mutableStateOf(false) }
+
+    var webAgentId by rememberSaveable {
+        mutableStateOf(aiSettings.webAgentIdOrNull)
+    }
+
+    var accuracyEnabled by rememberSaveable {
+        mutableStateOf(aiSettings.accuracyPromptEnabled)
+    }
+
+    // مزامنة مبدئية (لو تغيّر من شاشة ثانية)
+    LaunchedEffect(Unit) {
+        webAgentId = aiSettings.webAgentIdOrNull
+        accuracyEnabled = aiSettings.accuracyPromptEnabled
+    }
+
+    val webAgentName = remember(webAgentId, agents) {
+        webAgentId?.let { id -> agents.firstOrNull { it.id == id }?.name }
+    }
+
     val webAgent: AgentProfile? by produceState<AgentProfile?>(initialValue = null, webAgentId) {
         value = webAgentId?.let { id -> runCatching { agentRepository.getById(id) }.getOrNull() }
     }
-    val webAgentPrompt = remember(webAgent) { webAgent?.let { AgentPromptBuilder.build(it) }.orEmpty() }
+
+    val webAgentPrompt = remember(webAgent) {
+        webAgent?.let { AgentPromptBuilder.build(it) }.orEmpty()
+    }
 
     // =========================
     // Session state (مثل السابق)
@@ -463,6 +489,13 @@ fun GeckoTestScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Text(
+                        text = "Web Agent: ${webAgentName ?: "بدون وكيل"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             },
             navigationIcon = {
@@ -479,6 +512,11 @@ fun GeckoTestScreen(
                 }
             },
             actions = {
+                // ✅ زر اختيار الوكيل
+                IconButton(onClick = { showWebAgentDialog = true }) {
+                    Icon(Icons.Filled.SmartToy, contentDescription = "Web Agent")
+                }
+
                 if (chatViewModel != null && platform.memoryEnabled) {
                     IconButton(onClick = saveToMemory, enabled = !isSavingMemory && !isLoading) {
                         Text(if (isSavingMemory) "⏳" else "🧠")
@@ -523,7 +561,6 @@ fun GeckoTestScreen(
         }
 
         Box(modifier = Modifier.weight(1f)) {
-            // مهم: key(sessionKey) لمنع إعادة استخدام GeckoView مع session قديم عند التبديل
             key(sessionKey) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -644,11 +681,11 @@ fun GeckoTestScreen(
                             }
 
                         val extraNotes = aiSettings.customSystemInstruction.trim()
-                        val includeAccuracy = aiSettings.accuracyPromptEnabled
+                        val includeAccuracy = accuracyEnabled   // ✅ من state (ومن prefs أيضًا)
                         val kind = webKind()
 
                         val contextBlock = buildString {
-                            // ✅ NEW: Web Agent Persona
+                            // ✅ Web Agent Persona
                             if (webAgentPrompt.isNotBlank()) {
                                 appendLine("AGENT_PERSONA:")
                                 appendLine(webAgentPrompt.trim())
@@ -673,7 +710,6 @@ fun GeckoTestScreen(
 
                         val finalText = buildFinalTextForPlatform(kind = kind, contextBlock = contextBlock, question = question)
 
-                        // Arena: inject فقط (بدون auto-send)
                         val sendWithEnterFinal = if (kind == WebKind.ARENA) false else platform.sendWithEnter
                         val sendSelectorFinal = if (kind == WebKind.ARENA) "" else platform.sendSelector
 
@@ -690,6 +726,45 @@ fun GeckoTestScreen(
                     } catch (e: Exception) {
                         isSending = false
                         Toast.makeText(context, "⚠️ فشل تجهيز الإرسال: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+
+    // =========================
+    // ✅ Web Agent picker dialog
+    // =========================
+    if (showWebAgentDialog) {
+        AgentPickerDialog(
+            title = "Web Agent",
+            agents = agents,
+            selectedId = webAgentId,
+            onDismiss = { showWebAgentDialog = false },
+            onSelect = { id ->
+                webAgentId = id
+                aiSettings.setWebAgentId(id)
+                showWebAgentDialog = false
+            },
+            extraTopContent = {
+                Column {
+                    TextButton(
+                        onClick = {
+                            webAgentId = null
+                            aiSettings.setWebAgentId(null)
+                            showWebAgentDialog = false
+                        }
+                    ) { Text("بدون وكيل") }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = accuracyEnabled,
+                            onCheckedChange = { v ->
+                                accuracyEnabled = v
+                                aiSettings.accuracyPromptEnabled = v
+                            }
+                        )
+                        Text("تفعيل وثيقة الدقة")
                     }
                 }
             }
@@ -793,7 +868,6 @@ private fun WebSendBar(
 
 private enum class WebKind { CHATGPT, VENICE, ARENA, OTHER }
 
-// (لو content.js عندك يعتمد على markers بدل comment تقدر تبدل هنا بسهولة)
 private const val AICHAT_CTX_BEGIN = "<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>"
 private const val AICHAT_CTX_END = "<<<AICHAT_HIDDEN_CONTEXT_END>>>"
 
@@ -813,39 +887,15 @@ private fun buildFinalTextForPlatform(kind: WebKind, contextBlock: String, quest
 
     return when (kind) {
         WebKind.ARENA -> {
-            // Arena: visible + manual send
             "### Context (visible)\n$ctx\n### End Context\n\n$question"
         }
         WebKind.CHATGPT, WebKind.VENICE -> {
-            // الأفضل (إذا content.js عندك sanitizer يعتمد على markers)
             "$AICHAT_CTX_BEGIN\n$ctx\n$AICHAT_CTX_END\n\n$question"
         }
         WebKind.OTHER -> {
-            // fallback
             "$ctx\n\n$question"
         }
     }
-}
-
-/* ============================ AiSettings compat ============================ */
-
-private fun readWebAgentIdCompat(aiSettings: AiSettings): String? {
-    val getters = listOf("getWebAgentId", "webAgentId")
-    for (g in getters) {
-        val v = runCatching {
-            val m = aiSettings.javaClass.methods.firstOrNull { it.name == g && it.parameterTypes.isEmpty() }
-            m?.invoke(aiSettings) as? String
-        }.getOrNull()
-        if (!v.isNullOrBlank()) return v
-    }
-
-    val v = runCatching {
-        val f = aiSettings.javaClass.declaredFields.firstOrNull { it.name == "webAgentId" } ?: return@runCatching null
-        f.setAccessible(true)
-        f.get(aiSettings) as? String
-    }.getOrNull()
-
-    return v?.takeIf { it.isNotBlank() }
 }
 
 /* ============================ Helpers / dialogs ============================ */
