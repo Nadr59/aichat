@@ -274,12 +274,6 @@ class AiSettings(context: Context) {
             )
             .apply()
 
-    /**
-     * مزوّد الوسيط الذكي.
-     *
-     * النموذج لا يُحفظ هنا بشكل مستقل.
-     * يتم أخذه ديناميكيًا من إعدادات النموذج الخاصة بالمزوّد.
-     */
     var memoryCuratorProvider: String
         get() = prefs.getString(
             "memory_curator_provider",
@@ -295,33 +289,19 @@ class AiSettings(context: Context) {
             )
             .apply()
 
-    /**
-     * يعيد نموذج الوسيط حسب المزوّد المختار.
-     *
-     * لا توجد قائمة نماذج ثابتة للوسيط.
-     * الوسيط يستخدم النموذج الذي حدده المستخدم
-     * في إعدادات المحادثة لذلك المزوّد.
-     */
     fun getMemoryCuratorModel(): String {
         return when (memoryCuratorProvider) {
 
             "gemini" -> geminiModel
-
             "groq" -> groqModel
-
             "mistral" -> mistralModel
-
             "ollama" -> ollamaModel
-
             "custom" -> customModel
 
             else -> ""
         }.trim()
     }
 
-    /**
-     * نص هوية/أسلوب الوسيط — حقل حر اختياري.
-     */
     var mediatorIdentityText: String
         get() = prefs.getString(
             "mediator_identity_text",
@@ -350,15 +330,30 @@ class AiSettings(context: Context) {
             )
             .apply()
 
-                /**
+    /**
      * ✅ Web Agent مستقل عن محادثات الـ API
      * يخزن ID من جدول agents.
+     *
+     * ملاحظة: القيمة الفارغة "" تعني "بدون وكيل".
      */
     var webAgentId: String
         get() = prefs.getString("web_agent_id", "")?.trim().orEmpty()
         set(value) = prefs.edit()
             .putString("web_agent_id", value.trim())
             .apply()
+
+    /**
+     * ✅ Helper: يعيد null إذا لم يكن هناك وكيل (بدل String فارغ)
+     */
+    val webAgentIdOrNull: String?
+        get() = webAgentId.takeIf { it.isNotBlank() }
+
+    /**
+     * ✅ Helper: setter يقبل null لمسح الوكيل
+     */
+    fun setWebAgentId(id: String?) {
+        webAgentId = id?.trim().orEmpty()
+    }
 
     // ============================================================
     // Helpers
@@ -368,15 +363,10 @@ class AiSettings(context: Context) {
         return when (provider) {
 
             "gemini" -> geminiKey
-
             "openrouter" -> openrouterKey
-
             "openai" -> openaiKey
-
             "mistral" -> mistralKey
-
             "groq" -> groqKey
-
             "nvidia" -> nvidiaKey
 
             "huggingface",
@@ -384,7 +374,6 @@ class AiSettings(context: Context) {
             "hf" -> huggingfaceKey
 
             "ollama" -> ""
-
             "custom" -> customKey
 
             else -> ""
@@ -395,15 +384,10 @@ class AiSettings(context: Context) {
         return when (provider) {
 
             "gemini" -> geminiModel
-
             "openrouter" -> openrouterModel
-
             "openai" -> openaiModel
-
             "mistral" -> mistralModel
-
             "groq" -> groqModel
-
             "nvidia" -> nvidiaModel
 
             "huggingface",
@@ -411,7 +395,6 @@ class AiSettings(context: Context) {
             "hf" -> huggingfaceModel
 
             "ollama" -> ollamaModel
-
             "custom" -> customModel
 
             else -> ""
