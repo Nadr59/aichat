@@ -13,6 +13,7 @@ import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.data.model.Workspace
 
 @Database(
     entities = [
@@ -21,8 +22,9 @@ import com.example.aichat.data.model.WebPlatform
         MemoryItem::class,
         WebPlatform::class,
         AgentProfile::class, // ✅ v10
+        Workspace::class,    // ✅ v11 (Workspace Summary)
     ],
-    version = 10, // ✅ 9 → 10 (Agents + agentId in conversations)
+    version = 11, // ✅ 10 → 11 (Workspaces + workspaceId/parentConversationId)
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -30,7 +32,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun memoryDao(): MemoryDao
     abstract fun webPlatformDao(): WebPlatformDao
-    abstract fun agentDao(): AgentDao // ✅ جديد
+    abstract fun agentDao(): AgentDao // ✅ v10
 
     companion object {
 
@@ -77,11 +79,6 @@ abstract class ChatDatabase : RoomDatabase() {
 
         // ── Migrations ───────────────────────────────────────────
 
-        /**
-         * ملاحظة: هذا هو نفس الذي عندك (كان فيه embedding).
-         * قمنا بتصحيح MIGRATION_2_3 ليصبح "إضافة مشروطة" حتى لا يحدث crash
-         * لو كان embedding موجودًا مسبقًا.
-         */
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -104,7 +101,6 @@ abstract class ChatDatabase : RoomDatabase() {
 
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // ✅ كان يسبب crash لأن MIGRATION_1_2 أنشأ embedding مسبقاً
                 db.addColumnIfMissing("memory_items", "embedding", "TEXT NOT NULL DEFAULT ''")
             }
         }
@@ -165,7 +161,6 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
-        // ✅ Web auto-send fields
         val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.addColumnIfMissing("web_platforms", "inputSelector", "TEXT NOT NULL DEFAULT ''")
@@ -174,13 +169,10 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
-        // ✅ جديد: Agents + agentId
         val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // 1) Add agentId to conversations (nullable)
                 db.addColumnIfMissing("conversations", "agentId", "TEXT")
 
-                // 2) Create agents table (must match AgentProfile exactly)
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS agents (
@@ -201,8 +193,39 @@ abstract class ChatDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
-                // 3) Index
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_conversations_agentId ON conversations(agentId)")
+            }
+        }
+
+        // ✅ v11: Workspaces + conversation.workspaceId/parentConversationId
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+
+                // 1) Create workspaces table
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS workspaces (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        scopeKey TEXT NOT NULL,
+                        title TEXT NOT NULL DEFAULT '',
+                        summary TEXT NOT NULL DEFAULT '',
+                        createdAt INTEGER NOT NULL DEFAULT 0,
+                        updatedAt INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+
+                // unique scopeKey (workspace per scope مثل api:model أو web:platform)
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_workspaces_scopeKey ON workspaces(scopeKey)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_workspaces_updatedAt ON workspaces(updatedAt)")
+
+                // 2) Add workspaceId + parentConversationId to conversations
+                db.addColumnIfMissing("conversations", "workspaceId", "INTEGER")
+                db.addColumnIfMissing("conversations", "parentConversationId", "INTEGER")
+
+                // 3) Indexes for fast filtering/tree navigation
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_conversations_workspaceId ON conversations(workspaceId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_conversations_parentConversationId ON conversations(parentConversationId)")
             }
         }
 
@@ -223,7 +246,8 @@ abstract class ChatDatabase : RoomDatabase() {
                     MIGRATION_6_7,
                     MIGRATION_7_8,
                     MIGRATION_8_9,
-                    MIGRATION_9_10
+                    MIGRATION_9_10,
+                    MIGRATION_10_11
                 )
                 .build()
 
