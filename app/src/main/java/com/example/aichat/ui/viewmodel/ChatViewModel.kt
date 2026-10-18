@@ -1,3 +1,4 @@
+// app/src/main/java/com/example/aichat/ui/viewmodel/ChatViewModel.kt
 package com.example.aichat.ui.viewmodel
 
 import android.app.Application
@@ -13,6 +14,7 @@ import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.QueryStyle
+import com.example.aichat.data.model.Workspace
 import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.AgentRepository
 import com.example.aichat.repository.ChatRepository
@@ -34,6 +36,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
+import java.util.Locale
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -73,6 +76,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _currentAgentId = MutableStateFlow<String?>(null)
     val currentAgentId: StateFlow<String?> = _currentAgentId.asStateFlow()
+
+    // ✅ Workspace (v11) — Summary across conversations (tree memory / continuity)
+    private val _currentWorkspaceId = MutableStateFlow<Long?>(null)
+    val currentWorkspaceId: StateFlow<Long?> = _currentWorkspaceId.asStateFlow()
+
+    private val _workspaceSummary = MutableStateFlow("")
+    val workspaceSummary: StateFlow<String> = _workspaceSummary.asStateFlow()
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages.asStateFlow()
@@ -174,6 +184,131 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { memoryRepository.deleteConversationMemories(conversationId) }
     }
 
+    // ============================================================
+    // Workspace helpers (v11)
+    // ============================================================
+
+    private fun apiScopeKey(): String {
+        val provider = aiSettings.provider.trim().lowercase(Locale.ROOT)
+        val model = aiSettings.getActiveModel().trim().lowercase(Locale.ROOT)
+        return "api:$provider:$model"
+    }
+
+    private fun apiWorkspaceTitle(): String {
+        val provider = aiSettings.provider.trim()
+        val model = aiSettings.getActiveModel().trim()
+        return "API • $provider • $model"
+    }
+
+    private suspend fun setCurrentWorkspaceById(workspaceId: Long?) {
+        _currentWorkspaceId.value = workspaceId
+        val ws = workspaceId?.let { conversationRepository.getWorkspaceById(it) }
+        _workspaceSummary.value = ws?.summary.orEmpty()
+    }
+
+    /**
+     * يضمن أن للمحادثة Workspace.
+     * - إذا كان موجودًا: يحمّله
+     * - إذا لم يكن موجودًا: ينشئ Workspace حسب apiScopeKey ويلحقه بالمحادثة
+     */
+    private suspend fun ensureWorkspaceForConversation(conversationId: Long): Workspace {
+        val conv = conversationRepository.getConversationById(conversationId)
+        val existingWsId = conv?.workspaceId
+        val existingWs = existingWsId?.let { conversationRepository.getWorkspaceById(it) }
+
+        if (existingWs != null) {
+            setCurrentWorkspaceById(existingWs.id)
+            return existingWs
+        }
+
+        // لو المحادثة قديمة (قبل v11) أو workspace محذوف/غير موجود، أنشئ/اجلب workspace الافتراضي لهذا model/provider
+        val ws = conversationRepository.getOrCreateWorkspace(
+            scopeKey = apiScopeKey(),
+            title = apiWorkspaceTitle()
+        )
+
+        // اربط المحادثة به (إن كانت موجودة)
+        if (conv != null) {
+            conversationRepository.updateConversationWorkspace(
+                conversationId = conversationId,
+                workspaceId = ws.id,
+                parentConversationId = conv.parentConversationId
+            )
+        }
+
+        setCurrentWorkspaceById(ws.id)
+        return ws
+    }
+
+    private fun buildWorkspacePrompt(summary: String): String {
+        val s = summary.trim()
+        if (s.isBlank()) return ""
+        return buildString {
+            appendLine("WORKSPACE_SUMMARY:")
+            appendLine(s)
+        }.trim()
+    }
+
+    private suspend fun generateUpdatedWorkspaceSummary(
+        previousSummary: String,
+        userText: String,
+        assistantText: String
+    ): String {
+        val prev = previousSummary.trim().take(2000)
+        val u = userText.trim().take(1500)
+        val a = assistantText.trim().take(2000)
+
+        val prompt = buildString {
+            appendLine("مهمتك: تحديث ملخص جلسة (Workspace Summary) لاستمرار السياق بين محادثات متعددة.")
+            appendLine()
+            appendLine("الملخص السابق (قد يكون فارغًا):")
+            appendLine(prev.ifBlank { "(فارغ)" })
+            appendLine()
+            appendLine("التبادل الجديد:")
+            appendLine("USER: $u")
+            appendLine("ASSISTANT: $a")
+            appendLine()
+            appendLine("قواعد الإخراج:")
+            appendLine("- أعد الملخص المحدّث فقط دون شرح إضافي.")
+            appendLine("- اجعله بالعربية.")
+            appendLine("- حافظ على الحقائق المهمة والتفضيلات والمهام والقرارات والأسماء.")
+            appendLine("- لا تكرر نص الحوار حرفيًا، لخّصه.")
+            appendLine("- طول أقصى ~1200 حرف.")
+        }.trim()
+
+        // نستخدم نفس مزود الـ API الحالي (ChatRepository) لتوليد الملخص
+        return repository.sendMessage(
+            history = emptyList(),
+            userMessage = prompt,
+            imageBase64 = null,
+            memoryContext = "",
+            hasMemorySource = false,
+            agentPrompt = "" // لا نحقن Agent Persona هنا لتجنب تلويث الملخص
+        ).trim()
+    }
+
+    private fun updateWorkspaceSummaryAsync(
+        workspaceId: Long,
+        userText: String,
+        assistantText: String
+    ) {
+        val prev = _workspaceSummary.value
+        viewModelScope.launch {
+            runCatching {
+                val updated = generateUpdatedWorkspaceSummary(
+                    previousSummary = prev,
+                    userText = userText,
+                    assistantText = assistantText
+                )
+
+                if (updated.isNotBlank()) {
+                    conversationRepository.updateWorkspaceSummary(workspaceId, updated)
+                    _workspaceSummary.value = updated
+                }
+            }
+        }
+    }
+
     // =========================
     // Conversations
     // =========================
@@ -189,6 +324,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val conv = conversationRepository.getConversationById(conversationId)
             _memoryAccessEnabled.value = conv?.memoryAccessEnabled ?: true
             _currentAgentId.value = conv?.agentId
+
+            // ✅ Workspace load/attach
+            val wsId = conv?.workspaceId
+            if (wsId != null) {
+                setCurrentWorkspaceById(wsId)
+            } else {
+                // محادثة قديمة قبل v11: ألحقها افتراضياً بWorkspace الخاص بالموديل الحالي
+                runCatching { ensureWorkspaceForConversation(conversationId) }
+            }
         }
     }
 
@@ -206,6 +350,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _memoryAccessEnabled.value = true
         _enhancedQuery.value = null
         _isEnhancing.value = false
+
+        // ✅ لا نمسح workspace summary لكي تستمر “الجلسة” بين المحادثات على نفس الموديل
+        // (سيتم التأكد/التحديث عند الإرسال أو فتح محادثة مرتبطة بـ workspace)
     }
 
     fun toggleMemoryAccess(enabled: Boolean) {
@@ -214,7 +361,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { conversationRepository.updateMemoryAccess(convId, enabled) }
     }
 
-    // ✅ جديد: تعيين Agent للمحادثة
     fun setConversationAgent(agentId: String?) {
         _currentAgentId.value = agentId
         val convId = _currentConversationId.value ?: return
@@ -292,18 +438,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val imageBase64 = _selectedImageBase64.value
 
+                // ✅ Ensure Workspace for current model/provider (for continuity)
+                val scopeKey = apiScopeKey()
+                val ws = conversationRepository.getOrCreateWorkspace(scopeKey = scopeKey, title = apiWorkspaceTitle())
+                setCurrentWorkspaceById(ws.id)
+
                 val convId = _currentConversationId.value ?: run {
                     val id = conversationRepository.insertConversation(
                         Conversation(
                             title = text.take(50).ifBlank { "محادثة جديدة" },
                             memoryAccessEnabled = _memoryAccessEnabled.value,
-                            agentId = _currentAgentId.value // ✅ مهم
+                            agentId = _currentAgentId.value,
+                            workspaceId = ws.id,
+                            parentConversationId = null
                         )
                     )
                     _currentConversationId.value = id
                     startCollecting(id)
                     id
                 }
+
+                // إذا كانت محادثة قديمة/بدون workspace لسبب ما، ألحقها
+                runCatching { ensureWorkspaceForConversation(convId) }
 
                 val historySnapshot = conversationRepository.getMessagesOnce(convId)
 
@@ -347,13 +503,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     ?.let { AgentPromptBuilder.build(it) }
                     .orEmpty()
 
+                // ✅ Workspace Summary prompt (Injected as part of system context)
+                val wsPrompt = buildWorkspacePrompt(_workspaceSummary.value)
+
+                val combinedAgentPrompt = listOfNotNull(
+                    agentPrompt.takeIf { it.isNotBlank() },
+                    wsPrompt.takeIf { it.isNotBlank() }
+                ).joinToString("\n\n").trim()
+
                 val response = repository.sendMessage(
                     history = historySnapshot,
                     userMessage = text,
                     imageBase64 = imageBase64,
                     memoryContext = memoryContextText,
                     hasMemorySource = hasMemorySource,
-                    agentPrompt = agentPrompt
+                    agentPrompt = combinedAgentPrompt
                 )
 
                 conversationRepository.insertMessage(
@@ -364,6 +528,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         messageType = "text"
                     )
                 )
+
+                // ✅ Update workspace summary asynchronously (continuity across conversations)
+                _currentWorkspaceId.value?.let { workspaceId ->
+                    updateWorkspaceSummaryAsync(
+                        workspaceId = workspaceId,
+                        userText = text,
+                        assistantText = response
+                    )
+                }
 
                 val title = historySnapshot.firstOrNull { it.role == "user" }?.content ?: text
 
@@ -396,16 +569,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
+                // ✅ Workspace per web platform
+                val ws = conversationRepository.getOrCreateWorkspace(
+                    scopeKey = "web:$platformId",
+                    title = "WEB • $platformName"
+                )
+
                 val convId = _currentConversationId.value ?: run {
                     val id = conversationRepository.insertConversation(
                         Conversation(
                             title = "$platformName — Web",
-                            memoryAccessEnabled = _memoryAccessEnabled.value
+                            memoryAccessEnabled = _memoryAccessEnabled.value,
+                            workspaceId = ws.id
                         )
                     )
                     _currentConversationId.value = id
                     startCollecting(id)
                     id
+                }
+
+                // لو المحادثة بدون workspace لأي سبب
+                val conv = conversationRepository.getConversationById(convId)
+                if (conv?.workspaceId == null) {
+                    conversationRepository.updateConversationWorkspace(
+                        conversationId = convId,
+                        workspaceId = ws.id,
+                        parentConversationId = conv?.parentConversationId
+                    )
                 }
 
                 val messageId = conversationRepository.insertMessage(
@@ -433,6 +623,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         isShared = true
                     )
                 }
+
+                // (اختياري) يمكنك لاحقًا تحديث workspace summary للويب أيضاً،
+                // لكن غالباً الأفضل أن يتم من جهة GeckoTestScreen عند إرسال سؤال + جواب.
+
             } catch (_: Exception) {
             }
         }
@@ -466,9 +660,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // =========================
-    // File → Memory (Batch embeddings)  (من الملف الأصلي كما هو)
-    // =========================
     fun processAndSaveFile(uri: Uri) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -532,9 +723,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // =========================
-    // Web page → Memory (Batch embeddings) (من الملف الأصلي كما هو)
-    // =========================
     fun saveWebPage(url: String) {
         viewModelScope.launch {
             _isLoading.value = true
