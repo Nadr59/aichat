@@ -81,6 +81,7 @@ import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.AgentRepository
+import com.example.aichat.repository.ConversationRepository
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
@@ -100,6 +101,7 @@ import java.util.Locale
  * UI القديم (Tabs + GeckoView + SendBar) + إضافة:
  * ✅ Web Agent (aiSettings.webAgentId) يتم حقنه ضمن السياق عند الإرسال.
  * ✅ زر في الـ TopBar يفتح قائمة الوكلاء للتبديل بينهم.
+ * ✅ Workspace Summary (الذاكرة الشجرية - Workspace Summary) يتم حقنه ضمن السياق عند الإرسال (scopeKey = web:<platformId>).
  */
 @Composable
 fun GeckoTestScreen(
@@ -117,6 +119,12 @@ fun GeckoTestScreen(
     val app = context.applicationContext as AichatApp
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val scope = rememberCoroutineScope()
+
+    // محاولة الحصول على ConversationRepository (لا نغيّر signature الشاشة).
+    // إن كان موجودًا داخل ChatViewModel (حتى لو private) سنستخرجه بالـ reflection.
+    val conversationRepository: ConversationRepository? = remember(chatViewModel) {
+        resolveConversationRepositoryFromViewModel(chatViewModel)
+    }
 
     // ✅ مهم: ضمان وجود المنصات الافتراضية
     LaunchedEffect(webPlatformRepository) {
@@ -246,6 +254,8 @@ fun GeckoTestScreen(
         if (platform.url.isNotBlank()) hostOrEmptyFrom(platform.url) else hostOrEmptyFrom(currentUrl)
 
     fun webKind(): WebKind = classifyHost(targetDomainStable())
+
+    fun webWorkspaceScopeKey(platformId: String): String = "web:$platformId"
 
     // ============================================================
     // Gecko delegates
@@ -680,6 +690,19 @@ fun GeckoTestScreen(
                                 }
                             }
 
+                        // ✅ Workspace Summary injection (web:<platformId>)
+                        val workspaceSummary: String = conversationRepository
+                            ?.let { repo ->
+                                runCatching {
+                                    val ws = repo.getOrCreateWorkspace(
+                                        scopeKey = webWorkspaceScopeKey(platform.id),
+                                        title = "Web: ${platform.name}"
+                                    )
+                                    ws.summary.trim()
+                                }.getOrNull()
+                            }
+                            .orEmpty()
+
                         val extraNotes = aiSettings.customSystemInstruction.trim()
                         val includeAccuracy = accuracyEnabled   // ✅ من state (ومن prefs أيضًا)
                         val kind = webKind()
@@ -691,6 +714,14 @@ fun GeckoTestScreen(
                                 appendLine(webAgentPrompt.trim())
                                 appendLine()
                             }
+
+                            // ✅ Workspace Summary
+                            if (workspaceSummary.isNotBlank()) {
+                                appendLine("WORKSPACE_SUMMARY:")
+                                appendLine(workspaceSummary)
+                                appendLine()
+                            }
+
                             if (includeAccuracy) {
                                 appendLine("ACCURACY_POLICY:")
                                 appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
@@ -955,4 +986,25 @@ private fun GeckoUnavailableDialog(
         confirmButton = { Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") } },
         dismissButton = { OutlinedButton(onClick = onBack) { Text("رجوع") } }
     )
+}
+
+/**
+ * يحاول استخراج ConversationRepository من ChatViewModel بدون تغيير الـ API لهذه الشاشة.
+ * يعتمد على وجود field داخل ChatViewModel نوعه ConversationRepository (حتى لو private).
+ */
+private fun resolveConversationRepositoryFromViewModel(vm: ChatViewModel?): ConversationRepository? {
+    if (vm == null) return null
+    return runCatching {
+        val wanted = ConversationRepository::class.java
+        var c: Class<*>? = vm.javaClass
+        while (c != null) {
+            val f = c.declaredFields.firstOrNull { wanted.isAssignableFrom(it.type) }
+            if (f != null) {
+                f.isAccessible = true
+                return@runCatching (f.get(vm) as? ConversationRepository)
+            }
+            c = c.superclass
+        }
+        null
+    }.getOrNull()
 }
