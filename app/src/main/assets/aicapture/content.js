@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.0.45";
+  var VERSION = "1.0.46";
   var HOST = String((location && location.hostname) || "");
   var HREF = String((location && location.href) || "");
 
@@ -12,18 +12,30 @@
   // Platforms
   // ============================================================
 
+  function hostEndsWith(h, suffix) {
+    try { return String(h || "").toLowerCase().endsWith(String(suffix || "").toLowerCase()); } catch (_) { return false; }
+  }
+  function hostContains(h, part) {
+    try { return String(h || "").toLowerCase().indexOf(String(part || "").toLowerCase()) !== -1; } catch (_) { return false; }
+  }
+
   var PLATFORMS = {
     chatgpt: {
       id: "chatgpt",
       name: "ChatGPT",
-      matches: function () { return HOST === "chatgpt.com" || HOST === "chat.openai.com"; },
+      matches: function () {
+        return HOST === "chatgpt.com" || HOST === "chat.openai.com" || hostEndsWith(HOST, ".openai.com");
+      },
       responseSelectors: [
+        // ChatGPT new UI
+        'article[data-message-author-role="assistant"]',
         '[data-message-author-role="assistant"]',
         '[data-role="assistant"]',
         '[data-message-author="assistant"]',
         ".agent-turn"
       ],
       userSelectors: [
+        'article[data-message-author-role="user"]',
         '[data-message-author-role="user"]',
         '[data-role="user"]',
         '[data-message-author="user"]'
@@ -31,18 +43,37 @@
       userTextSelector: ".whitespace-pre-wrap, .markdown, [data-message-content]",
       extractResponse: function (el) {
         if (!el) return "";
-        var md = null; try { md = el.querySelector(".markdown"); } catch (e) {}
+        var md = null;
+        try { md = el.querySelector(".markdown"); } catch (e) {}
         return getElementText(md || el);
       },
-      legacyContainerMode: true
+      // ✅ تم تعطيل legacyContainerMode لأنه كان سبب التقاط التحذير
+      legacyContainerMode: false
     },
 
     venice: {
       id: "venice",
       name: "Venice",
-      matches: function () { return HOST === "venice.ai"; },
-      responseSelectors: [".prose", "[data-message-author-role='assistant']", ".assistant-message", ".ai-message"],
-      userSelectors: ["[data-message-author-role='user']", ".user-message", ".human-message", ".message.user"],
+      matches: function () {
+        // بعض نسخ الموقع قد تكون chat.venice.ai أو www.venice.ai
+        return HOST === "venice.ai" || hostEndsWith(HOST, ".venice.ai");
+      },
+      responseSelectors: [
+        '[data-message-author-role="assistant"]',
+        '[data-role="assistant"]',
+        ".assistant-message",
+        ".ai-message",
+        ".message.assistant",
+        ".prose",
+        "main .prose"
+      ],
+      userSelectors: [
+        '[data-message-author-role="user"]',
+        '[data-role="user"]',
+        ".user-message",
+        ".human-message",
+        ".message.user"
+      ],
       userTextSelector: ".prose, .message-content, .content, [data-message-content]",
       extractResponse: function (el) { return getElementText(el); },
       legacyContainerMode: false
@@ -51,9 +82,35 @@
     arena: {
       id: "arena",
       name: "Arena",
-      matches: function () { return HOST === "arena.ai"; },
-      responseSelectors: ["main .prose", ".prose.prose-base", "div.prose"],
-      userSelectors: ["[data-message-author-role='user']", ".user-message", ".human-message", ".message.user"],
+      matches: function () {
+        // ✅ دعم الدومينات الشائعة للـ Arena
+        if (HOST === "arena.ai") return true;
+        if (HOST === "lmarena.ai") return true;
+        if (HOST === "arena.lmsys.org") return true;
+        if (HOST === "chat.lmsys.org") return true;
+        if (hostEndsWith(HOST, ".lmsys.org")) return true;
+        // fallback: كلمة arena مع lmsys
+        if (hostContains(HOST, "lmsys") && hostContains(HOST, "arena")) return true;
+        return false;
+      },
+      responseSelectors: [
+        '[data-message-author-role="assistant"]',
+        '[data-role="assistant"]',
+        ".assistant-message",
+        ".ai-message",
+        ".message.assistant",
+        "main .prose",
+        ".prose.prose-base",
+        "div.prose",
+        "main div.prose"
+      ],
+      userSelectors: [
+        '[data-message-author-role="user"]',
+        '[data-role="user"]',
+        ".user-message",
+        ".human-message",
+        ".message.user"
+      ],
       userTextSelector: "main .prose, .prose, .message-content, [data-message-content]",
       extractResponse: function (el) { return getElementText(el); },
       legacyContainerMode: false
@@ -65,7 +122,7 @@
       matches: function () { return true; },
       responseSelectors: [
         '[data-message-author-role="assistant"]', '[data-role="assistant"]', '[data-message-author="assistant"]',
-        ".assistant-message", ".ai-message", ".model-response", ".response-container", ".prose"
+        ".assistant-message", ".ai-message", ".model-response", ".response-container", ".prose", "main .prose"
       ],
       userSelectors: [
         '[data-message-author-role="user"]', '[data-role="user"]', '[data-message-author="user"]',
@@ -482,24 +539,39 @@
   // Assistant response extraction
   // ============================================================
 
-  function getChatGPTConversationContainers() {
-    var out = [];
-    try {
-      var sections = document.querySelectorAll('section[aria-label^="محادثة"]');
-      for (var i = 0; i < sections.length; i++) out.push(sections[i]);
-    } catch (e) {}
-    if (!out.length) {
-      try {
-        var regions = document.querySelectorAll('[role="region"][aria-label="محادثة"]');
-        for (var j = 0; j < regions.length; j++) out.push(regions[j]);
-      } catch (e2) {}
+  function cleanAssistantResponse(text) {
+    if (!text) return "";
+    var s = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    s = s.replace(/\n[ \t]*\n[ \t]*\n+/g, "\n\n").replace(/[ \t]+\n/g, "\n");
+    return s.trim();
+  }
+
+  function isChatGPTDisclaimerCandidate(text) {
+    if (!text) return false;
+    var t = String(text).trim();
+    if (!t) return false;
+
+    var s = t.toLowerCase();
+
+    // English disclaimer
+    if (s.indexOf("chatgpt can make mistakes") !== -1) return true;
+    if (s.indexOf("consider checking important information") !== -1) return true;
+
+    // Arabic disclaimer (أكثر من صيغة)
+    if (s.indexOf("قد يخطئ") !== -1) return true;
+    if (s.indexOf("تحقق من المعلومات") !== -1) return true;
+
+    // Heuristic: short text containing chatgpt + mistake-like wording
+    if (t.length < 200 && s.indexOf("chatgpt") !== -1 && (s.indexOf("mistake") !== -1 || s.indexOf("خطأ") !== -1 || s.indexOf("يخطئ") !== -1)) {
+      return true;
     }
-    return out;
+
+    return false;
   }
 
   function getPlatformResponseElements() {
-    if (CURRENT_PLATFORM.id === "chatgpt" && CURRENT_PLATFORM.legacyContainerMode) return getChatGPTConversationContainers();
-    var res = [], sels = CURRENT_PLATFORM.responseSelectors || [];
+    var res = [];
+    var sels = CURRENT_PLATFORM.responseSelectors || [];
     for (var i = 0; i < sels.length; i++) {
       try {
         var els = document.querySelectorAll(sels[i]);
@@ -509,45 +581,56 @@
     return res;
   }
 
-  function cleanAssistantResponse(text) {
-    if (!text) return "";
-    var s = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    s = s.replace(/\n[ \t]*\n[ \t]*\n+/g, "\n\n").replace(/[ \t]+\n/g, "\n");
-    return s.trim();
-  }
-
-  function extractChatGPTAssistantText(conversationText) {
-    if (!conversationText) return "";
-    var markers = ["قال ChatGPT:", "قال ChatGPT :", "ChatGPT قال:", "ChatGPT:"];
-    var pos = -1, len = 0;
-    for (var i = 0; i < markers.length; i++) {
-      var p = conversationText.lastIndexOf(markers[i]);
-      if (p > pos) { pos = p; len = markers[i].length; }
-    }
-    if (pos === -1) return "";
-    return cleanAssistantResponse(conversationText.substring(pos + len).trim());
-  }
-
-  function extractLatestPlatformResponse() {
+  function extractLatestPlatformResponseWithMeta() {
     var els = getPlatformResponseElements();
-    if (!els.length) return "";
+    if (!els.length) return { text: "", count: 0, reason: "no_elements" };
+
+    var skippedInvisible = 0;
+    var skippedDisclaimer = 0;
+    var skippedArenaRejected = 0;
+
     for (var i = els.length - 1; i >= 0; i--) {
+      var el = els[i];
+      if (!el) continue;
+
+      // Try to avoid UI chrome / hidden blocks
+      if (!isProbablyVisible(el)) { skippedInvisible++; continue; }
+
       var t = "";
-      try { t = CURRENT_PLATFORM.extractResponse(els[i]); } catch (e) { t = getElementText(els[i]); }
+      try { t = CURRENT_PLATFORM.extractResponse(el); } catch (e) { t = getElementText(el); }
       t = cleanAssistantResponse(t);
-      if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(t)) continue;
-      if (t) return t;
+
+      if (!t) continue;
+
+      // ChatGPT: ignore the “may make mistakes” footer
+      if (CURRENT_PLATFORM.id === "chatgpt" && isChatGPTDisclaimerCandidate(t)) { skippedDisclaimer++; continue; }
+
+      // Arena guard
+      if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(t)) { skippedArenaRejected++; continue; }
+
+      return {
+        text: t,
+        count: els.length,
+        reason: "ok",
+        skippedInvisible: skippedInvisible,
+        skippedDisclaimer: skippedDisclaimer,
+        skippedArenaRejected: skippedArenaRejected
+      };
     }
-    return "";
+
+    return {
+      text: "",
+      count: els.length,
+      reason: "all_candidates_rejected",
+      skippedInvisible: skippedInvisible,
+      skippedDisclaimer: skippedDisclaimer,
+      skippedArenaRejected: skippedArenaRejected
+    };
   }
 
   function getCurrentAssistantText() {
-    if (CURRENT_PLATFORM.id === "chatgpt") {
-      var containers = getChatGPTConversationContainers();
-      if (!containers.length) return "";
-      return extractChatGPTAssistantText(getElementText(containers[containers.length - 1]));
-    }
-    return extractLatestPlatformResponse();
+    var r = extractLatestPlatformResponseWithMeta();
+    return r.text || "";
   }
 
   // ============================================================
@@ -574,6 +657,9 @@
     if (text.indexOf("## السؤال") !== -1) return true;
     if (text.indexOf("تعليمات مهمة") !== -1) return true;
     if (text.indexOf("ملاحظات إضافية") !== -1) return true;
+    if (text.indexOf("### Context (visible)") !== -1) return true;
+    if (text.indexOf("### End Context") !== -1) return true;
+
     var t = text.trim();
     return t.startsWith("السؤال") && (Date.now() - lastInjectedAt) < 60000;
   }
@@ -600,14 +686,25 @@
   var lastCandidate = "";
   var stableSince = 0;
 
+  var captureStartedAt = 0;
+  var CAPTURE_TIMEOUT_MS = 90000; // 90s
+
   function startResponseCapture() {
     captureActive = true;
     captureFinished = false;
     lastCandidate = "";
     stableSince = 0;
+    captureStartedAt = Date.now();
     baselineAssistant = getCurrentAssistantText();
     log("🧪 Capture started platform=" + CURRENT_PLATFORM.id + " baselineLen=" + (baselineAssistant ? baselineAssistant.length : 0));
     watchForResponse();
+  }
+
+  function stopCapture(reason) {
+    if (!captureActive) return;
+    captureActive = false;
+    captureFinished = true;
+    log("⏹️ Capture stopped reason=" + String(reason || ""));
   }
 
   function finishCapture(answer) {
@@ -633,6 +730,10 @@
   function watchForResponse() {
     if (!captureActive || captureFinished) return;
 
+    if (captureStartedAt && (Date.now() - captureStartedAt) > CAPTURE_TIMEOUT_MS) {
+      return stopCapture("timeout");
+    }
+
     var current = getCurrentAssistantText();
 
     if (CURRENT_PLATFORM.id === "arena" && current && isArenaRejectedCandidate(current)) return setTimeout(watchForResponse, 900);
@@ -653,22 +754,33 @@
   // Manual capture
   // ============================================================
 
-  function sendManualCaptureResult(text, reason) {
+  function sendManualCaptureResult(text, reason, meta) {
     var cleaned = cleanAssistantResponse(text || "");
+    var m = meta || {};
     sendToBackground({
       type: "CAPTURE_RESULT",
       success: !!cleaned,
       text: cleaned,
-      debug: { assistant: cleaned ? 1 : 0, articles: 0, bodyLen: cleaned.length, platform: CURRENT_PLATFORM.id, reason: reason || "" },
+      debug: {
+        assistant: cleaned ? 1 : 0,
+        articles: 0,
+        bodyLen: cleaned.length,
+        platform: CURRENT_PLATFORM.id,
+        reason: reason || "",
+        candidates: m.count || 0,
+        skippedInvisible: m.skippedInvisible || 0,
+        skippedDisclaimer: m.skippedDisclaimer || 0,
+        skippedArenaRejected: m.skippedArenaRejected || 0
+      },
       source: CURRENT_PLATFORM.id
     });
   }
 
   function captureCurrentResponse() {
-    var cur = getCurrentAssistantText();
-    if (!cur) return sendManualCaptureResult("", "assistant_response_not_found");
-    if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(cur)) return sendManualCaptureResult("", "rejected_injected_prompt");
-    sendManualCaptureResult(cur, "current_response");
+    var r = extractLatestPlatformResponseWithMeta();
+    if (!r.text) return sendManualCaptureResult("", r.reason || "assistant_response_not_found", r);
+    if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(r.text)) return sendManualCaptureResult("", "rejected_injected_prompt", r);
+    sendManualCaptureResult(r.text, "current_response", r);
   }
 
   // ============================================================
@@ -696,6 +808,7 @@
     out = out.replace(/SHARED_MEMORIES_XML:\s*<shared_memories>[\s\S]*?<\/shared_memories>\s*/ig, "");
     out = out.replace(/ACCURACY_POLICY:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
     out = out.replace(/EXTRA_NOTES:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
+    out = out.replace(/WORKSPACE_SUMMARY:\s*[\s\S]*?(?=\n{2,}|$)/ig, "");
     return out.trim();
   }
 
@@ -755,105 +868,6 @@
       log("❌ sanitizeOneNodeText failed: " + e2);
       return false;
     }
-  }
-
-  // ChatGPT-only sanitizer (avoid breaking UI)
-  function isSafeTextElement(el) {
-    if (!el || !el.querySelector) return true;
-    try {
-      if (el.querySelector("button, [role='button'], form, textarea, input, select")) return false;
-    } catch (_) {}
-    return true;
-  }
-
-  function pickBestMarkerElement(container) {
-    if (!container) return null;
-
-    var preferred = [".whitespace-pre-wrap", "[data-message-content]", ".markdown", "p", "div", "span"];
-    for (var i = 0; i < preferred.length; i++) {
-      try {
-        var el = container.querySelector(preferred[i]);
-        if (!el) continue;
-        if (!isSafeTextElement(el)) continue;
-        var t = getElementText(el);
-        if (looksLikeHasHiddenContext(t)) return el;
-      } catch (_) {}
-    }
-
-    var best = null;
-    var bestLen = 1e9;
-
-    try {
-      var walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT);
-      var visited = 0;
-
-      while (walker.nextNode()) {
-        visited++;
-        if (visited > 900) break;
-
-        var el2 = walker.currentNode;
-        if (!el2) continue;
-        if (!isSafeTextElement(el2)) continue;
-
-        var txt = getElementText(el2);
-        if (!looksLikeHasHiddenContext(txt)) continue;
-
-        var len = txt.length || 0;
-        if (len > 0 && len < bestLen) {
-          best = el2;
-          bestLen = len;
-          if (bestLen < 800) break;
-        }
-      }
-    } catch (_) {}
-
-    return best;
-  }
-
-  function sanitizeChatGPTOnly() {
-    if (CURRENT_PLATFORM.id !== "chatgpt") return 0;
-
-    var turns = [];
-    try {
-      var list = document.querySelectorAll('article[data-testid="conversation-turn"], div[data-testid="conversation-turn"]');
-      for (var i = 0; i < list.length; i++) turns.push(list[i]);
-    } catch (_) {}
-
-    if (!turns.length) {
-      try { var main = document.querySelector("main"); if (main) turns.push(main); } catch (_) {}
-    }
-    if (!turns.length) return 0;
-
-    var start = turns.length > 10 ? (turns.length - 10) : 0;
-
-    for (var ti = turns.length - 1; ti >= start; ti--) {
-      var turn = turns[ti];
-      if (!turn) continue;
-
-      var userBlocks = [];
-      try {
-        var ub = turn.querySelectorAll('[data-message-author-role="user"], [data-role="user"], [data-message-author="user"]');
-        for (var j = 0; j < ub.length; j++) userBlocks.push(ub[j]);
-      } catch (_) {}
-
-      if (!userBlocks.length) userBlocks.push(turn);
-
-      for (var ui = 0; ui < userBlocks.length; ui++) {
-        var block = userBlocks[ui];
-        if (!block) continue;
-
-        var blockText = "";
-        try { blockText = getElementText(block); } catch (_) {}
-        if (!looksLikeHasHiddenContext(blockText)) continue;
-
-        var best = pickBestMarkerElement(block);
-        if (best) {
-          if (sanitizeOneNodeText(best)) return 1;
-          if (isSafeTextElement(block) && sanitizeOneNodeText(block)) return 1;
-        }
-      }
-    }
-    return 0;
   }
 
   function sanitizeByUserElements() {
@@ -917,16 +931,11 @@
     // ✅ Arena: لا نخفي شيئًا (تريد الذاكرة ظاهرة هناك)
     if (CURRENT_PLATFORM.id === "arena") return 0;
 
-    var changedGpt = 0;
-    if (CURRENT_PLATFORM.id === "chatgpt") {
-      try { changedGpt = sanitizeChatGPTOnly(); } catch (_) { changedGpt = 0; }
-    }
-
     var changed1 = 0, changed2 = 0;
     try { changed1 = sanitizeByUserElements(); } catch (_) {}
     try { changed2 = sanitizeByCandidatesScan(); } catch (_) {}
 
-    var changed = changedGpt + changed1 + changed2;
+    var changed = changed1 + changed2;
     if (changed > 0) log("🧼 Sanitized " + changed + " node(s) reason=" + (reason || "") + " platform=" + CURRENT_PLATFORM.id);
     return changed;
   }
@@ -965,7 +974,7 @@
 
     sanitizeAggressiveUntil = Date.now() + 12000;
 
-    var changedNow = sanitizeAllNow("after_send_now");
+    sanitizeAllNow("after_send_now");
 
     if (sanitizeAggressiveTimer) { try { clearInterval(sanitizeAggressiveTimer); } catch (_) {} }
     var tries = 0;
@@ -977,13 +986,6 @@
         sanitizeAggressiveTimer = 0;
       }
     }, 250);
-
-    if (changedNow === 0) {
-      try {
-        log("🧼 scheduleSanitizeAfterSend: changedNow=0 marker=" +
-          (String(injectedText || "").indexOf(HIDDEN_MARKER) !== -1 ? "yes" : "no"));
-      } catch (_) {}
-    }
   }
 
   // ============================================================
@@ -1083,15 +1085,17 @@
           }
           sendContextWritten(true, contextId, "text_injected", "ok");
 
+          // ✅ ابدأ الالتقاط دائمًا بعد الحقن (حتى Arena text-only)
+          // - في Arena نحن لا نرسل تلقائيًا لتجنب مشاكل الأمان
+          // - لكن نترك الالتقاط شغالًا، بحيث إذا ضغطت "إرسال" يدويًا داخل Arena يتم التقاط الرد
+          startResponseCapture();
+
           // ✅ Arena: text-only (no send) لتجنب الكابتشا/الأمان
           if (CURRENT_PLATFORM.id === "arena") {
-            sendContextWritten(true, contextId, "arena_text_only", "injected_no_send");
+            sendContextWritten(true, contextId, "arena_text_only", "injected_no_send_capture_waiting");
             sendContextConsumed(contextId);
             return;
           }
-
-          // Start capture only when we will send
-          startResponseCapture();
 
           // ChatGPT/Venice/others: reliable send with retry
           sendWithRetry(input, opts, contextId, text);
