@@ -101,7 +101,7 @@ import java.util.Locale
  * UI القديم (Tabs + GeckoView + SendBar) + إضافة:
  * ✅ Web Agent (aiSettings.webAgentId) يتم حقنه ضمن السياق عند الإرسال.
  * ✅ زر في الـ TopBar يفتح قائمة الوكلاء للتبديل بينهم.
- * ✅ Workspace Summary (الذاكرة الشجرية - Workspace Summary) يتم حقنه ضمن السياق عند الإرسال (scopeKey = web:<platformId>).
+ * ✅ Workspace Summary (ذاكرة مشتركة لكل منصات الويب) يتم حقنه ضمن السياق عند الإرسال (scopeKey = web:global).
  */
 @Composable
 fun GeckoTestScreen(
@@ -255,7 +255,8 @@ fun GeckoTestScreen(
 
     fun webKind(): WebKind = classifyHost(targetDomainStable())
 
-    fun webWorkspaceScopeKey(platformId: String): String = "web:$platformId"
+    // ✅ ذاكرة مشتركة لكل منصات الويب:
+    fun webWorkspaceScopeKeyGlobal(): String = "web:global"
 
     // ============================================================
     // Gecko delegates
@@ -690,13 +691,13 @@ fun GeckoTestScreen(
                                 }
                             }
 
-                        // ✅ Workspace Summary injection (web:<platformId>)
+                        // ✅ Workspace Summary injection (مشترك لكل الويب)
                         val workspaceSummary: String = conversationRepository
                             ?.let { repo ->
                                 runCatching {
                                     val ws = repo.getOrCreateWorkspace(
-                                        scopeKey = webWorkspaceScopeKey(platform.id),
-                                        title = "Web: ${platform.name}"
+                                        scopeKey = webWorkspaceScopeKeyGlobal(),
+                                        title = "Web (Global)"
                                     )
                                     ws.summary.trim()
                                 }.getOrNull()
@@ -704,18 +705,16 @@ fun GeckoTestScreen(
                             .orEmpty()
 
                         val extraNotes = aiSettings.customSystemInstruction.trim()
-                        val includeAccuracy = accuracyEnabled   // ✅ من state (ومن prefs أيضًا)
+                        val includeAccuracy = accuracyEnabled
                         val kind = webKind()
 
                         val contextBlock = buildString {
-                            // ✅ Web Agent Persona
                             if (webAgentPrompt.isNotBlank()) {
                                 appendLine("AGENT_PERSONA:")
                                 appendLine(webAgentPrompt.trim())
                                 appendLine()
                             }
 
-                            // ✅ Workspace Summary
                             if (workspaceSummary.isNotBlank()) {
                                 appendLine("WORKSPACE_SUMMARY:")
                                 appendLine(workspaceSummary)
@@ -871,7 +870,7 @@ private fun WebSendBar(
                     label = { Text(if (isEnhanced) "مُحسّن ✨" else "اكتب رسالتك") }
                 )
 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                     IconButton(
                         onClick = if (isEnhanced) onClearEnhanced else onEnhance,
                         enabled = text.isNotBlank() && !isSending && !isEnhancing
