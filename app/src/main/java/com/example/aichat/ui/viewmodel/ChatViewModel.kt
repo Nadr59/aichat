@@ -50,6 +50,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val repository = ChatRepository(application)
     val customRequestCount: StateFlow<Int> = repository.customRequestCount
 
+    // NOTE: GeckoTestScreen currently reads this via reflection for Workspace Summary injection.
     private val conversationRepository = ConversationRepository(chatDao)
     private val memoryRepository = MemoryRepository(memoryDao, application)
 
@@ -114,6 +115,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val sharedMemories: StateFlow<List<MemoryItem>> =
         memoryRepository.getSharedMemories()
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    // =========================
+    // Web (global) support
+    // =========================
+    // ✅ نجعل الويب كله Workspace واحد مشترك: scopeKey = "web:global"
+    private fun webGlobalScopeKey(): String = "web:global"
+    private fun webGlobalWorkspaceTitle(): String = "WEB • Global"
+    private fun webGlobalConversationTitle(): String = "Web — Global"
+
+    // نخزن آخر سؤال أُرسل من شاشات الويب لكي نقدر نحدّث الملخص عند التقاط رد المساعد.
+    private val _lastWebUserText = MutableStateFlow<String?>(null)
+
+    // Conversation منفصل للويب حتى لا نخرب currentConversationId الخاص بشاشة الـ API
+    private val _currentWebConversationId = MutableStateFlow<Long?>(null)
 
     fun getConversationMemories(conversationId: Long): Flow<List<MemoryItem>> =
         memoryRepository.getConversationMemories(conversationId)
@@ -265,7 +280,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             appendLine(prev.ifBlank { "(فارغ)" })
             appendLine()
             appendLine("التبادل الجديد:")
-            appendLine("USER: $u")
+            appendLine("USER: ${u.ifBlank { "(غير متوفر)" }}")
             appendLine("ASSISTANT: $a")
             appendLine()
             appendLine("قواعد الإخراج:")
@@ -304,6 +319,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (updated.isNotBlank()) {
                     conversationRepository.updateWorkspaceSummary(workspaceId, updated)
                     _workspaceSummary.value = updated
+                }
+            }
+        }
+    }
+
+    /**
+     * تحديث ملخص Workspace محدد بدون الاعتماد على _workspaceSummary الحالي
+     * (مفيد للويب global حتى لا نخلط Summary الخاص بالـ API).
+     */
+    private fun updateWorkspaceSummaryAsyncForWorkspace(
+        workspaceId: Long,
+        userText: String,
+        assistantText: String
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                val prev = conversationRepository.getWorkspaceById(workspaceId)?.summary.orEmpty()
+                val updated = generateUpdatedWorkspaceSummary(
+                    previousSummary = prev,
+                    userText = userText,
+                    assistantText = assistantText
+                )
+
+                if (updated.isNotBlank()) {
+                    conversationRepository.updateWorkspaceSummary(workspaceId, updated)
+
+                    // لو المستخدم حالياً على نفس الـ workspace في شاشة الـ API، حدّث state أيضاً
+                    if (_currentWorkspaceId.value == workspaceId) {
+                        _workspaceSummary.value = updated
+                    }
                 }
             }
         }
@@ -352,7 +397,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _isEnhancing.value = false
 
         // ✅ لا نمسح workspace summary لكي تستمر “الجلسة” بين المحادثات على نفس الموديل
-        // (سيتم التأكد/التحديث عند الإرسال أو فتح محادثة مرتبطة بـ workspace)
     }
 
     fun toggleMemoryAccess(enabled: Boolean) {
@@ -558,6 +602,76 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // Web AI response (capture)
     // =========================
 
+    /**
+     * (مهم للـ Web Global Summary)
+     * استدعِ هذه قبل الإرسال في GeckoTestScreen:
+     * chatViewModel?.onWebUserMessageSent(question)
+     */
+    fun onWebUserMessageSent(userText: String) {
+        val clean = userText.trim()
+        if (clean.isBlank()) return
+        _lastWebUserText.value = clean
+
+        // (اختياري) نخزن سؤال المستخدم في DB داخل محادثة ويب global، بدون تغيير currentConversationId للـ API
+        viewModelScope.launch {
+            runCatching {
+                val ws = conversationRepository.getOrCreateWorkspace(
+                    scopeKey = webGlobalScopeKey(),
+                    title = webGlobalWorkspaceTitle()
+                )
+                val convId = ensureWebGlobalConversation(workspaceId = ws.id)
+
+                conversationRepository.insertMessage(
+                    Message(
+                        conversationId = convId,
+                        role = "user",
+                        content = clean,
+                        messageType = "text"
+                    )
+                )
+
+                conversationRepository.updateTitleAndTimestamp(
+                    id = convId,
+                    title = webGlobalConversationTitle(),
+                    updatedAt = System.currentTimeMillis()
+                )
+            }
+        }
+    }
+
+    private suspend fun ensureWebGlobalConversation(workspaceId: Long): Long {
+        val existingId = _currentWebConversationId.value
+        if (existingId != null) {
+            val conv = conversationRepository.getConversationById(existingId)
+            if (conv != null) {
+                val sameWs = conv.workspaceId == workspaceId
+                if (sameWs) return existingId
+
+                // لو كانت محادثة قديمة بدون workspace أو workspace مختلف، اربطها/أو تجاهلها
+                if (conv.workspaceId == null) {
+                    conversationRepository.updateConversationWorkspace(
+                        conversationId = existingId,
+                        workspaceId = workspaceId,
+                        parentConversationId = conv.parentConversationId
+                    )
+                    return existingId
+                }
+            }
+        }
+
+        val newId = conversationRepository.insertConversation(
+            Conversation(
+                title = webGlobalConversationTitle(),
+                memoryAccessEnabled = true,
+                agentId = null,
+                workspaceId = workspaceId,
+                parentConversationId = null
+            )
+        )
+        _currentWebConversationId.value = newId
+        return newId
+    }
+
     fun onWebAiResponse(
         platformId: String,
         platformName: String,
@@ -569,34 +683,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                // ✅ Workspace per web platform
+                // ✅ Workspace واحد مشترك لكل منصات الويب
                 val ws = conversationRepository.getOrCreateWorkspace(
-                    scopeKey = "web:$platformId",
-                    title = "WEB • $platformName"
+                    scopeKey = webGlobalScopeKey(),
+                    title = webGlobalWorkspaceTitle()
                 )
 
-                val convId = _currentConversationId.value ?: run {
-                    val id = conversationRepository.insertConversation(
-                        Conversation(
-                            title = "$platformName — Web",
-                            memoryAccessEnabled = _memoryAccessEnabled.value,
-                            workspaceId = ws.id
-                        )
-                    )
-                    _currentConversationId.value = id
-                    startCollecting(id)
-                    id
-                }
-
-                // لو المحادثة بدون workspace لأي سبب
-                val conv = conversationRepository.getConversationById(convId)
-                if (conv?.workspaceId == null) {
-                    conversationRepository.updateConversationWorkspace(
-                        conversationId = convId,
-                        workspaceId = ws.id,
-                        parentConversationId = conv?.parentConversationId
-                    )
-                }
+                val convId = ensureWebGlobalConversation(workspaceId = ws.id)
 
                 val messageId = conversationRepository.insertMessage(
                     Message(
@@ -609,7 +702,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 conversationRepository.updateTitleAndTimestamp(
                     id = convId,
-                    title = "$platformName — Web",
+                    title = webGlobalConversationTitle(),
                     updatedAt = System.currentTimeMillis()
                 )
 
@@ -624,10 +717,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
 
-                // (اختياري) يمكنك لاحقًا تحديث workspace summary للويب أيضاً،
-                // لكن غالباً الأفضل أن يتم من جهة GeckoTestScreen عند إرسال سؤال + جواب.
+                // ✅ تحديث Workspace Summary العالمي للويب (حتى ينتقل معك بين ChatGPT/Venice/غيرها)
+                val lastUser = _lastWebUserText.value.orEmpty()
+                updateWorkspaceSummaryAsyncForWorkspace(
+                    workspaceId = ws.id,
+                    userText = lastUser,
+                    assistantText = clean
+                )
+                _lastWebUserText.value = null
 
             } catch (_: Exception) {
+                // intentionally ignored (web capture can be noisy)
             }
         }
     }
