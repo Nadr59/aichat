@@ -196,7 +196,7 @@ fun ChatScreen(
                         Icon(Icons.Filled.SmartToy, contentDescription = "Agent")
                     }
 
-                    // ✅ NEW: زر تفريع من المحادثة الحالية
+                    // ✅ NEW: تفريع من المحادثة الحالية
                     IconButton(
                         onClick = { showBranchDialog = true },
                         enabled = conversationId != null && !isLoading
@@ -284,14 +284,12 @@ fun ChatScreen(
         }
     }
 
-    // ✅ NEW: تأكيد التفريع
+    // ✅ NEW: Branch dialog
     if (showBranchDialog) {
         AlertDialog(
             onDismissRequest = { showBranchDialog = false },
             title = { Text("تفريع المحادثة") },
-            text = {
-                Text("سيتم إنشاء محادثة جديدة كفرع من المحادثة الحالية والانتقال إليها مباشرة.")
-            },
+            text = { Text("سيتم إنشاء محادثة جديدة كفرع من المحادثة الحالية والانتقال إليها مباشرة.") },
             confirmButton = {
                 TextButton(
                     onClick = {
