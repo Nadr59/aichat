@@ -68,6 +68,7 @@ fun ChatScreen(
     }
 
     var showAgentDialog by remember { mutableStateOf(false) }
+    var showBranchDialog by remember { mutableStateOf(false) } // ✅ NEW
 
     // ✅ FIX: استخدم TextFieldValue (يعالج composing text)
     var userInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
@@ -195,6 +196,14 @@ fun ChatScreen(
                         Icon(Icons.Filled.SmartToy, contentDescription = "Agent")
                     }
 
+                    // ✅ NEW: زر تفريع من المحادثة الحالية
+                    IconButton(
+                        onClick = { showBranchDialog = true },
+                        enabled = conversationId != null && !isLoading
+                    ) {
+                        Icon(Icons.Filled.AccountTree, contentDescription = "تفريع")
+                    }
+
                     IconButton(onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }) {
                         Icon(
                             Icons.Filled.Memory,
@@ -273,6 +282,29 @@ fun ChatScreen(
                 modifier = Modifier.fillMaxWidth()
             )
         }
+    }
+
+    // ✅ NEW: تأكيد التفريع
+    if (showBranchDialog) {
+        AlertDialog(
+            onDismissRequest = { showBranchDialog = false },
+            title = { Text("تفريع المحادثة") },
+            text = {
+                Text("سيتم إنشاء محادثة جديدة كفرع من المحادثة الحالية والانتقال إليها مباشرة.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.branchFromCurrentConversation()
+                        showBranchDialog = false
+                    },
+                    enabled = conversationId != null && !isLoading
+                ) { Text("إنشاء فرع") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBranchDialog = false }) { Text("إلغاء") }
+            }
+        )
     }
 
     // Agent picker (per conversation)
@@ -503,8 +535,6 @@ private fun InputBar(
                 },
                 keyboardOptions = KeyboardOptions(
                     imeAction = ImeAction.Send,
-                    // إذا أردت إبقاء autocorrect، اجعلها true.
-                    // false أحيانًا يحل مشاكل composing مع بعض الكيبوردات.
                     autoCorrect = false
                 ),
                 keyboardActions = KeyboardActions(
