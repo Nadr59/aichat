@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "AiChat Web Extension",
-  "version": "1.0.45",
+  "version": "1.0.47",
   "description": "AiChat GeckoView WebExtension",
   "permissions": [
     "nativeMessaging",
@@ -18,7 +18,8 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "browser_specific_settings": {
