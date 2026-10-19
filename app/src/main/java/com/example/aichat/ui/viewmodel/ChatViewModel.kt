@@ -361,6 +361,54 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * ✅ NEW: تفريع من المحادثة الحالية (Branch from current conversation)
+     *
+     * - ينشئ Conversation جديدة
+     * - parentConversationId = المحادثة الحالية
+     * - workspaceId = نفس Workspace للأب (للاستمرارية عبر Workspace Summary)
+     * - ثم يفتح الفرع الجديد مباشرة
+     */
+    fun branchFromCurrentConversation() {
+        val parentId = _currentConversationId.value ?: return
+        if (_isLoading.value) return
+
+        viewModelScope.launch {
+            runCatching {
+                val parent = conversationRepository.getConversationById(parentId) ?: return@launch
+
+                // ضمنّا أن للأب Workspace، واستخدمناه للفرع
+                val ws = ensureWorkspaceForConversation(parentId)
+
+                val branchTitle = buildString {
+                    val base = parent.title.trim().ifBlank { "محادثة" }.take(45)
+                    append("فرع: ")
+                    append(base)
+                }.take(60)
+
+                val newId = conversationRepository.insertConversation(
+                    Conversation(
+                        title = branchTitle.ifBlank { "فرع جديد" },
+                        memoryAccessEnabled = parent.memoryAccessEnabled,
+                        agentId = parent.agentId,
+                        workspaceId = ws.id,
+                        parentConversationId = parentId
+                    )
+                )
+
+                // تنظيف أي مرفقات/حالة عالقة من المحادثة السابقة
+                _selectedImageBase64.value = null
+                _memoryContext.value = ""
+                _enhancedQuery.value = null
+
+                // فتح الفرع
+                openConversation(newId)
+            }.onFailure { e ->
+                _error.value = "فشل إنشاء فرع: ${e.message ?: "خطأ غير معروف"}"
+            }
+        }
+    }
+
     fun newConversation() {
         messagesCollectJob?.cancel()
         messagesCollectJob = null
