@@ -75,6 +75,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentConversationId = MutableStateFlow<Long?>(null)
     val currentConversationId: StateFlow<Long?> = _currentConversationId.asStateFlow()
 
+    // ✅ NEW (اختياري لكنه مفيد): Parent للمحادثة الحالية (لـ UI الشجري لاحقًا)
+    private val _currentParentConversationId = MutableStateFlow<Long?>(null)
+    val currentParentConversationId: StateFlow<Long?> = _currentParentConversationId.asStateFlow()
+
     private val _currentAgentId = MutableStateFlow<String?>(null)
     val currentAgentId: StateFlow<String?> = _currentAgentId.asStateFlow()
 
@@ -118,6 +122,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getConversationMemories(conversationId: Long): Flow<List<MemoryItem>> =
         memoryRepository.getConversationMemories(conversationId)
+
+    // ✅ (اختياري) للاستفادة من observeChildConversations الموجودة بالـ DAO لاحقًا
+    fun observeChildConversations(parentConversationId: Long): Flow<List<Conversation>> =
+        conversationRepository.observeChildConversations(parentConversationId)
 
     fun addMemory(
         content: String,
@@ -349,6 +357,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val conv = conversationRepository.getConversationById(conversationId)
+
+            // ✅ NEW: parent id
+            _currentParentConversationId.value = conv?.parentConversationId
+
             _memoryAccessEnabled.value = conv?.memoryAccessEnabled ?: true
             _currentAgentId.value = conv?.agentId
 
@@ -362,7 +374,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * ✅ NEW: تفريع من المحادثة الحالية (Branch from current conversation)
+     * ✅ تفريع من المحادثة الحالية (Branch from current conversation)
      *
      * - ينشئ Conversation جديدة
      * - parentConversationId = المحادثة الحالية
@@ -370,12 +382,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * - ثم يفتح الفرع الجديد مباشرة
      */
     fun branchFromCurrentConversation() {
-        val parentId = _currentConversationId.value ?: return
+        val parentId = _currentConversationId.value
+        if (parentId == null) {
+            _error.value = "لا يمكن إنشاء فرع قبل فتح/إنشاء محادثة."
+            return
+        }
         if (_isLoading.value) return
 
         viewModelScope.launch {
             runCatching {
-                val parent = conversationRepository.getConversationById(parentId) ?: return@launch
+                val parent = conversationRepository.getConversationById(parentId)
+                    ?: throw IllegalStateException("المحادثة الأصل غير موجودة")
 
                 // ضمنّا أن للأب Workspace، واستخدمناه للفرع
                 val ws = ensureWorkspaceForConversation(parentId)
@@ -396,7 +413,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                // تنظيف أي مرفقات/حالة عالقة من المحادثة السابقة
+                // مهم: ارفع updatedAt للفرع حتى يظهر أعلى القائمة مباشرة
+                conversationRepository.updateTitleAndTimestamp(
+                    id = newId,
+                    title = branchTitle.ifBlank { "فرع جديد" },
+                    updatedAt = System.currentTimeMillis()
+                )
+
+                // تنظيف أي مرفقات/حالة عالقة
                 _selectedImageBase64.value = null
                 _memoryContext.value = ""
                 _enhancedQuery.value = null
@@ -414,6 +438,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         messagesCollectJob = null
 
         _currentConversationId.value = null
+        _currentParentConversationId.value = null
         _currentAgentId.value = null
         _messages.value = emptyList()
         _selectedImageBase64.value = null
