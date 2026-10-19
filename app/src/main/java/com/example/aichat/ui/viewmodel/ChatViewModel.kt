@@ -75,14 +75,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentConversationId = MutableStateFlow<Long?>(null)
     val currentConversationId: StateFlow<Long?> = _currentConversationId.asStateFlow()
 
-    // ✅ NEW (اختياري لكنه مفيد): Parent للمحادثة الحالية (لـ UI الشجري لاحقًا)
+    // ✅ Parent id للمحادثة الحالية (لـ Tree UI)
     private val _currentParentConversationId = MutableStateFlow<Long?>(null)
     val currentParentConversationId: StateFlow<Long?> = _currentParentConversationId.asStateFlow()
 
     private val _currentAgentId = MutableStateFlow<String?>(null)
     val currentAgentId: StateFlow<String?> = _currentAgentId.asStateFlow()
 
-    // ✅ Workspace (v11) — Summary across conversations (tree memory / continuity)
+    // ✅ Workspace (v11) — Summary across conversations
     private val _currentWorkspaceId = MutableStateFlow<Long?>(null)
     val currentWorkspaceId: StateFlow<Long?> = _currentWorkspaceId.asStateFlow()
 
@@ -123,7 +123,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun getConversationMemories(conversationId: Long): Flow<List<MemoryItem>> =
         memoryRepository.getConversationMemories(conversationId)
 
-    // ✅ (اختياري) للاستفادة من observeChildConversations الموجودة بالـ DAO لاحقًا
+    // ✅ Tree UI: children (فروع) للمحادثة
     fun observeChildConversations(parentConversationId: Long): Flow<List<Conversation>> =
         conversationRepository.observeChildConversations(parentConversationId)
 
@@ -215,11 +215,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _workspaceSummary.value = ws?.summary.orEmpty()
     }
 
-    /**
-     * يضمن أن للمحادثة Workspace.
-     * - إذا كان موجودًا: يحمّله
-     * - إذا لم يكن موجودًا: ينشئ Workspace حسب apiScopeKey ويلحقه بالمحادثة
-     */
     private suspend fun ensureWorkspaceForConversation(conversationId: Long): Workspace {
         val conv = conversationRepository.getConversationById(conversationId)
         val existingWsId = conv?.workspaceId
@@ -315,10 +310,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * تحديث ملخص Workspace محدد بدون الاعتماد على _workspaceSummary الحالي
-     * (مفيد للويب global حتى لا نخلط Summary الخاص بالـ API).
-     */
     private fun updateWorkspaceSummaryAsyncForWorkspace(
         workspaceId: Long,
         userText: String,
@@ -358,9 +349,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val conv = conversationRepository.getConversationById(conversationId)
 
-            // ✅ NEW: parent id
             _currentParentConversationId.value = conv?.parentConversationId
-
             _memoryAccessEnabled.value = conv?.memoryAccessEnabled ?: true
             _currentAgentId.value = conv?.agentId
 
@@ -373,14 +362,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * ✅ تفريع من المحادثة الحالية (Branch from current conversation)
-     *
-     * - ينشئ Conversation جديدة
-     * - parentConversationId = المحادثة الحالية
-     * - workspaceId = نفس Workspace للأب (للاستمرارية عبر Workspace Summary)
-     * - ثم يفتح الفرع الجديد مباشرة
-     */
     fun branchFromCurrentConversation() {
         val parentId = _currentConversationId.value
         if (parentId == null) {
@@ -394,7 +375,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val parent = conversationRepository.getConversationById(parentId)
                     ?: throw IllegalStateException("المحادثة الأصل غير موجودة")
 
-                // ضمنّا أن للأب Workspace، واستخدمناه للفرع
                 val ws = ensureWorkspaceForConversation(parentId)
 
                 val branchTitle = buildString {
@@ -413,19 +393,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                // مهم: ارفع updatedAt للفرع حتى يظهر أعلى القائمة مباشرة
+                // حتى يظهر في الأعلى فورًا
                 conversationRepository.updateTitleAndTimestamp(
                     id = newId,
                     title = branchTitle.ifBlank { "فرع جديد" },
                     updatedAt = System.currentTimeMillis()
                 )
 
-                // تنظيف أي مرفقات/حالة عالقة
                 _selectedImageBase64.value = null
                 _memoryContext.value = ""
                 _enhancedQuery.value = null
 
-                // فتح الفرع
                 openConversation(newId)
             }.onFailure { e ->
                 _error.value = "فشل إنشاء فرع: ${e.message ?: "خطأ غير معروف"}"
@@ -654,10 +632,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun webGlobalWorkspaceTitle(): String = "WEB • Global"
     private fun webGlobalConversationTitle(): String = "Web — Global"
 
-    // آخر سؤال أرسله المستخدم في الويب (يُستعمل لتحديث الملخص عندما يصل رد المساعد)
     private val _lastWebUserText = MutableStateFlow<String?>(null)
-
-    // Conversation منفصل للويب حتى لا نغير currentConversationId الخاص بالـ API
     private val _currentWebConversationId = MutableStateFlow<Long?>(null)
 
     fun onWebUserMessageSent(userText: String) {
@@ -666,7 +641,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         _lastWebUserText.value = clean
 
-        // (اختياري) نخزن سؤال المستخدم كـ message داخل محادثة web global
         viewModelScope.launch {
             runCatching {
                 val ws = conversationRepository.getOrCreateWorkspace(
@@ -734,7 +708,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                // ✅ Workspace واحد مشترك لكل منصات الويب
                 val ws = conversationRepository.getOrCreateWorkspace(
                     scopeKey = webGlobalScopeKey(),
                     title = webGlobalWorkspaceTitle()
@@ -768,7 +741,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
 
-                // ✅ تحديث Summary العالمي للويب
                 val lastUser = _lastWebUserText.value.orEmpty()
                 updateWorkspaceSummaryAsyncForWorkspace(
                     workspaceId = ws.id,
@@ -778,7 +750,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _lastWebUserText.value = null
 
             } catch (_: Exception) {
-                // capture can fail silently
+                // ignore
             }
         }
     }
