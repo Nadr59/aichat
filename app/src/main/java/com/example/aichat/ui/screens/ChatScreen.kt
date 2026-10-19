@@ -8,13 +8,17 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -27,17 +31,18 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
+import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
@@ -62,13 +67,71 @@ fun ChatScreen(
     val conversationId by viewModel.currentConversationId.collectAsState()
     val currentAgentId by viewModel.currentAgentId.collectAsState()
 
+    // ✅ Tree data
+    val parentConversationId by viewModel.currentParentConversationId.collectAsState()
+    val allConversations by viewModel.conversations.collectAsState()
+    val currentWorkspaceId by viewModel.currentWorkspaceId.collectAsState()
+
     val agents by agentsViewModel.agents.collectAsState()
     val currentAgentName = remember(currentAgentId, agents) {
         currentAgentId?.let { id -> agents.firstOrNull { it.id == id }?.name }
     }
 
     var showAgentDialog by remember { mutableStateOf(false) }
-    var showBranchDialog by remember { mutableStateOf(false) } // ✅ NEW
+    var showWebImportDialog by remember { mutableStateOf(false) }
+
+    // ✅ BottomSheet Tree
+    var showTreeSheet by remember { mutableStateOf(false) }
+    val treeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // ✅ Confirm create branch (safer UX)
+    var showBranchConfirm by remember { mutableStateOf(false) }
+
+    // Children of current
+    val childrenFlow = remember(conversationId) {
+        conversationId?.let { viewModel.observeChildConversations(it) } ?: flowOf(emptyList())
+    }
+    val childConversations by childrenFlow.collectAsState(initial = emptyList())
+
+    // Siblings: children of parent
+    val siblingsFlow = remember(parentConversationId) {
+        parentConversationId?.let { viewModel.observeChildConversations(it) } ?: flowOf(emptyList())
+    }
+    val siblingsAll by siblingsFlow.collectAsState(initial = emptyList())
+
+    val siblings = remember(siblingsAll, conversationId) {
+        val cid = conversationId ?: return@remember emptyList()
+        siblingsAll.filterNot { it.id == cid }
+    }
+
+    // Current conversation object (from list)
+    val currentConversation = remember(conversationId, allConversations) {
+        val cid = conversationId ?: return@remember null
+        allConversations.firstOrNull { it.id == cid }
+    }
+
+    // Breadcrumb: root -> ... -> current (computed locally from conversations list)
+    val breadcrumb: List<Conversation> = remember(conversationId, allConversations, currentWorkspaceId) {
+        val cid = conversationId ?: return@remember emptyList()
+        val map = allConversations.associateBy { it.id }
+        val wsId = currentConversation?.workspaceId ?: currentWorkspaceId
+
+        val path = mutableListOf<Conversation>()
+        var cur: Conversation? = map[cid]
+        var guard = 0
+        while (cur != null && guard < 60) {
+            // لا نتجاوز Workspace مختلفة (لمنع أي chain خاطئ)
+            if (wsId != null && cur.workspaceId != null && cur.workspaceId != wsId) break
+
+            path.add(cur)
+            val pid = cur.parentConversationId ?: break
+            cur = map[pid]
+            guard++
+        }
+        path.reversed()
+    }
+
+    val rootInBreadcrumbId = breadcrumb.firstOrNull()?.id
 
     // ✅ FIX: استخدم TextFieldValue (يعالج composing text)
     var userInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
@@ -82,8 +145,6 @@ fun ChatScreen(
 
     val isEnhanced = enhancedQuery != null
     val hasIdentity = settings.mediatorIdentityText.isNotBlank()
-
-    // الحقل الذي نعرضه فعليًا
     val displayedValue = if (isEnhanced) enhancedInput else userInput
 
     val listState = rememberLazyListState()
@@ -94,15 +155,24 @@ fun ChatScreen(
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
-    var showWebImportDialog by remember { mutableStateOf(false) }
+
+    fun clearDraftInput() {
+        userInput = TextFieldValue("")
+        // enhancedInput يتم التحكم فيه عبر enhancedQuery
+    }
+
+    fun openConversationFromTree(targetId: Long) {
+        keyboardController?.hide()
+        focusManager.clearFocus(force = true)
+        clearDraftInput()
+        viewModel.openConversation(targetId)
+        showTreeSheet = false
+        showBranchConfirm = false
+    }
 
     // عندما تأتي نتيجة التحسين من ViewModel نضعها في enhancedInput مرة واحدة
     LaunchedEffect(enhancedQuery) {
-        if (enhancedQuery != null) {
-            enhancedInput = TextFieldValue(enhancedQuery!!)
-        } else {
-            enhancedInput = TextFieldValue("")
-        }
+        enhancedInput = if (enhancedQuery != null) TextFieldValue(enhancedQuery!!) else TextFieldValue("")
     }
 
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
@@ -127,20 +197,12 @@ fun ChatScreen(
         cb.setPrimaryClip(ClipData.newPlainText("message", text))
     }
 
-    /**
-     * ✅ FIX قوي:
-     * - نخفي الكيبورد + نزيل الفوكس
-     * - ننتظر قليلًا حتى يلتقط Compose/IME آخر composing ويعمل commit
-     * - ثم نقرأ النص من state ونرسله
-     */
     fun send() {
         if (isLoading) return
 
         scope.launch {
             keyboardController?.hide()
             focusManager.clearFocus(force = true)
-
-            // هذا التأخير حل عملي جدًا مع بعض لوحات المفاتيح التي لا تعمل commit فورًا
             delay(80)
 
             val textToSend = (if (isEnhanced) enhancedInput.text else userInput.text).trim()
@@ -148,9 +210,8 @@ fun ChatScreen(
 
             viewModel.sendChatMessage(textToSend)
 
-            // reset
             userInput = TextFieldValue("")
-            viewModel.clearEnhancedQuery() // سيخرج من وضع التحسين
+            viewModel.clearEnhancedQuery()
         }
     }
 
@@ -196,12 +257,12 @@ fun ChatScreen(
                         Icon(Icons.Filled.SmartToy, contentDescription = "Agent")
                     }
 
-                    // ✅ NEW: تفريع من المحادثة الحالية
+                    // ✅ Tree sheet
                     IconButton(
-                        onClick = { showBranchDialog = true },
-                        enabled = conversationId != null && !isLoading
+                        onClick = { showTreeSheet = true },
+                        enabled = conversationId != null
                     ) {
-                        Icon(Icons.Filled.AccountTree, contentDescription = "تفريع")
+                        Icon(Icons.Filled.AccountTree, contentDescription = "شجرة المحادثة")
                     }
 
                     IconButton(onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }) {
@@ -284,23 +345,271 @@ fun ChatScreen(
         }
     }
 
-    // ✅ NEW: Branch dialog
-    if (showBranchDialog) {
+    // ✅ BottomSheet: Best tree UI (Breadcrumb + siblings + children)
+    if (showTreeSheet) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showTreeSheet = false
+                showBranchConfirm = false
+            },
+            sheetState = treeSheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("شجرة المحادثة", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "id=${conversationId ?: "-"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Breadcrumb
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("المسار (Breadcrumb)", fontWeight = FontWeight.SemiBold)
+
+                        if (breadcrumb.isEmpty()) {
+                            Text(
+                                "غير متوفر حالياً.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                breadcrumb.forEachIndexed { idx, conv ->
+                                    val isCurrent = conv.id == conversationId
+                                    AssistChip(
+                                        onClick = { openConversationFromTree(conv.id) },
+                                        label = {
+                                            Text(
+                                                (conv.title.ifBlank { "بدون عنوان" }).take(18) +
+                                                    if (conv.title.length > 18) "…" else ""
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            if (isCurrent) {
+                                                Icon(Icons.Filled.Check, contentDescription = null)
+                                            } else {
+                                                Icon(Icons.Filled.ChevronRight, contentDescription = null)
+                                            }
+                                        },
+                                        colors = if (isCurrent) {
+                                            AssistChipDefaults.assistChipColors(
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        } else {
+                                            AssistChipDefaults.assistChipColors()
+                                        }
+                                    )
+                                    if (idx != breadcrumb.lastIndex) {
+                                        Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    enabled = rootInBreadcrumbId != null && rootInBreadcrumbId != conversationId,
+                                    onClick = { rootInBreadcrumbId?.let { openConversationFromTree(it) } }
+                                ) {
+                                    Text("فتح الجذر")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Parent quick actions
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("الأب", fontWeight = FontWeight.SemiBold)
+
+                        if (parentConversationId == null) {
+                            Text(
+                                "هذه محادثة جذر (لا يوجد أب).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    val pTitle = allConversations.firstOrNull { it.id == parentConversationId }?.title
+                                    Text((pTitle ?: "Conversation #$parentConversationId").take(80))
+                                    Text(
+                                        "id = $parentConversationId",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(onClick = { openConversationFromTree(parentConversationId!!) }) {
+                                    Text("فتح الأب")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Siblings (same parent)
+                if (parentConversationId != null) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("إخوة (فروع تحت نفس الأب)", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                Text(
+                                    "${siblings.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            if (siblings.isEmpty()) {
+                                Text(
+                                    "لا يوجد إخوة.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 220.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    items(siblings, key = { it.id }) { conv ->
+                                        ConversationNavRow(
+                                            title = conv.title,
+                                            id = conv.id,
+                                            onClick = { openConversationFromTree(conv.id) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Children (branches from current)
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("الأبناء (فروع من الحالية)", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            Text(
+                                "${childConversations.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (childConversations.isEmpty()) {
+                            Text(
+                                "لا توجد فروع من هذه المحادثة بعد.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 260.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(childConversations, key = { it.id }) { conv ->
+                                    ConversationNavRow(
+                                        title = conv.title,
+                                        id = conv.id,
+                                        onClick = { openConversationFromTree(conv.id) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Actions
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = { showBranchConfirm = true },
+                        enabled = conversationId != null && !isLoading
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("إنشاء فرع")
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    TextButton(onClick = {
+                        showTreeSheet = false
+                        showBranchConfirm = false
+                    }) {
+                        Text("إغلاق")
+                    }
+                }
+            }
+        }
+    }
+
+    // ✅ Confirm create branch
+    if (showBranchConfirm) {
         AlertDialog(
-            onDismissRequest = { showBranchDialog = false },
-            title = { Text("تفريع المحادثة") },
-            text = { Text("سيتم إنشاء محادثة جديدة كفرع من المحادثة الحالية والانتقال إليها مباشرة.") },
+            onDismissRequest = { showBranchConfirm = false },
+            title = { Text("إنشاء فرع") },
+            text = { Text("سيتم إنشاء محادثة جديدة كفرع من المحادثة الحالية والانتقال إليها.") },
             confirmButton = {
                 TextButton(
                     onClick = {
+                        showBranchConfirm = false
+                        showTreeSheet = false
+                        clearDraftInput()
                         viewModel.branchFromCurrentConversation()
-                        showBranchDialog = false
                     },
                     enabled = conversationId != null && !isLoading
-                ) { Text("إنشاء فرع") }
+                ) { Text("متابعة") }
             },
             dismissButton = {
-                TextButton(onClick = { showBranchDialog = false }) { Text("إلغاء") }
+                TextButton(onClick = { showBranchConfirm = false }) { Text("إلغاء") }
             }
         )
     }
@@ -349,6 +658,44 @@ fun ChatScreen(
                 showWebImportDialog = false
             }
         )
+    }
+}
+
+/* ----------------------------- Tree UI helpers ----------------------------- */
+
+@Composable
+private fun ConversationNavRow(
+    title: String,
+    id: Long,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Filled.AccountTree,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Column(Modifier.weight(1f)) {
+                Text(title.ifBlank { "بدون عنوان" }.take(90))
+                Text(
+                    "id = $id",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = null)
+        }
     }
 }
 
@@ -535,9 +882,7 @@ private fun InputBar(
                     imeAction = ImeAction.Send,
                     autoCorrect = false
                 ),
-                keyboardActions = KeyboardActions(
-                    onSend = { onSend() }
-                )
+                keyboardActions = KeyboardActions(onSend = { onSend() })
             )
 
             IconButton(onClick = onSend, enabled = !isLoading && displayedText.isNotBlank()) {
