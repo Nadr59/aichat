@@ -35,7 +35,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
-import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.ui.components.AgentPickerDialog
@@ -67,7 +66,7 @@ fun ChatScreen(
     val conversationId by viewModel.currentConversationId.collectAsState()
     val currentAgentId by viewModel.currentAgentId.collectAsState()
 
-    // ✅ Tree data
+    // Tree data
     val parentConversationId by viewModel.currentParentConversationId.collectAsState()
     val allConversations by viewModel.conversations.collectAsState()
     val currentWorkspaceId by viewModel.currentWorkspaceId.collectAsState()
@@ -80,12 +79,15 @@ fun ChatScreen(
     var showAgentDialog by remember { mutableStateOf(false) }
     var showWebImportDialog by remember { mutableStateOf(false) }
 
-    // ✅ BottomSheet Tree
+    // BottomSheet Tree
     var showTreeSheet by remember { mutableStateOf(false) }
     val treeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // ✅ Confirm create branch (safer UX)
+    // Confirm create branch
     var showBranchConfirm by remember { mutableStateOf(false) }
+
+    // ✅ NEW: Confirm reset workspace
+    var showResetWorkspaceConfirm by remember { mutableStateOf(false) }
 
     // Children of current
     val childrenFlow = remember(conversationId) {
@@ -104,25 +106,23 @@ fun ChatScreen(
         siblingsAll.filterNot { it.id == cid }
     }
 
-    // Current conversation object (from list)
+    // Current conversation object
     val currentConversation = remember(conversationId, allConversations) {
         val cid = conversationId ?: return@remember null
         allConversations.firstOrNull { it.id == cid }
     }
 
-    // Breadcrumb: root -> ... -> current (computed locally from conversations list)
-    val breadcrumb: List<Conversation> = remember(conversationId, allConversations, currentWorkspaceId) {
+    // Breadcrumb: root -> ... -> current
+    val breadcrumb = remember(conversationId, allConversations, currentWorkspaceId, currentConversation?.workspaceId) {
         val cid = conversationId ?: return@remember emptyList()
         val map = allConversations.associateBy { it.id }
         val wsId = currentConversation?.workspaceId ?: currentWorkspaceId
 
-        val path = mutableListOf<Conversation>()
-        var cur: Conversation? = map[cid]
+        val path = mutableListOf<com.example.aichat.data.model.Conversation>()
+        var cur = map[cid]
         var guard = 0
         while (cur != null && guard < 60) {
-            // لا نتجاوز Workspace مختلفة (لمنع أي chain خاطئ)
             if (wsId != null && cur.workspaceId != null && cur.workspaceId != wsId) break
-
             path.add(cur)
             val pid = cur.parentConversationId ?: break
             cur = map[pid]
@@ -133,15 +133,8 @@ fun ChatScreen(
 
     val rootInBreadcrumbId = breadcrumb.firstOrNull()?.id
 
-    // ✅ FIX: استخدم TextFieldValue (يعالج composing text)
-    var userInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(""))
-    }
-
-    // ✅ FIX: في وضع التحسين نخزن نسخة محلية فقط (بدون حلقة updateEnhancedQuery)
-    var enhancedInput by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(""))
-    }
+    var userInput by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
+    var enhancedInput by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
 
     val isEnhanced = enhancedQuery != null
     val hasIdentity = settings.mediatorIdentityText.isNotBlank()
@@ -158,7 +151,6 @@ fun ChatScreen(
 
     fun clearDraftInput() {
         userInput = TextFieldValue("")
-        // enhancedInput يتم التحكم فيه عبر enhancedQuery
     }
 
     fun openConversationFromTree(targetId: Long) {
@@ -168,9 +160,9 @@ fun ChatScreen(
         viewModel.openConversation(targetId)
         showTreeSheet = false
         showBranchConfirm = false
+        showResetWorkspaceConfirm = false
     }
 
-    // عندما تأتي نتيجة التحسين من ViewModel نضعها في enhancedInput مرة واحدة
     LaunchedEffect(enhancedQuery) {
         enhancedInput = if (enhancedQuery != null) TextFieldValue(enhancedQuery!!) else TextFieldValue("")
     }
@@ -199,7 +191,6 @@ fun ChatScreen(
 
     fun send() {
         if (isLoading) return
-
         scope.launch {
             keyboardController?.hide()
             focusManager.clearFocus(force = true)
@@ -209,7 +200,6 @@ fun ChatScreen(
             if (textToSend.isBlank()) return@launch
 
             viewModel.sendChatMessage(textToSend)
-
             userInput = TextFieldValue("")
             viewModel.clearEnhancedQuery()
         }
@@ -257,7 +247,6 @@ fun ChatScreen(
                         Icon(Icons.Filled.SmartToy, contentDescription = "Agent")
                     }
 
-                    // ✅ Tree sheet
                     IconButton(
                         onClick = { showTreeSheet = true },
                         enabled = conversationId != null
@@ -283,7 +272,6 @@ fun ChatScreen(
                 .padding(padding)
         ) {
 
-            // Messages
             if (messages.isEmpty() && !isLoading) {
                 EmptyChatView(modifier = Modifier.weight(1f))
             } else {
@@ -308,7 +296,6 @@ fun ChatScreen(
                 }
             }
 
-            // Error
             error?.let { err ->
                 ErrorMessage(
                     error = err,
@@ -320,7 +307,6 @@ fun ChatScreen(
                 )
             }
 
-            // Input
             InputBar(
                 isLoading = isLoading,
                 hasSelectedImage = selectedImage != null,
@@ -345,12 +331,13 @@ fun ChatScreen(
         }
     }
 
-    // ✅ BottomSheet: Best tree UI (Breadcrumb + siblings + children)
+    // BottomSheet Tree UI + Reset Workspace
     if (showTreeSheet) {
         ModalBottomSheet(
             onDismissRequest = {
                 showTreeSheet = false
                 showBranchConfirm = false
+                showResetWorkspaceConfirm = false
             },
             sheetState = treeSheetState
         ) {
@@ -371,7 +358,6 @@ fun ChatScreen(
                     )
                 }
 
-                // Breadcrumb
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -398,27 +384,17 @@ fun ChatScreen(
                                     val isCurrent = conv.id == conversationId
                                     AssistChip(
                                         onClick = { openConversationFromTree(conv.id) },
-                                        label = {
-                                            Text(
-                                                (conv.title.ifBlank { "بدون عنوان" }).take(18) +
-                                                    if (conv.title.length > 18) "…" else ""
-                                            )
-                                        },
+                                        label = { Text((conv.title.ifBlank { "بدون عنوان" }).take(18) + if (conv.title.length > 18) "…" else "") },
                                         leadingIcon = {
-                                            if (isCurrent) {
-                                                Icon(Icons.Filled.Check, contentDescription = null)
-                                            } else {
-                                                Icon(Icons.Filled.ChevronRight, contentDescription = null)
-                                            }
+                                            if (isCurrent) Icon(Icons.Filled.Check, contentDescription = null)
+                                            else Icon(Icons.Filled.ChevronRight, contentDescription = null)
                                         },
                                         colors = if (isCurrent) {
                                             AssistChipDefaults.assistChipColors(
                                                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                                                 labelColor = MaterialTheme.colorScheme.onPrimaryContainer
                                             )
-                                        } else {
-                                            AssistChipDefaults.assistChipColors()
-                                        }
+                                        } else AssistChipDefaults.assistChipColors()
                                     )
                                     if (idx != breadcrumb.lastIndex) {
                                         Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -433,15 +409,12 @@ fun ChatScreen(
                                 TextButton(
                                     enabled = rootInBreadcrumbId != null && rootInBreadcrumbId != conversationId,
                                     onClick = { rootInBreadcrumbId?.let { openConversationFromTree(it) } }
-                                ) {
-                                    Text("فتح الجذر")
-                                }
+                                ) { Text("فتح الجذر") }
                             }
                         }
                     }
                 }
 
-                // Parent quick actions
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -479,7 +452,6 @@ fun ChatScreen(
                     }
                 }
 
-                // Siblings (same parent)
                 if (parentConversationId != null) {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
@@ -489,24 +461,13 @@ fun ChatScreen(
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("إخوة (فروع تحت نفس الأب)", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                Text(
-                                    "${siblings.size}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text("${siblings.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-
                             if (siblings.isEmpty()) {
-                                Text(
-                                    "لا يوجد إخوة.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text("لا يوجد إخوة.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } else {
                                 LazyColumn(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 220.dp),
+                                    modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     items(siblings, key = { it.id }) { conv ->
@@ -522,7 +483,6 @@ fun ChatScreen(
                     }
                 }
 
-                // Children (branches from current)
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -531,24 +491,13 @@ fun ChatScreen(
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("الأبناء (فروع من الحالية)", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            Text(
-                                "${childConversations.size}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("${childConversations.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-
                         if (childConversations.isEmpty()) {
-                            Text(
-                                "لا توجد فروع من هذه المحادثة بعد.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("لا توجد فروع من هذه المحادثة بعد.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         } else {
                             LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 260.dp),
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 items(childConversations, key = { it.id }) { conv ->
@@ -563,7 +512,7 @@ fun ChatScreen(
                     }
                 }
 
-                // Actions
+                // Actions row (branch + close)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -583,15 +532,54 @@ fun ChatScreen(
                     TextButton(onClick = {
                         showTreeSheet = false
                         showBranchConfirm = false
-                    }) {
-                        Text("إغلاق")
+                        showResetWorkspaceConfirm = false
+                    }) { Text("إغلاق") }
+                }
+
+                // ✅ Danger zone: Reset workspace
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "إعادة ضبط Workspace",
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            "سيتم حذف كل المحادثات والفروع ضمن هذا الـWorkspace + تصفير WORKSPACE_SUMMARY.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            "WorkspaceId: ${currentWorkspaceId ?: (currentConversation?.workspaceId ?: "-")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                        )
+
+                        OutlinedButton(
+                            onClick = { showResetWorkspaceConfirm = true },
+                            enabled = !isLoading,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            ),
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.onErrorContainer)
+                            )
+                        ) {
+                            Icon(Icons.Filled.DeleteSweep, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Reset workspace بالكامل")
+                        }
                     }
                 }
             }
         }
     }
 
-    // ✅ Confirm create branch
+    // Confirm create branch
     if (showBranchConfirm) {
         AlertDialog(
             onDismissRequest = { showBranchConfirm = false },
@@ -614,7 +602,32 @@ fun ChatScreen(
         )
     }
 
-    // Agent picker (per conversation)
+    // ✅ Confirm reset workspace
+    if (showResetWorkspaceConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetWorkspaceConfirm = false },
+            title = { Text("Reset workspace بالكامل؟") },
+            text = {
+                Text("تحذير: سيُحذف كل تاريخ المحادثات والفروع ضمن هذا الـWorkspace وسيتم تصفير ملخص الذاكرة (WORKSPACE_SUMMARY).")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showResetWorkspaceConfirm = false
+                        showTreeSheet = false
+                        clearDraftInput()
+                        viewModel.resetCurrentWorkspaceFully()
+                    },
+                    enabled = !isLoading
+                ) { Text("نعم، نفّذ") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetWorkspaceConfirm = false }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    // Agent picker
     if (showAgentDialog) {
         AgentPickerDialog(
             title = "Agent لهذه المحادثة",
