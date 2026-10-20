@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
@@ -321,7 +322,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // =========================
-    // Conversations
+    // Conversations (API)
     // =========================
 
     fun openConversation(conversationId: Long) {
@@ -650,50 +651,177 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // =========================
-    // Web AI response (capture) — GLOBAL WEB WORKSPACE
-    // (كما هو عندك)
+    // Web — GLOBAL WORKSPACE (Tree-enabled)
     // =========================
 
     private fun webGlobalScopeKey(): String = "web:global"
     private fun webGlobalWorkspaceTitle(): String = "WEB • Global"
-    private fun webGlobalConversationTitle(): String = "Web — Global"
+
+    // عنوان افتراضي فقط (لن نفرضه على كل المحادثات)
+    private fun webDefaultConversationTitle(): String = "Web"
 
     private val _lastWebUserText = MutableStateFlow<String?>(null)
+
+    // ✅ هذا هو مؤشر "المحادثة الحالية" للويب (ضمن web:global)
     private val _currentWebConversationId = MutableStateFlow<Long?>(null)
 
-    fun onWebUserMessageSent(userText: String) {
-        val clean = userText.trim()
-        if (clean.isBlank()) return
+    // ✅ expose للـ UI (بدون reflection)
+    val currentWebConversationId: StateFlow<Long?> = _currentWebConversationId.asStateFlow()
 
-        _lastWebUserText.value = clean
+    // ✅ نحتفظ بـ workspaceId للويب لتسهيل عرض الشجرة/التصفية
+    private val _webWorkspaceId = MutableStateFlow<Long?>(null)
+    val webWorkspaceId: StateFlow<Long?> = _webWorkspaceId.asStateFlow()
 
+    // ✅ قائمة محادثات الويب فقط (ضمن web:global) — مفيدة لشاشة الشجرة في GeckoTestScreen
+    val webConversations: StateFlow<List<Conversation>> =
+        combine(conversations, webWorkspaceId) { all, wsId ->
+            if (wsId == null) emptyList()
+            else all.filter { it.workspaceId == wsId }
+        }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    init {
+        // تجهيز Workspace web:global مبكرًا
         viewModelScope.launch {
             runCatching {
                 val ws = conversationRepository.getOrCreateWorkspace(
                     scopeKey = webGlobalScopeKey(),
                     title = webGlobalWorkspaceTitle()
                 )
-                val convId = ensureWebGlobalConversation(workspaceId = ws.id)
-
-                conversationRepository.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role = "user",
-                        content = clean,
-                        messageType = "text"
-                    )
-                )
-
-                conversationRepository.updateTitleAndTimestamp(
-                    id = convId,
-                    title = webGlobalConversationTitle(),
-                    updatedAt = System.currentTimeMillis()
-                )
+                _webWorkspaceId.value = ws.id
             }
         }
     }
 
-    private suspend fun ensureWebGlobalConversation(workspaceId: Long): Long {
+    private suspend fun ensureWebWorkspace(): Workspace {
+        val ws = conversationRepository.getOrCreateWorkspace(
+            scopeKey = webGlobalScopeKey(),
+            title = webGlobalWorkspaceTitle()
+        )
+        _webWorkspaceId.value = ws.id
+        return ws
+    }
+
+    fun openWebConversation(conversationId: Long) {
+        _currentWebConversationId.value = conversationId
+        _lastWebUserText.value = null
+    }
+
+    /**
+     * إنشاء محادثة ويب جديدة (Root) ضمن web:global
+     * وتصبح هي المحادثة الحالية للويب.
+     */
+    fun newWebConversation(title: String? = null) {
+        viewModelScope.launch {
+            runCatching {
+                val ws = ensureWebWorkspace()
+                val now = System.currentTimeMillis()
+
+                val finalTitle = title?.trim().orEmpty().ifBlank { webDefaultConversationTitle() }.take(60)
+                val newId = conversationRepository.insertConversation(
+                    Conversation(
+                        title = finalTitle,
+                        memoryAccessEnabled = true,
+                        agentId = aiSettings.webAgentIdOrNull,
+                        workspaceId = ws.id,
+                        parentConversationId = null
+                    )
+                )
+
+                conversationRepository.updateTitleAndTimestamp(
+                    id = newId,
+                    title = finalTitle,
+                    updatedAt = now
+                )
+
+                _currentWebConversationId.value = newId
+                _successMessage.value = "✅ تم إنشاء محادثة ويب جديدة."
+            }.onFailure { e ->
+                _error.value = "فشل إنشاء محادثة ويب: ${e.message ?: "خطأ غير معروف"}"
+            }
+        }
+    }
+
+    /**
+     * تفريع من "المحادثة الحالية للويب" ضمن web:global.
+     */
+    fun branchFromCurrentWebConversation() {
+        val parentId = _currentWebConversationId.value
+        if (parentId == null) {
+            _error.value = "لا يمكن إنشاء فرع قبل اختيار محادثة ويب."
+            return
+        }
+        if (_isLoading.value) return
+
+        viewModelScope.launch {
+            runCatching {
+                val ws = ensureWebWorkspace()
+                val parent = conversationRepository.getConversationById(parentId)
+                    ?: throw IllegalStateException("محادثة الويب الأصل غير موجودة")
+
+                val branchTitle = buildString {
+                    val base = parent.title.trim().ifBlank { webDefaultConversationTitle() }.take(45)
+                    append("فرع: ")
+                    append(base)
+                }.take(60)
+
+                val newId = conversationRepository.insertConversation(
+                    Conversation(
+                        title = branchTitle.ifBlank { "فرع جديد" },
+                        memoryAccessEnabled = true,
+                        agentId = aiSettings.webAgentIdOrNull,
+                        workspaceId = ws.id,
+                        parentConversationId = parentId
+                    )
+                )
+
+                conversationRepository.updateTitleAndTimestamp(
+                    id = newId,
+                    title = branchTitle.ifBlank { "فرع جديد" },
+                    updatedAt = System.currentTimeMillis()
+                )
+
+                _currentWebConversationId.value = newId
+                _successMessage.value = "✅ تم إنشاء فرع ويب."
+            }.onFailure { e ->
+                _error.value = "فشل إنشاء فرع ويب: ${e.message ?: "خطأ غير معروف"}"
+            }
+        }
+    }
+
+    /**
+     * Reset كامل لـ web:global (محادثات + رسائل + summary)
+     * ⚠️ لا يمسح Shared Memories.
+     */
+    fun resetWebGlobalWorkspaceFully() {
+        if (_isLoading.value) return
+
+        viewModelScope.launch {
+            runCatching {
+                val ws = ensureWebWorkspace()
+                conversationRepository.resetWorkspaceFully(ws.id)
+
+                _currentWebConversationId.value = null
+                _lastWebUserText.value = null
+
+                _successMessage.value = "✅ تم تصفير Workspace الويب بالكامل (web:global)."
+            }.onFailure { e ->
+                _error.value = "فشل تصفير Workspace الويب: ${e.message ?: "خطأ غير معروف"}"
+            }
+        }
+    }
+
+    private fun buildWebTitle(platformName: String?, seedText: String?): String {
+        val p = platformName?.trim().orEmpty()
+        val s = seedText?.trim().orEmpty()
+        val suffix = if (s.isNotBlank()) " • ${s.take(40)}" else ""
+        val base = if (p.isNotBlank()) "Web: $p" else webDefaultConversationTitle()
+        return (base + suffix).trim().take(60)
+    }
+
+    private suspend fun ensureWebConversation(
+        workspaceId: Long,
+        suggestedTitleForNewConversation: String
+    ): Long {
         val existing = _currentWebConversationId.value
         if (existing != null) {
             val conv = conversationRepository.getConversationById(existing)
@@ -712,15 +840,62 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val newId = conversationRepository.insertConversation(
             Conversation(
-                title = webGlobalConversationTitle(),
+                title = suggestedTitleForNewConversation.ifBlank { webDefaultConversationTitle() },
                 memoryAccessEnabled = true,
-                agentId = null,
+                agentId = aiSettings.webAgentIdOrNull,
                 workspaceId = workspaceId,
                 parentConversationId = null
             )
         )
         _currentWebConversationId.value = newId
         return newId
+    }
+
+    /**
+     * يتم استدعاؤها من GeckoTestScreen قبل إرسال السياق إلى صفحة الويب.
+     *
+     * platformName اختياري (للتوافق مع الاستدعاء القديم).
+     * إن مرّرته، نستخدمه لتحسين عنوان المحادثة الجديدة عند أول إنشاء.
+     */
+    fun onWebUserMessageSent(userText: String, platformName: String? = null) {
+        val clean = userText.trim()
+        if (clean.isBlank()) return
+
+        _lastWebUserText.value = clean
+
+        viewModelScope.launch {
+            runCatching {
+                val ws = ensureWebWorkspace()
+                val convId = ensureWebConversation(
+                    workspaceId = ws.id,
+                    suggestedTitleForNewConversation = buildWebTitle(platformName, clean)
+                )
+
+                conversationRepository.insertMessage(
+                    Message(
+                        conversationId = convId,
+                        role = "user",
+                        content = clean,
+                        messageType = "text"
+                    )
+                )
+
+                // تحديث timestamp + (اختياري) تحديث العنوان إذا كان فارغ/افتراضي
+                val now = System.currentTimeMillis()
+                val conv = conversationRepository.getConversationById(convId)
+                val currentTitle = conv?.title.orEmpty().trim()
+                val computedTitle =
+                    if (currentTitle.isBlank() || currentTitle == webDefaultConversationTitle()) {
+                        buildWebTitle(platformName, clean)
+                    } else currentTitle
+
+                conversationRepository.updateTitleAndTimestamp(
+                    id = convId,
+                    title = computedTitle.take(60).ifBlank { webDefaultConversationTitle() },
+                    updatedAt = now
+                )
+            }
+        }
     }
 
     fun onWebAiResponse(
@@ -734,12 +909,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                val ws = conversationRepository.getOrCreateWorkspace(
-                    scopeKey = webGlobalScopeKey(),
-                    title = webGlobalWorkspaceTitle()
+                val ws = ensureWebWorkspace()
+                val convId = ensureWebConversation(
+                    workspaceId = ws.id,
+                    suggestedTitleForNewConversation = buildWebTitle(platformName, seedText = null)
                 )
-
-                val convId = ensureWebGlobalConversation(workspaceId = ws.id)
 
                 val messageId = conversationRepository.insertMessage(
                     Message(
@@ -750,10 +924,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
+                // تحديث timestamp فقط (ولا نفرض عنوان ثابت)
+                val now = System.currentTimeMillis()
+                val conv = conversationRepository.getConversationById(convId)
+                val title = conv?.title?.trim().orEmpty().ifBlank { buildWebTitle(platformName, null) }
+
                 conversationRepository.updateTitleAndTimestamp(
                     id = convId,
-                    title = webGlobalConversationTitle(),
-                    updatedAt = System.currentTimeMillis()
+                    title = title.take(60),
+                    updatedAt = now
                 )
 
                 val shouldSave = forceSaveToMemory || aiSettings.autoSave
