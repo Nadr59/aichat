@@ -24,9 +24,12 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
@@ -40,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
@@ -48,9 +52,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -89,19 +95,31 @@ import com.example.aichat.repository.WebPlatformRepository
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
+import java.lang.reflect.Method
 import java.util.Locale
+import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 
 /**
  * UI القديم (Tabs + GeckoView + SendBar) + إضافة:
  * ✅ Web Agent (aiSettings.webAgentId) يتم حقنه ضمن السياق عند الإرسال.
  * ✅ زر في الـ TopBar يفتح قائمة الوكلاء للتبديل بينهم.
  * ✅ Workspace Summary (ذاكرة مشتركة لكل منصات الويب) يتم حقنه ضمن السياق عند الإرسال (scopeKey = web:global).
+ * ✅ زر "الشجرة" للويب + BottomSheet تعرض Tree داخل Workspace واحد مشترك (web:global).
+ *
+ * ملاحظة مهمة:
+ * - الشجرة تعتمد على وجود Conversations داخل Room ضمن web:global.
+ * - عند عدم توفر APIs مطلوبة داخل ConversationRepository/ChatViewModel (حسب نسختك)،
+ *   سيظهر BottomSheet لكن قد لا يستطيع تحميل القائمة/إنشاء محادثة (سيظهر Toast يوضح السبب).
  */
 @Composable
 fun GeckoTestScreen(
@@ -190,6 +208,9 @@ fun GeckoTestScreen(
         mutableStateOf(aiSettings.accuracyPromptEnabled)
     }
 
+    // ✅ شجرة الويب
+    var showWebTreeSheet by rememberSaveable { mutableStateOf(false) }
+
     // مزامنة مبدئية (لو تغيّر من شاشة ثانية)
     LaunchedEffect(Unit) {
         webAgentId = aiSettings.webAgentIdOrNull
@@ -255,7 +276,7 @@ fun GeckoTestScreen(
 
     fun webKind(): WebKind = classifyHost(targetDomainStable())
 
-    // ✅ ذاكرة مشتركة لكل منصات الويب:
+    // ✅ ذاكرة وشجرة مشتركة لكل منصات الويب:
     fun webWorkspaceScopeKeyGlobal(): String = "web:global"
 
     // ============================================================
@@ -528,6 +549,13 @@ fun GeckoTestScreen(
                     Icon(Icons.Filled.SmartToy, contentDescription = "Web Agent")
                 }
 
+                // ✅ زر الشجرة (للويب) - شجرة واحدة مشتركة (web:global)
+                if (chatViewModel != null && conversationRepository != null) {
+                    IconButton(onClick = { showWebTreeSheet = true }) {
+                        Icon(Icons.Filled.AccountTree, contentDescription = "الشجرة")
+                    }
+                }
+
                 if (chatViewModel != null && platform.memoryEnabled) {
                     IconButton(onClick = saveToMemory, enabled = !isSavingMemory && !isLoading) {
                         Text(if (isSavingMemory) "⏳" else "🧠")
@@ -669,6 +697,10 @@ fun GeckoTestScreen(
 
                 scope.launch {
                     try {
+                        // ✅ مهم: تسجيل رسالة المستخدم داخل VM قبل الالتقاط/الرد
+                        // (هذا كان ناقص سابقًا ويؤثر على onWebAiResponse/تحديث summary)
+                        runCatching { vm?.onWebUserMessageSent(question) }
+
                         val memoryAllowed = memoryInjectionEnabled && includeMemory && platform.memoryEnabled && vm != null
 
                         val memoryXml: String =
@@ -763,6 +795,19 @@ fun GeckoTestScreen(
     }
 
     // =========================
+    // ✅ Web Conversation Tree (BottomSheet)
+    // =========================
+    if (showWebTreeSheet && chatViewModel != null && conversationRepository != null) {
+        WebGlobalTreeBottomSheet(
+            repo = conversationRepository,
+            vm = chatViewModel,
+            platformName = platform.name,
+            webAgentId = webAgentId,
+            onDismiss = { showWebTreeSheet = false }
+        )
+    }
+
+    // =========================
     // ✅ Web Agent picker dialog
     // =========================
     if (showWebAgentDialog) {
@@ -799,6 +844,609 @@ fun GeckoTestScreen(
                 }
             }
         )
+    }
+}
+
+/* ============================ Web Tree BottomSheet ============================ */
+
+@Composable
+private fun WebGlobalTreeBottomSheet(
+    repo: ConversationRepository,
+    vm: ChatViewModel,
+    platformName: String,
+    webAgentId: String?,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // workspace web:global
+    val wsState = produceState<WebWorkspaceInfo?>(initialValue = null, repo) {
+        value = runCatching {
+            val ws = repo.getOrCreateWorkspace(scopeKey = "web:global", title = "Web (Global)")
+            WebWorkspaceInfo(id = ws.id, summary = ws.summary.orEmpty())
+        }.getOrNull()
+    }
+    val ws = wsState.value
+
+    // current web conversation id from VM (reflection; tries: _currentWebConversationId/currentWebConversationId)
+    val currentWebConversationIdStateFlow: MutableStateFlow<Long?>? = remember(vm) {
+        resolveMutableStateFlowLongNullable(vm, fieldNameHints = listOf("_currentWebConversationId", "currentWebConversationId"))
+    }
+    val currentWebConversationIdState: State<Long?> =
+        currentWebConversationIdStateFlow?.collectAsStateWithLifecycle(initialValue = null)
+            ?: remember { mutableStateOf<Long?>(null) }
+    val currentId: Long? = currentWebConversationIdState.value
+
+    // observe conversations in this workspace (reflection on repository)
+    val conversationsFlow: Flow<List<Any>>? = remember(repo, ws?.id) {
+        if (ws?.id == null) return@remember null
+        resolveWorkspaceConversationsFlow(repo, ws.id)
+    }
+    val convObjectsState: State<List<Any>> =
+        conversationsFlow?.collectAsStateWithLifecycle(initialValue = emptyList())
+            ?: remember { mutableStateOf(emptyList()) }
+
+    val convs: List<ConvLite> = remember(convObjectsState.value) {
+        convObjectsState.value.mapNotNull { obj ->
+            val id = obj.readLongProp("id") ?: return@mapNotNull null
+            val title = obj.readStringProp("title") ?: "بدون عنوان"
+            val parentId = obj.readLongProp("parentConversationId")
+            val updatedAt = obj.readLongProp("updatedAt") ?: 0L
+            val workspaceId = obj.readLongProp("workspaceId")
+            ConvLite(id = id, title = title, parentId = parentId, updatedAt = updatedAt, workspaceId = workspaceId)
+        }
+    }
+
+    val byId: Map<Long, ConvLite> = remember(convs) { convs.associateBy { it.id } }
+
+    fun pathToRoot(id: Long): List<ConvLite> {
+        val out = ArrayList<ConvLite>(8)
+        var cur: ConvLite? = byId[id]
+        val seen = HashSet<Long>()
+        while (cur != null && seen.add(cur.id)) {
+            out.add(cur)
+            val p = cur.parentId ?: break
+            cur = byId[p]
+        }
+        return out.asReversed()
+    }
+
+    val breadcrumb: List<ConvLite> = remember(currentId, byId) {
+        currentId?.let { pathToRoot(it) }.orEmpty()
+    }
+    val currentConv: ConvLite? = remember(currentId, byId) { currentId?.let { byId[it] } }
+    val parentConv: ConvLite? = remember(currentConv, byId) { currentConv?.parentId?.let { byId[it] } }
+
+    val children: List<ConvLite> = remember(currentId, convs) {
+        if (currentId == null) emptyList()
+        else convs.filter { it.parentId == currentId }.sortedByDescending { it.updatedAt }
+    }
+    val siblings: List<ConvLite> = remember(currentConv, convs) {
+        val pid = currentConv?.parentId ?: return@remember emptyList()
+        convs.filter { it.parentId == pid && it.id != currentConv.id }.sortedByDescending { it.updatedAt }
+    }
+    val roots: List<ConvLite> = remember(convs) {
+        convs.filter { it.parentId == null }.sortedByDescending { it.updatedAt }
+    }
+
+    fun openConversation(id: Long) {
+        setMutableStateFlowValue(currentWebConversationIdStateFlow, id)
+        // Optional: keep main VM "currentConversationId" synced if it exists
+        runCatching { invokeOpenConversationIfExists(vm, id) }
+    }
+
+    var showResetConfirm by rememberSaveable { mutableStateOf(false) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "🌳 شجرة الويب (مشتركة)",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Workspace: web:global",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (ws == null) {
+                Text("⚠️ تعذر تحميل Workspace (ConversationRepository غير جاهز).")
+            } else {
+                if (ws.summary.isNotBlank()) {
+                    Text(
+                        text = "WORKSPACE_SUMMARY (مختصر):\n${ws.summary.take(220)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    Text(
+                        text = "WORKSPACE_SUMMARY فارغ حاليًا.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "المحادثة الحالية:",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = currentConv?.title ?: "لا توجد محادثة محددة بعد",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "ID: ${currentId?.toString() ?: "—"}  •  Platform: $platformName",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                if (ws == null) {
+                                    Toast.makeText(context, "Workspace غير متاح", Toast.LENGTH_SHORT).show()
+                                    return@OutlinedButton
+                                }
+                                scope.launch {
+                                    val newId = createConversationInWebWorkspaceReflective(
+                                        repo = repo,
+                                        workspaceId = ws.id,
+                                        parentConversationId = null,
+                                        title = "Web: $platformName",
+                                        agentId = webAgentId
+                                    )
+                                    if (newId != null) openConversation(newId)
+                                    else Toast.makeText(context, "⚠️ تعذر إنشاء محادثة (Repository API غير معروف)", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = ws != null
+                        ) { Text("➕ محادثة جديدة") }
+
+                        OutlinedButton(
+                            onClick = {
+                                val pid = currentId
+                                if (ws == null || pid == null) {
+                                    Toast.makeText(context, "اختر محادثة أولًا", Toast.LENGTH_SHORT).show()
+                                    return@OutlinedButton
+                                }
+                                scope.launch {
+                                    val newId = createConversationInWebWorkspaceReflective(
+                                        repo = repo,
+                                        workspaceId = ws.id,
+                                        parentConversationId = pid,
+                                        title = "فرع: $platformName",
+                                        agentId = webAgentId
+                                    )
+                                    if (newId != null) openConversation(newId)
+                                    else Toast.makeText(context, "⚠️ تعذر إنشاء فرع (Repository API غير معروف)", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = ws != null && currentId != null
+                        ) { Text("🪵 تفريع") }
+                    }
+                }
+            }
+
+            if (currentId != null) {
+                Text("Breadcrumb:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                if (breadcrumb.isEmpty()) {
+                    Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        breadcrumb.forEach { c ->
+                            OutlinedButton(onClick = { openConversation(c.id) }) {
+                                Text(c.title.take(18))
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (parentConv != null) {
+                Text("الأب:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                ConversationRowLite(
+                    title = parentConv.title,
+                    subtitle = "ID: ${parentConv.id}",
+                    onClick = { openConversation(parentConv.id) }
+                )
+            }
+
+            if (siblings.isNotEmpty()) {
+                Text("الإخوة:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                siblings.take(12).forEach { c ->
+                    ConversationRowLite(
+                        title = c.title,
+                        subtitle = "ID: ${c.id}",
+                        onClick = { openConversation(c.id) }
+                    )
+                }
+                if (siblings.size > 12) Text("… +${siblings.size - 12}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            if (children.isNotEmpty()) {
+                Text("الأبناء:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                children.take(12).forEach { c ->
+                    ConversationRowLite(
+                        title = c.title,
+                        subtitle = "ID: ${c.id}",
+                        onClick = { openConversation(c.id) }
+                    )
+                }
+                if (children.size > 12) Text("… +${children.size - 12}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            if (roots.isNotEmpty()) {
+                Text("الجذور (Top-level):", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                roots.take(8).forEach { c ->
+                    ConversationRowLite(
+                        title = c.title,
+                        subtitle = "ID: ${c.id}",
+                        onClick = { openConversation(c.id) }
+                    )
+                }
+                if (roots.size > 8) Text("… +${roots.size - 8}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Danger zone",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Reset workspace بالكامل (يحذف كل محادثات ورسائل web:global + يصفر summary).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        onClick = { showResetConfirm = true },
+                        enabled = ws != null
+                    ) { Text("🧨 Reset web:global") }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+        }
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("تأكيد Reset") },
+            text = { Text("سيتم حذف كل المحادثات والرسائل ضمن web:global وتصفير Workspace Summary. هل أنت متأكد؟") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val wsId = ws?.id
+                        if (wsId == null) {
+                            Toast.makeText(context, "Workspace غير متاح", Toast.LENGTH_SHORT).show()
+                            showResetConfirm = false
+                            return@Button
+                        }
+                        scope.launch {
+                            val ok = resetWorkspaceFullyReflective(repo, wsId)
+                            if (ok) {
+                                setMutableStateFlowValue(currentWebConversationIdStateFlow, null)
+                                Toast.makeText(context, "✅ تم Reset", Toast.LENGTH_SHORT).show()
+                                showResetConfirm = false
+                                onDismiss()
+                            } else {
+                                Toast.makeText(context, "⚠️ لم يتم Reset (الميثود غير موجودة بعد)", Toast.LENGTH_LONG).show()
+                                showResetConfirm = false
+                            }
+                        }
+                    }
+                ) { Text("نعم") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showResetConfirm = false }) { Text("إلغاء") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ConversationRowLite(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private data class WebWorkspaceInfo(
+    val id: Long,
+    val summary: String
+)
+
+private data class ConvLite(
+    val id: Long,
+    val title: String,
+    val parentId: Long?,
+    val updatedAt: Long,
+    val workspaceId: Long?
+)
+
+private fun resolveWorkspaceConversationsFlow(
+    repo: ConversationRepository,
+    workspaceId: Long
+): Flow<List<Any>>? {
+    val candidates = listOf(
+        "observeConversationsInWorkspace",
+        "observeConversationsForWorkspace",
+        "observeConversationsByWorkspace",
+        "observeConversationsByWorkspaceId",
+        "observeWorkspaceConversations"
+    )
+
+    val m = repo.javaClass.methods
+        .plus(repo.javaClass.declaredMethods)
+        .firstOrNull { method ->
+            if (method.name !in candidates) return@firstOrNull false
+            val params = method.parameterTypes
+            // (workspaceId) or (workspaceId, ...) but we only support 1 arg here
+            if (params.isEmpty()) return@firstOrNull false
+            val last = params.lastOrNull()?.name
+            // must NOT be suspend for flow; but even if suspend we can’t safely call it here.
+            if (last == "kotlin.coroutines.Continuation") return@firstOrNull false
+            params.size == 1 && (params[0] == java.lang.Long.TYPE || params[0] == java.lang.Long::class.java)
+        }
+        ?.apply { isAccessible = true }
+        ?: return null
+
+    val raw = runCatching { m.invoke(repo, workspaceId) }.getOrNull() ?: return null
+    @Suppress("UNCHECKED_CAST")
+    val flowAny = raw as? Flow<Any?> ?: return null
+
+    return flowAny.map { v ->
+        (v as? List<*>)?.filterNotNull()?.map { it as Any } ?: emptyList()
+    }
+}
+
+private fun resolveMutableStateFlowLongNullable(
+    vm: ChatViewModel,
+    fieldNameHints: List<String>
+): MutableStateFlow<Long?>? {
+    val wanted = MutableStateFlow::class.java
+    var c: Class<*>? = vm.javaClass
+
+    // 1) exact name match first
+    while (c != null) {
+        for (name in fieldNameHints) {
+            val f = runCatching { c.getDeclaredField(name) }.getOrNull() ?: continue
+            if (!wanted.isAssignableFrom(f.type)) continue
+            f.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            return (f.get(vm) as? MutableStateFlow<Any?>) as? MutableStateFlow<Long?>
+        }
+        c = c.superclass
+    }
+
+    // 2) fallback: any field contains "web" and "conversation" and is MutableStateFlow
+    c = vm.javaClass
+    while (c != null) {
+        val f = c.declaredFields.firstOrNull { ff ->
+            wanted.isAssignableFrom(ff.type) &&
+                ff.name.lowercase(Locale.ROOT).contains("web") &&
+                ff.name.lowercase(Locale.ROOT).contains("conversation")
+        }
+        if (f != null) {
+            f.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            return (f.get(vm) as? MutableStateFlow<Any?>) as? MutableStateFlow<Long?>
+        }
+        c = c.superclass
+    }
+    return null
+}
+
+private fun setMutableStateFlowValue(flow: MutableStateFlow<Long?>?, value: Long?) {
+    if (flow == null) return
+    runCatching { flow.value = value }
+}
+
+private fun invokeOpenConversationIfExists(vm: ChatViewModel, conversationId: Long) {
+    val m = vm.javaClass.methods
+        .plus(vm.javaClass.declaredMethods)
+        .firstOrNull { it.name == "openConversation" && it.parameterTypes.size == 1 && (it.parameterTypes[0] == java.lang.Long.TYPE || it.parameterTypes[0] == java.lang.Long::class.java) }
+        ?.apply { isAccessible = true }
+        ?: return
+    runCatching { m.invoke(vm, conversationId) }
+}
+
+private fun Any.readLongProp(name: String): Long? {
+    // getter: getX()
+    val getter = "get" + name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+    runCatching {
+        val m = javaClass.methods.firstOrNull { it.name == getter && it.parameterTypes.isEmpty() } ?: return@runCatching
+        val v = m.invoke(this)
+        when (v) {
+            is Long -> v
+            is Int -> v.toLong()
+            is Number -> v.toLong()
+            else -> null
+        }
+    }.getOrNull()?.let { return it }
+
+    // field direct
+    return runCatching {
+        var c: Class<*>? = javaClass
+        while (c != null) {
+            val f = c.declaredFields.firstOrNull { it.name == name } ?: run {
+                c = c.superclass
+                continue
+            }
+            f.isAccessible = true
+            val v = f.get(this)
+            return@runCatching when (v) {
+                null -> null
+                is Long -> v
+                is Int -> v.toLong()
+                is Number -> v.toLong()
+                else -> null
+            }
+        }
+        null
+    }.getOrNull()
+}
+
+private fun Any.readStringProp(name: String): String? {
+    val getter = "get" + name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+    runCatching {
+        val m = javaClass.methods.firstOrNull { it.name == getter && it.parameterTypes.isEmpty() } ?: return@runCatching
+        val v = m.invoke(this)
+        return@runCatching v as? String
+    }.getOrNull()?.let { return it }
+
+    return runCatching {
+        var c: Class<*>? = javaClass
+        while (c != null) {
+            val f = c.declaredFields.firstOrNull { it.name == name } ?: run {
+                c = c.superclass
+                continue
+            }
+            f.isAccessible = true
+            return@runCatching f.get(this) as? String
+        }
+        null
+    }.getOrNull()
+}
+
+private fun Method.isSuspendLike(): Boolean {
+    val p = parameterTypes
+    return p.isNotEmpty() && p.last().name == "kotlin.coroutines.Continuation"
+}
+
+/**
+ * محاولة إنشاء Conversation داخل Workspace معيّن.
+ * هذه تعتمد على شكل ConversationRepository عندك:
+ * - لو عندك createConversation(...) بشكل واضح، ستنجح.
+ * - لو الـ API مختلف، سترجع null.
+ */
+private suspend fun createConversationInWebWorkspaceReflective(
+    repo: ConversationRepository,
+    workspaceId: Long,
+    parentConversationId: Long?,
+    title: String,
+    agentId: String?,
+): Long? {
+    val names = listOf("createConversation", "insertConversation")
+
+    val all = repo.javaClass.methods.toList() + repo.javaClass.declaredMethods.toList()
+    val candidates = all.filter { it.name in names }.onEach { it.isAccessible = true }
+
+    // Prefer signature: (title:String, agentId:String?, memoryAccessEnabled:Boolean, workspaceId:Long, parentConversationId:Long?)
+    val preferred = candidates.firstOrNull { m ->
+        val ps = m.parameterTypes
+        val suspend = m.isSuspendLike()
+        val count = if (suspend) ps.size - 1 else ps.size
+        if (count != 5) return@firstOrNull false
+        ps[0] == String::class.java &&
+            ps[2] == Boolean::class.javaPrimitiveType &&
+            (ps[3] == Long::class.javaPrimitiveType || ps[3] == java.lang.Long::class.java)
+    }
+
+    val m = preferred ?: return null
+
+    val args = arrayOf<Any?>(
+        title,
+        agentId,
+        true, // memoryAccessEnabled (للوثوق/التمييز فقط)
+        workspaceId,
+        parentConversationId
+    )
+
+    return invokePossiblySuspendReturningLong(repo, m, args)
+}
+
+private suspend fun resetWorkspaceFullyReflective(repo: ConversationRepository, workspaceId: Long): Boolean {
+    val names = listOf("resetWorkspaceFully", "resetWorkspace", "resetWorkspaceCompletely")
+    val all = repo.javaClass.methods.toList() + repo.javaClass.declaredMethods.toList()
+    val m = all.firstOrNull { it.name in names }?.apply { isAccessible = true } ?: return false
+
+    val ps = m.parameterTypes
+    val suspend = m.isSuspendLike()
+    val count = if (suspend) ps.size - 1 else ps.size
+    if (count != 1) return false
+    if (!(ps[0] == Long::class.javaPrimitiveType || ps[0] == java.lang.Long::class.java)) return false
+
+    val ok = runCatching {
+        if (suspend) {
+            invokePossiblySuspend(repo, m, arrayOf(workspaceId))
+        } else {
+            m.invoke(repo, workspaceId)
+        }
+        true
+    }.getOrDefault(false)
+
+    return ok
+}
+
+private suspend fun invokePossiblySuspendReturningLong(
+    target: Any,
+    method: Method,
+    args: Array<Any?>
+): Long? {
+    val res: Any? = if (method.isSuspendLike()) {
+        invokePossiblySuspend(target, method, args)
+    } else {
+        runCatching { method.invoke(target, *args) }.getOrNull()
+    }
+    return when (res) {
+        is Long -> res
+        is Int -> res.toLong()
+        is Number -> res.toLong()
+        else -> null
+    }
+}
+
+private suspend fun invokePossiblySuspend(
+    target: Any,
+    method: Method,
+    args: Array<Any?>
+): Any? {
+    if (!method.isSuspendLike()) return runCatching { method.invoke(target, *args) }.getOrNull()
+
+    return suspendCancellableCoroutine { cont ->
+        try {
+            val fullArgs = arrayOfNulls<Any?>(args.size + 1)
+            for (i in args.indices) fullArgs[i] = args[i]
+            fullArgs[args.size] = cont
+
+            val r = method.invoke(target, *fullArgs)
+            if (r != COROUTINE_SUSPENDED) {
+                cont.resume(r, onCancellation = null)
+            }
+        } catch (t: Throwable) {
+            cont.resumeWith(Result.failure(t))
+        }
     }
 }
 
