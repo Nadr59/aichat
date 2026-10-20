@@ -86,6 +86,7 @@ import com.example.aichat.data.model.AgentProfile
 import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.data.model.Workspace
 import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.AgentRepository
 import com.example.aichat.repository.ConversationRepository
@@ -97,6 +98,7 @@ import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
@@ -106,16 +108,17 @@ import org.mozilla.geckoview.WebRequestError
 import java.util.Locale
 
 /**
- * UI القديم (Tabs + GeckoView + SendBar) + إضافة:
- * ✅ Web Agent (aiSettings.webAgentId) يتم حقنه ضمن السياق عند الإرسال.
- * ✅ زر في الـ TopBar يفتح قائمة الوكلاء للتبديل بينهم.
- * ✅ Workspace Summary (ذاكرة مشتركة لكل منصات الويب) يتم حقنه ضمن السياق عند الإرسال (scopeKey = web:global).
- * ✅ زر "الشجرة" للويب + BottomSheet تعرض Tree داخل Workspace واحد مشترك (web:global).
+ * GeckoTestScreen (Tabs + GeckoView + SendBar) +:
+ * ✅ Web Agent injection
+ * ✅ Workspace Summary injection (scopeKey = web:global)
+ * ✅ زر "الشجرة" + BottomSheet لشجرة web:global
  *
  * ملاحظة:
- * - هذه النسخة لا تعتمد على وجود observeConversationsInWorkspace في ConversationRepository.
- * - بدلًا من ذلك، تعتمد على vm.conversations (كل المحادثات) ثم تعمل فلترة حسب workspaceId للويب.
- * - ما زلنا نستخدم reflection فقط لقراءة/تعديل _currentWebConversationId لأنها private في ChatViewModel الحالي.
+ * - BottomSheet الآن لا يعتمد على reflection لمعرفة "محادثات Workspace".
+ * - يستخدم مباشرة:
+ *   - repo.observeAllWorkspaces() لإيجاد Workspace web:global
+ *   - repo.observeConversationsByWorkspace(wsId) لعرض الشجرة
+ * - نستخدم reflection فقط لقراءة/تعديل _currentWebConversationId (لأنه private داخل ChatViewModel الحالي).
  */
 @Composable
 fun GeckoTestScreen(
@@ -192,14 +195,12 @@ fun GeckoTestScreen(
     // Web Agent (Picker + injection)
     // =========================
     var showWebAgentDialog by rememberSaveable { mutableStateOf(false) }
-
     var webAgentId by rememberSaveable { mutableStateOf(aiSettings.webAgentIdOrNull) }
     var accuracyEnabled by rememberSaveable { mutableStateOf(aiSettings.accuracyPromptEnabled) }
 
     // ✅ شجرة الويب
     var showWebTreeSheet by rememberSaveable { mutableStateOf(false) }
 
-    // مزامنة مبدئية (لو تغيّر من شاشة ثانية)
     LaunchedEffect(Unit) {
         webAgentId = aiSettings.webAgentIdOrNull
         accuracyEnabled = aiSettings.accuracyPromptEnabled
@@ -532,7 +533,6 @@ fun GeckoTestScreen(
                 }
             },
             actions = {
-                // ✅ زر اختيار الوكيل
                 IconButton(onClick = { showWebAgentDialog = true }) {
                     Icon(Icons.Filled.SmartToy, contentDescription = "Web Agent")
                 }
@@ -685,7 +685,7 @@ fun GeckoTestScreen(
 
                 scope.launch {
                     try {
-                        // ✅ مهم: تسجيل رسالة المستخدم داخل VM قبل الالتقاط/الرد
+                        // ✅ تسجيل رسالة المستخدم داخل VM قبل الالتقاط/الرد
                         runCatching { vm?.onWebUserMessageSent(question) }
 
                         val memoryAllowed = memoryInjectionEnabled && includeMemory && platform.memoryEnabled && vm != null
@@ -716,7 +716,7 @@ fun GeckoTestScreen(
                                 runCatching {
                                     val ws = repo.getOrCreateWorkspace(
                                         scopeKey = webWorkspaceScopeKeyGlobal(),
-                                        title = "Web (Global)"
+                                        title = "WEB • Global"
                                     )
                                     ws.summary.trim()
                                 }.getOrNull()
@@ -848,34 +848,40 @@ private fun WebGlobalTreeBottomSheet(
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // workspace web:global
-    val wsState = produceState<WebWorkspaceInfo?>(initialValue = null, repo) {
-        value = runCatching {
-            val ws = repo.getOrCreateWorkspace(scopeKey = "web:global", title = "WEB • Global")
-            WebWorkspaceInfo(id = ws.id, summary = ws.summary.orEmpty())
-        }.getOrNull()
+    // Ensure workspace exists
+    LaunchedEffect(repo) {
+        runCatching { repo.getOrCreateWorkspace(scopeKey = "web:global", title = "WEB • Global") }
     }
-    val ws = wsState.value
 
-    // current web conversation id from VM (reflection)
-    val currentWebConversationIdStateFlow: MutableStateFlow<Long?>? = remember(vm) {
-        resolveMutableStateFlowLongNullable(vm, fieldNameHints = listOf("_currentWebConversationId", "currentWebConversationId"))
+    val wsFlow = remember(repo) {
+        repo.observeAllWorkspaces().map { all ->
+            all.firstOrNull { it.scopeKey == "web:global" }
+        }
     }
-    val currentWebConversationIdState: State<Long?> =
+    val ws: Workspace? by wsFlow.collectAsStateWithLifecycle(initialValue = null)
+
+    val currentWebConversationIdStateFlow: MutableStateFlow<Long?>? = remember(vm) {
+        resolveMutableStateFlowLongNullable(
+            vm,
+            fieldNameHints = listOf("_currentWebConversationId", "currentWebConversationId")
+        )
+    }
+    val currentIdState: State<Long?> =
         currentWebConversationIdStateFlow?.collectAsStateWithLifecycle(initialValue = null)
             ?: remember { mutableStateOf<Long?>(null) }
-    val currentId: Long? = currentWebConversationIdState.value
+    val currentId: Long? = currentIdState.value
 
-    // ✅ conversations list comes from vm.conversations (no repo reflection)
-    val allConversations by vm.conversations.collectAsStateWithLifecycle()
-    val convs: List<Conversation> = remember(allConversations, ws?.id) {
-        val wsId = ws?.id ?: return@remember emptyList()
-        allConversations
-            .filter { it.workspaceId == wsId }
-            .sortedByDescending { it.updatedAt }
+    val convsFlow = remember(repo, ws?.id) {
+        ws?.id?.let { repo.observeConversationsByWorkspace(it) }
+            ?: kotlinx.coroutines.flow.flowOf(emptyList())
     }
-
+    val convsRaw: List<Conversation> by convsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val convs: List<Conversation> = remember(convsRaw) { convsRaw.sortedByDescending { it.updatedAt } }
     val byId: Map<Long, Conversation> = remember(convs) { convs.associateBy { it.id } }
+
+    fun openConversation(id: Long) {
+        setMutableStateFlowValue(currentWebConversationIdStateFlow, id)
+    }
 
     fun pathToRoot(id: Long): List<Conversation> {
         val out = ArrayList<Conversation>(8)
@@ -889,10 +895,8 @@ private fun WebGlobalTreeBottomSheet(
         return out.asReversed()
     }
 
-    val breadcrumb: List<Conversation> = remember(currentId, byId) {
-        currentId?.let { pathToRoot(it) }.orEmpty()
-    }
     val currentConv: Conversation? = remember(currentId, byId) { currentId?.let { byId[it] } }
+    val breadcrumb: List<Conversation> = remember(currentId, byId) { currentId?.let { pathToRoot(it) }.orEmpty() }
     val parentConv: Conversation? = remember(currentConv, byId) { currentConv?.parentConversationId?.let { byId[it] } }
 
     val children: List<Conversation> = remember(currentId, convs) {
@@ -905,10 +909,6 @@ private fun WebGlobalTreeBottomSheet(
     }
     val roots: List<Conversation> = remember(convs) {
         convs.filter { it.parentConversationId == null }.sortedByDescending { it.updatedAt }
-    }
-
-    fun openConversation(id: Long) {
-        setMutableStateFlowValue(currentWebConversationIdStateFlow, id)
     }
 
     var showResetConfirm by rememberSaveable { mutableStateOf(false) }
@@ -939,9 +939,9 @@ private fun WebGlobalTreeBottomSheet(
             if (ws == null) {
                 Text("⚠️ تعذر تحميل Workspace.")
             } else {
-                if (ws.summary.isNotBlank()) {
+                if (ws!!.summary.isNotBlank()) {
                     Text(
-                        text = "WORKSPACE_SUMMARY (مختصر):\n${ws.summary.take(220)}",
+                        text = "WORKSPACE_SUMMARY (مختصر):\n${ws!!.summary.take(220)}",
                         style = MaterialTheme.typography.bodySmall
                     )
                 } else {
@@ -973,8 +973,8 @@ private fun WebGlobalTreeBottomSheet(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = {
-                                val wsId = ws?.id
-                                if (wsId == null) {
+                                val workspaceId = ws?.id
+                                if (workspaceId == null) {
                                     Toast.makeText(context, "Workspace غير متاح", Toast.LENGTH_SHORT).show()
                                     return@OutlinedButton
                                 }
@@ -986,7 +986,7 @@ private fun WebGlobalTreeBottomSheet(
                                                 title = title,
                                                 memoryAccessEnabled = true,
                                                 agentId = webAgentId,
-                                                workspaceId = wsId,
+                                                workspaceId = workspaceId,
                                                 parentConversationId = null
                                             )
                                         )
@@ -1006,9 +1006,9 @@ private fun WebGlobalTreeBottomSheet(
 
                         OutlinedButton(
                             onClick = {
-                                val wsId = ws?.id
+                                val workspaceId = ws?.id
                                 val pid = currentId
-                                if (wsId == null || pid == null) {
+                                if (workspaceId == null || pid == null) {
                                     Toast.makeText(context, "اختر محادثة أولًا", Toast.LENGTH_SHORT).show()
                                     return@OutlinedButton
                                 }
@@ -1021,7 +1021,7 @@ private fun WebGlobalTreeBottomSheet(
                                                 title = branchTitle,
                                                 memoryAccessEnabled = true,
                                                 agentId = webAgentId,
-                                                workspaceId = wsId,
+                                                workspaceId = workspaceId,
                                                 parentConversationId = pid
                                             )
                                         )
@@ -1040,14 +1040,14 @@ private fun WebGlobalTreeBottomSheet(
                         ) { Text("🪵 تفريع") }
 
                         OutlinedButton(
-                            onClick = { setMutableStateFlowValue(currentWebConversationIdStateFlow, null) },
+                            onClick = { setMutableStateFlowValue(currentWebConversationIdStateFlow, null) }
                         ) { Text("⛔ إلغاء التحديد") }
                     }
                 }
             }
 
             if (currentId != null) {
-                Text("Breadcrumb:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Text("المسار (Breadcrumb):", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 if (breadcrumb.isEmpty()) {
                     Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
@@ -1183,11 +1183,6 @@ private fun ConversationRowLite(
         }
     }
 }
-
-private data class WebWorkspaceInfo(
-    val id: Long,
-    val summary: String
-)
 
 private fun resolveMutableStateFlowLongNullable(
     vm: ChatViewModel,
