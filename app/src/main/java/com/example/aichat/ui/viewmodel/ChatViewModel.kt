@@ -75,14 +75,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentConversationId = MutableStateFlow<Long?>(null)
     val currentConversationId: StateFlow<Long?> = _currentConversationId.asStateFlow()
 
-    // ✅ Parent id للمحادثة الحالية (لـ Tree UI)
     private val _currentParentConversationId = MutableStateFlow<Long?>(null)
     val currentParentConversationId: StateFlow<Long?> = _currentParentConversationId.asStateFlow()
 
     private val _currentAgentId = MutableStateFlow<String?>(null)
     val currentAgentId: StateFlow<String?> = _currentAgentId.asStateFlow()
 
-    // ✅ Workspace (v11) — Summary across conversations
+    // ✅ Workspace (v11)
     private val _currentWorkspaceId = MutableStateFlow<Long?>(null)
     val currentWorkspaceId: StateFlow<Long?> = _currentWorkspaceId.asStateFlow()
 
@@ -123,7 +122,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun getConversationMemories(conversationId: Long): Flow<List<MemoryItem>> =
         memoryRepository.getConversationMemories(conversationId)
 
-    // ✅ Tree UI: children (فروع) للمحادثة
     fun observeChildConversations(parentConversationId: Long): Flow<List<Conversation>> =
         conversationRepository.observeChildConversations(parentConversationId)
 
@@ -296,12 +294,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val prev = _workspaceSummary.value
         viewModelScope.launch {
             runCatching {
-                val updated = generateUpdatedWorkspaceSummary(
-                    previousSummary = prev,
-                    userText = userText,
-                    assistantText = assistantText
-                )
-
+                val updated = generateUpdatedWorkspaceSummary(prev, userText, assistantText)
                 if (updated.isNotBlank()) {
                     conversationRepository.updateWorkspaceSummary(workspaceId, updated)
                     _workspaceSummary.value = updated
@@ -318,18 +311,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 val prev = conversationRepository.getWorkspaceById(workspaceId)?.summary.orEmpty()
-                val updated = generateUpdatedWorkspaceSummary(
-                    previousSummary = prev,
-                    userText = userText,
-                    assistantText = assistantText
-                )
-
+                val updated = generateUpdatedWorkspaceSummary(prev, userText, assistantText)
                 if (updated.isNotBlank()) {
                     conversationRepository.updateWorkspaceSummary(workspaceId, updated)
-
-                    if (_currentWorkspaceId.value == workspaceId) {
-                        _workspaceSummary.value = updated
-                    }
+                    if (_currentWorkspaceId.value == workspaceId) _workspaceSummary.value = updated
                 }
             }
         }
@@ -348,17 +333,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val conv = conversationRepository.getConversationById(conversationId)
-
             _currentParentConversationId.value = conv?.parentConversationId
             _memoryAccessEnabled.value = conv?.memoryAccessEnabled ?: true
             _currentAgentId.value = conv?.agentId
 
             val wsId = conv?.workspaceId
-            if (wsId != null) {
-                setCurrentWorkspaceById(wsId)
-            } else {
-                runCatching { ensureWorkspaceForConversation(conversationId) }
-            }
+            if (wsId != null) setCurrentWorkspaceById(wsId)
+            else runCatching { ensureWorkspaceForConversation(conversationId) }
         }
     }
 
@@ -393,7 +374,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                // حتى يظهر في الأعلى فورًا
                 conversationRepository.updateTitleAndTimestamp(
                     id = newId,
                     title = branchTitle.ifBlank { "فرع جديد" },
@@ -407,6 +387,55 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 openConversation(newId)
             }.onFailure { e ->
                 _error.value = "فشل إنشاء فرع: ${e.message ?: "خطأ غير معروف"}"
+            }
+        }
+    }
+
+    /**
+     * ✅ NEW: Reset workspace بالكامل
+     * - يمسح كل المحادثات/الفروع داخل نفس workspace
+     * - ويصفّر Workspace Summary
+     *
+     * ملاحظة: لا يمسح Shared Memories.
+     */
+    fun resetCurrentWorkspaceFully() {
+        if (_isLoading.value) return
+
+        val convId = _currentConversationId.value
+        viewModelScope.launch {
+            runCatching {
+                // 1) حدّد Workspace الصحيح
+                val workspaceIdToReset: Long = when {
+                    convId != null -> {
+                        val conv = conversationRepository.getConversationById(convId)
+                        conv?.workspaceId ?: ensureWorkspaceForConversation(convId).id
+                    }
+                    _currentWorkspaceId.value != null -> _currentWorkspaceId.value!!
+                    else -> {
+                        // fallback: workspace الخاص بالموديل الحالي
+                        conversationRepository.getOrCreateWorkspace(
+                            scopeKey = apiScopeKey(),
+                            title = apiWorkspaceTitle()
+                        ).id
+                    }
+                }
+
+                // 2) أوقف أي collect للمحادثة الحالية قبل الحذف
+                messagesCollectJob?.cancel()
+                messagesCollectJob = null
+
+                // 3) reset في DB
+                conversationRepository.resetWorkspaceFully(workspaceIdToReset)
+
+                // 4) صفّر واجهة المستخدم (مهم لأن المحادثة الحالية قد تكون حُذفت)
+                newConversation()
+
+                // 5) حدّث الحالة: workspace موجود لكن Summary فاضي
+                setCurrentWorkspaceById(workspaceIdToReset)
+
+                _successMessage.value = "✅ تم تصفير Workspace بالكامل (محادثات + ملخص)."
+            }.onFailure { e ->
+                _error.value = "فشل تصفير Workspace: ${e.message ?: "خطأ غير معروف"}"
             }
         }
     }
@@ -426,19 +455,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _memoryAccessEnabled.value = true
         _enhancedQuery.value = null
         _isEnhancing.value = false
-        // لا نمسح workspace summary (استمرارية)
+        // لا نمسح workspace summary هنا (استمرارية) — إلا إذا resetCurrentWorkspaceFully
     }
 
     fun toggleMemoryAccess(enabled: Boolean) {
         _memoryAccessEnabled.value = enabled
-        val convId = _currentConversationId.value ?: return
-        viewModelScope.launch { conversationRepository.updateMemoryAccess(convId, enabled) }
+        val id = _currentConversationId.value ?: return
+        viewModelScope.launch { conversationRepository.updateMemoryAccess(id, enabled) }
     }
 
     fun setConversationAgent(agentId: String?) {
         _currentAgentId.value = agentId
-        val convId = _currentConversationId.value ?: return
-        viewModelScope.launch { conversationRepository.updateAgentId(convId, agentId) }
+        val id = _currentConversationId.value ?: return
+        viewModelScope.launch { conversationRepository.updateAgentId(id, agentId) }
     }
 
     private fun startCollecting(conversationId: Long) {
@@ -602,11 +631,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 _currentWorkspaceId.value?.let { workspaceId ->
-                    updateWorkspaceSummaryAsync(
-                        workspaceId = workspaceId,
-                        userText = text,
-                        assistantText = response
-                    )
+                    updateWorkspaceSummaryAsync(workspaceId, text, response)
                 }
 
                 val title = historySnapshot.firstOrNull { it.role == "user" }?.content ?: text
@@ -626,6 +651,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // =========================
     // Web AI response (capture) — GLOBAL WEB WORKSPACE
+    // (كما هو عندك)
     // =========================
 
     private fun webGlobalScopeKey(): String = "web:global"
@@ -756,7 +782,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // =========================
-    // Images + File/Web saving
+    // Images + File/Web saving (كما هو)
     // =========================
 
     fun selectImage(uri: Uri) {
