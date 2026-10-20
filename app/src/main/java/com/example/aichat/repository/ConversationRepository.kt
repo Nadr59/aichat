@@ -55,7 +55,6 @@ class ConversationRepository(
         )
     }
 
-    // اختياري لشاشة “الذاكرة الشجرية” لاحقاً
     fun observeConversationsByWorkspace(workspaceId: Long): Flow<List<Conversation>> =
         chatDao.observeConversationsByWorkspace(workspaceId)
 
@@ -65,10 +64,6 @@ class ConversationRepository(
     fun observeChildConversations(parentConversationId: Long): Flow<List<Conversation>> =
         chatDao.observeChildConversations(parentConversationId)
 
-    /**
-     * ✅ Helper: إنشاء محادثة داخل Workspace (scopeKey) مباشرة
-     * هذا يسهل علينا في ChatViewModel تطبيق “استكمال بدون انقطاع”.
-     */
     suspend fun insertConversationInWorkspace(
         scopeKey: String,
         conversation: Conversation,
@@ -112,18 +107,11 @@ class ConversationRepository(
     suspend fun getWorkspaceByScopeKey(scopeKey: String): Workspace? =
         chatDao.getWorkspaceByScopeKey(scopeKey)
 
-    /**
-     * ينشئ Workspace إذا غير موجود (scopeKey فريد).
-     * - إذا تم الإدخال: يرجع Workspace الجديد
-     * - إذا كان موجودًا: يرجع الموجود
-     */
     suspend fun getOrCreateWorkspace(
         scopeKey: String,
         title: String = ""
     ): Workspace {
-        // 1) حاول تجيب الموجود أولاً (أرخص)
         chatDao.getWorkspaceByScopeKey(scopeKey)?.let { existing ->
-            // إذا العنوان فاضي بالمخزن وعندنا عنوان جديد، حدّثه
             if (existing.title.isBlank() && title.isNotBlank()) {
                 chatDao.updateWorkspaceTitle(
                     id = existing.id,
@@ -135,7 +123,6 @@ class ConversationRepository(
             return existing
         }
 
-        // 2) لو غير موجود: جرّب insert IGNORE (في حال سباق)
         val now = System.currentTimeMillis()
         val insertedId = chatDao.insertWorkspaceIgnore(
             Workspace(
@@ -147,14 +134,12 @@ class ConversationRepository(
             )
         )
 
-        // 3) إذا نجح الإدخال: رجّع بالسحب من DB
         if (insertedId > 0) {
             return requireNotNull(chatDao.getWorkspaceById(insertedId)) {
                 "Workspace inserted but cannot be loaded (id=$insertedId)"
             }
         }
 
-        // 4) إذا كان موجودًا (insert رجع -1): اسحبه
         return requireNotNull(chatDao.getWorkspaceByScopeKey(scopeKey)) {
             "Workspace exists but cannot be loaded (scopeKey=$scopeKey)"
         }
@@ -173,6 +158,24 @@ class ConversationRepository(
             id = workspaceId,
             summary = summary,
             updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    // ✅ NEW: Reset workspace بالكامل (يمسح الشجرة + الملخص)
+    suspend fun resetWorkspaceFully(workspaceId: Long) {
+        val now = System.currentTimeMillis()
+
+        // 1) احذف الرسائل لكل محادثات هذا الـworkspace
+        chatDao.deleteMessagesByWorkspace(workspaceId)
+
+        // 2) احذف المحادثات نفسها (الشجرة)
+        chatDao.deleteConversationsByWorkspace(workspaceId)
+
+        // 3) صفّر Summary
+        chatDao.updateWorkspaceSummary(
+            id = workspaceId,
+            summary = "",
+            updatedAt = now
         )
     }
 }
