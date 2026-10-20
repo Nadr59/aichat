@@ -69,6 +69,18 @@ interface ChatDao {
     @Query("SELECT * FROM conversations WHERE parentConversationId = :parentId ORDER BY updatedAt DESC")
     fun observeChildConversations(parentId: Long): Flow<List<Conversation>>
 
+    // ✅ NEW: حذف شجرة Workspace بالكامل (محادثات + رسائل)
+    @Query(
+        """
+        DELETE FROM messages 
+        WHERE conversationId IN (SELECT id FROM conversations WHERE workspaceId = :workspaceId)
+        """
+    )
+    suspend fun deleteMessagesByWorkspace(workspaceId: Long)
+
+    @Query("DELETE FROM conversations WHERE workspaceId = :workspaceId")
+    suspend fun deleteConversationsByWorkspace(workspaceId: Long)
+
     // ============================================================
     // Messages
     // ============================================================
