@@ -1192,32 +1192,48 @@ private fun resolveMutableStateFlowLongNullable(
     var c: Class<*>? = vm.javaClass
 
     // 1) exact name match first
-    while (c != null) {
+    while (true) {
+        val cls = c ?: break
+
         for (name in fieldNameHints) {
-            val f = runCatching { c.getDeclaredField(name) }.getOrNull() ?: continue
+            val f = try {
+                cls.getDeclaredField(name)
+            } catch (_: NoSuchFieldException) {
+                null
+            } catch (_: SecurityException) {
+                null
+            } ?: continue
+
             if (!wanted.isAssignableFrom(f.type)) continue
             f.isAccessible = true
+
             @Suppress("UNCHECKED_CAST")
             return (f.get(vm) as? MutableStateFlow<Any?>) as? MutableStateFlow<Long?>
         }
-        c = c.superclass
+
+        c = cls.superclass
     }
 
     // 2) fallback: any field contains "web" and "conversation" and is MutableStateFlow
     c = vm.javaClass
-    while (c != null) {
-        val f = c.declaredFields.firstOrNull { ff ->
+    while (true) {
+        val cls = c ?: break
+
+        val f = cls.declaredFields.firstOrNull { ff ->
             wanted.isAssignableFrom(ff.type) &&
                 ff.name.lowercase(Locale.ROOT).contains("web") &&
                 ff.name.lowercase(Locale.ROOT).contains("conversation")
         }
+
         if (f != null) {
             f.isAccessible = true
             @Suppress("UNCHECKED_CAST")
             return (f.get(vm) as? MutableStateFlow<Any?>) as? MutableStateFlow<Long?>
         }
-        c = c.superclass
+
+        c = cls.superclass
     }
+
     return null
 }
 
