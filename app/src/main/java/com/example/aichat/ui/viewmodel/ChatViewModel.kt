@@ -393,7 +393,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * ✅ NEW: Reset workspace بالكامل
+     * ✅ Reset workspace بالكامل (API workspace الحالي)
      * - يمسح كل المحادثات/الفروع داخل نفس workspace
      * - ويصفّر Workspace Summary
      *
@@ -413,7 +413,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     _currentWorkspaceId.value != null -> _currentWorkspaceId.value!!
                     else -> {
-                        // fallback: workspace الخاص بالموديل الحالي
                         conversationRepository.getOrCreateWorkspace(
                             scopeKey = apiScopeKey(),
                             title = apiWorkspaceTitle()
@@ -706,6 +705,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _lastWebUserText.value = null
     }
 
+    fun clearWebConversationSelection() {
+        _currentWebConversationId.value = null
+        _lastWebUserText.value = null
+    }
+
     /**
      * إنشاء محادثة ويب جديدة (Root) ضمن web:global
      * وتصبح هي المحادثة الحالية للويب.
@@ -961,7 +965,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // =========================
-    // Images + File/Web saving (كما هو)
+    // Images + File/Web saving
     // =========================
 
     fun selectImage(uri: Uri) {
@@ -1158,7 +1162,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             conversationRepository.deleteMessages(conversation.id)
             conversationRepository.deleteConversation(conversation)
+
             if (_currentConversationId.value == conversation.id) newConversation()
+            if (_currentWebConversationId.value == conversation.id) clearWebConversationSelection()
         }
     }
 }
