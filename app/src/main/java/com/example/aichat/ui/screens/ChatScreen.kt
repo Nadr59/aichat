@@ -1,4 +1,4 @@
-// app/src/main/java/com/example/aichat/ui/screens/ChatScreen.kt
+
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -73,7 +73,9 @@ fun ChatScreen(
 
     val agents by agentsViewModel.agents.collectAsState()
     val currentAgentName = remember(currentAgentId, agents) {
-        currentAgentId?.let { id -> agents.firstOrNull { it.id == id }?.name }
+        currentAgentId?.let { id ->
+            agents.firstOrNull { it.id == id }?.name
+        }
     }
 
     var showAgentDialog by remember { mutableStateOf(false) }
@@ -81,25 +83,35 @@ fun ChatScreen(
 
     // BottomSheet Tree
     var showTreeSheet by remember { mutableStateOf(false) }
-    val treeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val treeSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true
+    )
 
     // Confirm create branch
     var showBranchConfirm by remember { mutableStateOf(false) }
 
-    // ✅ NEW: Confirm reset workspace
+    // Confirm reset workspace
     var showResetWorkspaceConfirm by remember { mutableStateOf(false) }
 
-    // Children of current
+    // Children of current conversation
     val childrenFlow = remember(conversationId) {
-        conversationId?.let { viewModel.observeChildConversations(it) } ?: flowOf(emptyList())
+        conversationId?.let {
+            viewModel.observeChildConversations(it)
+        } ?: flowOf(emptyList())
     }
-    val childConversations by childrenFlow.collectAsState(initial = emptyList())
+    val childConversations by childrenFlow.collectAsState(
+        initial = emptyList()
+    )
 
     // Siblings: children of parent
     val siblingsFlow = remember(parentConversationId) {
-        parentConversationId?.let { viewModel.observeChildConversations(it) } ?: flowOf(emptyList())
+        parentConversationId?.let {
+            viewModel.observeChildConversations(it)
+        } ?: flowOf(emptyList())
     }
-    val siblingsAll by siblingsFlow.collectAsState(initial = emptyList())
+    val siblingsAll by siblingsFlow.collectAsState(
+        initial = emptyList()
+    )
 
     val siblings = remember(siblingsAll, conversationId) {
         val cid = conversationId ?: return@remember emptyList()
@@ -107,13 +119,21 @@ fun ChatScreen(
     }
 
     // Current conversation object
-    val currentConversation = remember(conversationId, allConversations) {
+    val currentConversation = remember(
+        conversationId,
+        allConversations
+    ) {
         val cid = conversationId ?: return@remember null
         allConversations.firstOrNull { it.id == cid }
     }
 
     // Breadcrumb: root -> ... -> current
-    val breadcrumb = remember(conversationId, allConversations, currentWorkspaceId, currentConversation?.workspaceId) {
+    val breadcrumb = remember(
+        conversationId,
+        allConversations,
+        currentWorkspaceId,
+        currentConversation?.workspaceId
+    ) {
         val cid = conversationId ?: return@remember emptyList()
         val map = allConversations.associateBy { it.id }
         val wsId = currentConversation?.workspaceId ?: currentWorkspaceId
@@ -121,20 +141,39 @@ fun ChatScreen(
         val path = mutableListOf<com.example.aichat.data.model.Conversation>()
         var cur = map[cid]
         var guard = 0
+
         while (cur != null && guard < 60) {
-            if (wsId != null && cur.workspaceId != null && cur.workspaceId != wsId) break
+            if (
+                wsId != null &&
+                cur.workspaceId != null &&
+                cur.workspaceId != wsId
+            ) {
+                break
+            }
+
             path.add(cur)
+
             val pid = cur.parentConversationId ?: break
             cur = map[pid]
             guard++
         }
+
         path.reversed()
     }
 
     val rootInBreadcrumbId = breadcrumb.firstOrNull()?.id
 
-    var userInput by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
-    var enhancedInput by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
+    var userInput by rememberSaveable(
+        stateSaver = TextFieldValue.Saver
+    ) {
+        mutableStateOf(TextFieldValue(""))
+    }
+
+    var enhancedInput by rememberSaveable(
+        stateSaver = TextFieldValue.Saver
+    ) {
+        mutableStateOf(TextFieldValue(""))
+    }
 
     val isEnhanced = enhancedQuery != null
     val hasIdentity = settings.mediatorIdentityText.isNotBlank()
@@ -164,39 +203,72 @@ fun ChatScreen(
     }
 
     LaunchedEffect(enhancedQuery) {
-        enhancedInput = if (enhancedQuery != null) TextFieldValue(enhancedQuery!!) else TextFieldValue("")
+        enhancedInput = if (enhancedQuery != null) {
+            TextFieldValue(enhancedQuery!!)
+        } else {
+            TextFieldValue("")
+        }
     }
 
-    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) {
         it?.let(viewModel::selectImage)
     }
-    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) cameraImageUri?.let(viewModel::selectImage)
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { ok ->
+        if (ok) {
+            cameraImageUri?.let(viewModel::selectImage)
+        }
     }
-    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
+
+    val fileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) {
         it?.let(viewModel::processAndSaveFile)
     }
 
     fun openCamera() = runCatching {
-        val file = File.createTempFile("camera_photo_", ".jpg", context.cacheDir)
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+        val file = File.createTempFile(
+            "camera_photo_",
+            ".jpg",
+            context.cacheDir
+        )
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.provider",
+            file
+        )
+
         cameraImageUri = uri
         cameraLauncher.launch(uri)
     }.getOrNull()
 
     fun copyToClipboard(text: String) {
-        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cb.setPrimaryClip(ClipData.newPlainText("message", text))
+        val cb = context.getSystemService(
+            Context.CLIPBOARD_SERVICE
+        ) as ClipboardManager
+
+        cb.setPrimaryClip(
+            ClipData.newPlainText("message", text)
+        )
     }
 
     fun send() {
         if (isLoading) return
+
         scope.launch {
             keyboardController?.hide()
             focusManager.clearFocus(force = true)
             delay(80)
 
-            val textToSend = (if (isEnhanced) enhancedInput.text else userInput.text).trim()
+            val textToSend = (
+                if (isEnhanced) enhancedInput.text else userInput.text
+            ).trim()
+
             if (textToSend.isBlank()) return@launch
 
             viewModel.sendChatMessage(textToSend)
@@ -207,7 +279,12 @@ fun ChatScreen(
 
     LaunchedEffect(messages.size, isLoading) {
         val total = messages.size + if (isLoading) 1 else 0
-        if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
+
+        if (total > 0) {
+            runCatching {
+                listState.animateScrollToItem(total - 1)
+            }
+        }
     }
 
     Scaffold(
@@ -215,12 +292,17 @@ fun ChatScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("المحادثة", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "المحادثة",
+                            fontWeight = FontWeight.SemiBold
+                        )
+
                         Text(
                             settings.getActiveModel().take(40),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
                         currentAgentName?.let {
                             Text(
                                 "Agent: $it",
@@ -228,6 +310,7 @@ fun ChatScreen(
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
+
                         if (settings.provider.trim().lowercase() == "custom") {
                             Text(
                                 "الطلبات: $customRequestCount",
@@ -239,27 +322,48 @@ fun ChatScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع")
+                        Icon(
+                            Icons.Filled.ArrowBack,
+                            contentDescription = "رجوع"
+                        )
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showAgentDialog = true }) {
-                        Icon(Icons.Filled.SmartToy, contentDescription = "Agent")
+                    IconButton(
+                        onClick = { showAgentDialog = true }
+                    ) {
+                        Icon(
+                            Icons.Filled.SmartToy,
+                            contentDescription = "Agent"
+                        )
                     }
 
                     IconButton(
                         onClick = { showTreeSheet = true },
                         enabled = conversationId != null
                     ) {
-                        Icon(Icons.Filled.AccountTree, contentDescription = "شجرة المحادثة")
+                        Icon(
+                            Icons.Filled.AccountTree,
+                            contentDescription = "شجرة المحادثة"
+                        )
                     }
 
-                    IconButton(onClick = { viewModel.toggleMemoryAccess(!memoryAccessEnabled) }) {
+                    IconButton(
+                        onClick = {
+                            viewModel.toggleMemoryAccess(
+                                !memoryAccessEnabled
+                            )
+                        }
+                    ) {
                         Icon(
                             Icons.Filled.Memory,
                             contentDescription = "Memory access",
-                            tint = if (memoryAccessEnabled) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f)
+                            tint = if (memoryAccessEnabled) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                                    .copy(alpha = .35f)
+                            }
                         )
                     }
                 }
@@ -271,27 +375,45 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-
             if (messages.isEmpty() && !isLoading) {
-                EmptyChatView(modifier = Modifier.weight(1f))
+                EmptyChatView(
+                    modifier = Modifier.weight(1f)
+                )
             } else {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-                    contentPadding = PaddingValues(12.dp, 16.dp),
+                    contentPadding = PaddingValues(
+                        12.dp,
+                        16.dp
+                    ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(messages, key = { it.id }) { msg ->
+                    items(
+                        messages,
+                        key = { it.id }
+                    ) { msg ->
                         MessageBubble(
                             message = msg,
-                            onCopy = { copyToClipboard(msg.content) },
-                            onSaveMemory = { memoryMessage = msg }
+                            onCopy = {
+                                copyToClipboard(msg.content)
+                            },
+                            onSaveMemory = {
+                                memoryMessage = msg
+                            },
+                            onBranch = {
+                                viewModel.branchFromMessage(msg.id)
+                            },
+                            branchEnabled = !isLoading
                         )
                     }
+
                     if (isLoading) {
-                        item("thinking") { ThinkingBubble() }
+                        item("thinking") {
+                            ThinkingBubble()
+                        }
                     }
                 }
             }
@@ -300,10 +422,15 @@ fun ChatScreen(
                 ErrorMessage(
                     error = err,
                     onDismiss = viewModel::clearError,
-                    onCopy = { copyToClipboard(err) },
+                    onCopy = {
+                        copyToClipboard(err)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .padding(
+                            horizontal = 12.dp,
+                            vertical = 6.dp
+                        )
                 )
             }
 
@@ -315,17 +442,33 @@ fun ChatScreen(
                 isEnhancing = isEnhancing,
                 hasIdentity = hasIdentity,
                 onValueChange = { tfv ->
-                    if (isEnhanced) enhancedInput = tfv else userInput = tfv
+                    if (isEnhanced) {
+                        enhancedInput = tfv
+                    } else {
+                        userInput = tfv
+                    }
                 },
-                onOpenGallery = { galleryLauncher.launch("image/*") },
-                onOpenCamera = { openCamera() },
-                onOpenFile = { fileLauncher.launch("*/*") },
-                onOpenWebImport = { showWebImportDialog = true },
+                onOpenGallery = {
+                    galleryLauncher.launch("image/*")
+                },
+                onOpenCamera = {
+                    openCamera()
+                },
+                onOpenFile = {
+                    fileLauncher.launch("*/*")
+                },
+                onOpenWebImport = {
+                    showWebImportDialog = true
+                },
                 onRemoveImage = viewModel::clearSelectedImage,
                 onSend = ::send,
-                onEnhance = { viewModel.enhanceUserQuery(userInput.text) },
+                onEnhance = {
+                    viewModel.enhanceUserQuery(userInput.text)
+                },
                 onClearEnhanced = viewModel::clearEnhancedQuery,
-                onRefineStyle = { style -> viewModel.refineQueryStyle(userInput.text, style) },
+                onRefineStyle = { style ->
+                    viewModel.refineQueryStyle(userInput.text, style)
+                },
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -348,9 +491,17 @@ fun ChatScreen(
                     .padding(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("شجرة المحادثة", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "شجرة المحادثة",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
                     Spacer(Modifier.weight(1f))
+
                     Text(
                         "id=${conversationId ?: "-"}",
                         style = MaterialTheme.typography.labelSmall,
@@ -358,13 +509,20 @@ fun ChatScreen(
                     )
                 }
 
+                // Breadcrumb
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("المسار (Breadcrumb)", fontWeight = FontWeight.SemiBold)
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            "المسار (Breadcrumb)",
+                            fontWeight = FontWeight.SemiBold
+                        )
 
                         if (breadcrumb.isEmpty()) {
                             Text(
@@ -376,28 +534,55 @@ fun ChatScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
+                                    .horizontalScroll(
+                                        rememberScrollState()
+                                    ),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 breadcrumb.forEachIndexed { idx, conv ->
                                     val isCurrent = conv.id == conversationId
+
                                     AssistChip(
-                                        onClick = { openConversationFromTree(conv.id) },
-                                        label = { Text((conv.title.ifBlank { "بدون عنوان" }).take(18) + if (conv.title.length > 18) "…" else "") },
+                                        onClick = {
+                                            openConversationFromTree(conv.id)
+                                        },
+                                        label = {
+                                            Text(
+                                                (conv.title.ifBlank {
+                                                    "بدون عنوان"
+                                                }).take(18) +
+                                                    if (conv.title.length > 18) "…" else ""
+                                            )
+                                        },
                                         leadingIcon = {
-                                            if (isCurrent) Icon(Icons.Filled.Check, contentDescription = null)
-                                            else Icon(Icons.Filled.ChevronRight, contentDescription = null)
+                                            if (isCurrent) {
+                                                Icon(
+                                                    Icons.Filled.Check,
+                                                    contentDescription = null
+                                                )
+                                            } else {
+                                                Icon(
+                                                    Icons.Filled.ChevronRight,
+                                                    contentDescription = null
+                                                )
+                                            }
                                         },
                                         colors = if (isCurrent) {
                                             AssistChipDefaults.assistChipColors(
                                                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                                                 labelColor = MaterialTheme.colorScheme.onPrimaryContainer
                                             )
-                                        } else AssistChipDefaults.assistChipColors()
+                                        } else {
+                                            AssistChipDefaults.assistChipColors()
+                                        }
                                     )
+
                                     if (idx != breadcrumb.lastIndex) {
-                                        Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            "›",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
                             }
@@ -407,21 +592,35 @@ fun ChatScreen(
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 TextButton(
-                                    enabled = rootInBreadcrumbId != null && rootInBreadcrumbId != conversationId,
-                                    onClick = { rootInBreadcrumbId?.let { openConversationFromTree(it) } }
-                                ) { Text("فتح الجذر") }
+                                    enabled = rootInBreadcrumbId != null &&
+                                        rootInBreadcrumbId != conversationId,
+                                    onClick = {
+                                        rootInBreadcrumbId?.let {
+                                            openConversationFromTree(it)
+                                        }
+                                    }
+                                ) {
+                                    Text("فتح الجذر")
+                                }
                             }
                         }
                     }
                 }
 
+                // Parent
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("الأب", fontWeight = FontWeight.SemiBold)
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            "الأب",
+                            fontWeight = FontWeight.SemiBold
+                        )
 
                         if (parentConversationId == null) {
                             Text(
@@ -435,16 +634,33 @@ fun ChatScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Column(Modifier.weight(1f)) {
-                                    val pTitle = allConversations.firstOrNull { it.id == parentConversationId }?.title
-                                    Text((pTitle ?: "Conversation #$parentConversationId").take(80))
+                                Column(
+                                    Modifier.weight(1f)
+                                ) {
+                                    val pTitle = allConversations
+                                        .firstOrNull {
+                                            it.id == parentConversationId
+                                        }?.title
+
+                                    Text(
+                                        (pTitle
+                                            ?: "Conversation #$parentConversationId").take(80)
+                                    )
+
                                     Text(
                                         "id = $parentConversationId",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                TextButton(onClick = { openConversationFromTree(parentConversationId!!) }) {
+
+                                TextButton(
+                                    onClick = {
+                                        parentConversationId?.let {
+                                            openConversationFromTree(it)
+                                        }
+                                    }
+                                ) {
                                     Text("فتح الأب")
                                 }
                             }
@@ -452,29 +668,56 @@ fun ChatScreen(
                     }
                 }
 
+                // Siblings
                 if (parentConversationId != null) {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("إخوة (فروع تحت نفس الأب)", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                Text("${siblings.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(
+                            Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "إخوة (فروع تحت نفس الأب)",
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                Text(
+                                    "${siblings.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
+
                             if (siblings.isEmpty()) {
-                                Text("لا يوجد إخوة.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "لا يوجد إخوة.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             } else {
                                 LazyColumn(
-                                    modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 220.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    items(siblings, key = { it.id }) { conv ->
+                                    items(
+                                        siblings,
+                                        key = { it.id }
+                                    ) { conv ->
                                         ConversationNavRow(
                                             title = conv.title,
                                             id = conv.id,
-                                            onClick = { openConversationFromTree(conv.id) }
+                                            onClick = {
+                                                openConversationFromTree(conv.id)
+                                            }
                                         )
                                     }
                                 }
@@ -483,28 +726,55 @@ fun ChatScreen(
                     }
                 }
 
+                // Children
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("الأبناء (فروع من الحالية)", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            Text("${childConversations.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "الأبناء (فروع من الحالية)",
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Text(
+                                "${childConversations.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
+
                         if (childConversations.isEmpty()) {
-                            Text("لا توجد فروع من هذه المحادثة بعد.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "لا توجد فروع من هذه المحادثة بعد.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         } else {
                             LazyColumn(
-                                modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 260.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                items(childConversations, key = { it.id }) { conv ->
+                                items(
+                                    childConversations,
+                                    key = { it.id }
+                                ) { conv ->
                                     ConversationNavRow(
                                         title = conv.title,
                                         id = conv.id,
-                                        onClick = { openConversationFromTree(conv.id) }
+                                        onClick = {
+                                            openConversationFromTree(conv.id)
+                                        }
                                     )
                                 }
                             }
@@ -512,64 +782,92 @@ fun ChatScreen(
                     }
                 }
 
-                // Actions row (branch + close)
+                // Actions row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        onClick = { showBranchConfirm = true },
+                        onClick = {
+                            showBranchConfirm = true
+                        },
                         enabled = conversationId != null && !isLoading
                     ) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Icon(
+                            Icons.Filled.Add,
+                            contentDescription = null
+                        )
+
                         Spacer(Modifier.width(8.dp))
                         Text("إنشاء فرع")
                     }
 
                     Spacer(Modifier.weight(1f))
 
-                    TextButton(onClick = {
-                        showTreeSheet = false
-                        showBranchConfirm = false
-                        showResetWorkspaceConfirm = false
-                    }) { Text("إغلاق") }
+                    TextButton(
+                        onClick = {
+                            showTreeSheet = false
+                            showBranchConfirm = false
+                            showResetWorkspaceConfirm = false
+                        }
+                    ) {
+                        Text("إغلاق")
+                    }
                 }
 
-                // ✅ Danger zone: Reset workspace
+                // Danger zone: Reset workspace
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.errorContainer,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Text(
                             "إعادة ضبط Workspace",
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
+
                         Text(
                             "سيتم حذف كل المحادثات والفروع ضمن هذا الـWorkspace + تصفير WORKSPACE_SUMMARY.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
+
                         Text(
-                            "WorkspaceId: ${currentWorkspaceId ?: (currentConversation?.workspaceId ?: "-")}",
+                            "WorkspaceId: ${
+                                currentWorkspaceId
+                                    ?: (currentConversation?.workspaceId ?: "-")
+                            }",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(
+                                alpha = 0.85f
+                            )
                         )
 
                         OutlinedButton(
-                            onClick = { showResetWorkspaceConfirm = true },
+                            onClick = {
+                                showResetWorkspaceConfirm = true
+                            },
                             enabled = !isLoading,
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = MaterialTheme.colorScheme.onErrorContainer
                             ),
                             border = ButtonDefaults.outlinedButtonBorder.copy(
-                                brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.onErrorContainer)
+                                brush = androidx.compose.ui.graphics.SolidColor(
+                                    MaterialTheme.colorScheme.onErrorContainer
+                                )
                             )
                         ) {
-                            Icon(Icons.Filled.DeleteSweep, contentDescription = null)
+                            Icon(
+                                Icons.Filled.DeleteSweep,
+                                contentDescription = null
+                            )
+
                             Spacer(Modifier.width(8.dp))
                             Text("Reset workspace بالكامل")
                         }
@@ -582,9 +880,17 @@ fun ChatScreen(
     // Confirm create branch
     if (showBranchConfirm) {
         AlertDialog(
-            onDismissRequest = { showBranchConfirm = false },
-            title = { Text("إنشاء فرع") },
-            text = { Text("سيتم إنشاء محادثة جديدة كفرع من المحادثة الحالية والانتقال إليها.") },
+            onDismissRequest = {
+                showBranchConfirm = false
+            },
+            title = {
+                Text("إنشاء فرع")
+            },
+            text = {
+                Text(
+                    "سيتم إنشاء محادثة جديدة كفرع من المحادثة الحالية والانتقال إليها."
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -594,21 +900,35 @@ fun ChatScreen(
                         viewModel.branchFromCurrentConversation()
                     },
                     enabled = conversationId != null && !isLoading
-                ) { Text("متابعة") }
+                ) {
+                    Text("متابعة")
+                }
             },
             dismissButton = {
-                TextButton(onClick = { showBranchConfirm = false }) { Text("إلغاء") }
+                TextButton(
+                    onClick = {
+                        showBranchConfirm = false
+                    }
+                ) {
+                    Text("إلغاء")
+                }
             }
         )
     }
 
-    // ✅ Confirm reset workspace
+    // Confirm reset workspace
     if (showResetWorkspaceConfirm) {
         AlertDialog(
-            onDismissRequest = { showResetWorkspaceConfirm = false },
-            title = { Text("Reset workspace بالكامل؟") },
+            onDismissRequest = {
+                showResetWorkspaceConfirm = false
+            },
+            title = {
+                Text("Reset workspace بالكامل؟")
+            },
             text = {
-                Text("تحذير: سيُحذف كل تاريخ المحادثات والفروع ضمن هذا الـWorkspace وسيتم تصفير ملخص الذاكرة (WORKSPACE_SUMMARY).")
+                Text(
+                    "تحذير: سيُحذف كل تاريخ المحادثات والفروع ضمن هذا الـWorkspace وسيتم تصفير ملخص الذاكرة (WORKSPACE_SUMMARY)."
+                )
             },
             confirmButton = {
                 TextButton(
@@ -619,10 +939,18 @@ fun ChatScreen(
                         viewModel.resetCurrentWorkspaceFully()
                     },
                     enabled = !isLoading
-                ) { Text("نعم، نفّذ") }
+                ) {
+                    Text("نعم، نفّذ")
+                }
             },
             dismissButton = {
-                TextButton(onClick = { showResetWorkspaceConfirm = false }) { Text("إلغاء") }
+                TextButton(
+                    onClick = {
+                        showResetWorkspaceConfirm = false
+                    }
+                ) {
+                    Text("إلغاء")
+                }
             }
         )
     }
@@ -633,7 +961,9 @@ fun ChatScreen(
             title = "Agent لهذه المحادثة",
             agents = agents,
             selectedId = currentAgentId,
-            onDismiss = { showAgentDialog = false },
+            onDismiss = {
+                showAgentDialog = false
+            },
             onSelect = { id ->
                 viewModel.setConversationAgent(id)
                 showAgentDialog = false
@@ -644,7 +974,9 @@ fun ChatScreen(
                         showAgentDialog = false
                         onOpenAgents()
                     }
-                ) { Text("إدارة/استيراد Agents") }
+                ) {
+                    Text("إدارة/استيراد Agents")
+                }
             }
         )
     }
@@ -654,9 +986,16 @@ fun ChatScreen(
         SaveMemoryDialog(
             message = msg,
             conversationId = conversationId,
-            onDismiss = { memoryMessage = null },
+            onDismiss = {
+                memoryMessage = null
+            },
             onSave = { category, isShared ->
-                viewModel.addMemory(msg.content, category, isShared, msg.id)
+                viewModel.addMemory(
+                    msg.content,
+                    category,
+                    isShared,
+                    msg.id
+                )
                 memoryMessage = null
             }
         )
@@ -665,7 +1004,9 @@ fun ChatScreen(
     // Web page import dialog
     if (showWebImportDialog) {
         WebPageImportDialog(
-            onDismiss = { showWebImportDialog = false },
+            onDismiss = {
+                showWebImportDialog = false
+            },
             onConfirm = { url ->
                 viewModel.saveWebPage(url)
                 showWebImportDialog = false
@@ -699,15 +1040,25 @@ private fun ConversationNavRow(
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary
             )
-            Column(Modifier.weight(1f)) {
-                Text(title.ifBlank { "بدون عنوان" }.take(90))
+
+            Column(
+                Modifier.weight(1f)
+            ) {
+                Text(
+                    title.ifBlank { "بدون عنوان" }.take(90)
+                )
+
                 Text(
                     "id = $id",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Icon(Icons.Filled.ChevronRight, contentDescription = null)
+
+            Icon(
+                Icons.Filled.ChevronRight,
+                contentDescription = null
+            )
         }
     }
 }
@@ -715,11 +1066,23 @@ private fun ConversationNavRow(
 /* ----------------------------- UI components ----------------------------- */
 
 @Composable
-private fun EmptyChatView(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("ابدأ محادثة جديدة", fontWeight = FontWeight.SemiBold)
+private fun EmptyChatView(
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "ابدأ محادثة جديدة",
+                fontWeight = FontWeight.SemiBold
+            )
+
             Spacer(Modifier.height(6.dp))
+
             Text(
                 "اكتب سؤالك بالأسفل.",
                 style = MaterialTheme.typography.bodySmall,
@@ -741,8 +1104,15 @@ private fun ThinkingBubble() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            Text("يفكّر…", style = MaterialTheme.typography.bodySmall)
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp
+            )
+
+            Text(
+                "يفكّر…",
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
@@ -753,13 +1123,25 @@ private fun MessageBubble(
     message: Message,
     onCopy: () -> Unit,
     onSaveMemory: () -> Unit,
+    onBranch: () -> Unit,
+    branchEnabled: Boolean
 ) {
-    val isUser = remember(message) { guessIsUser(message) }
+    val isUser = remember(message) {
+        guessIsUser(message)
+    }
 
-    val bg =
-        if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-    val fg =
-        if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    val bg = if (isUser) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+
+    val fg = if (isUser) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
     val align = if (isUser) Alignment.End else Alignment.Start
 
     Column(
@@ -774,26 +1156,66 @@ private fun MessageBubble(
                 .widthIn(max = 520.dp)
                 .combinedClickable(
                     onClick = {},
-                    onLongClick = { onCopy() }
+                    onLongClick = {
+                        onCopy()
+                    }
                 )
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(message.content, color = fg)
+            Column(
+                modifier = Modifier.padding(12.dp)
+            ) {
+                Text(
+                    message.content,
+                    color = fg
+                )
 
                 Spacer(Modifier.height(10.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     AssistChip(
                         onClick = onCopy,
-                        label = { Text("نسخ") },
-                        leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
+                        label = {
+                            Text("نسخ")
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.ContentCopy,
+                                contentDescription = null
+                            )
+                        }
                     )
+
                     AssistChip(
                         onClick = onSaveMemory,
-                        label = { Text("حفظ كذاكرة") },
-                        leadingIcon = { Icon(Icons.Filled.Memory, contentDescription = null) }
+                        label = {
+                            Text("حفظ كذاكرة")
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Memory,
+                                contentDescription = null
+                            )
+                        }
                     )
                 }
+
+                Spacer(Modifier.height(6.dp))
+
+                AssistChip(
+                    onClick = onBranch,
+                    enabled = branchEnabled,
+                    label = {
+                        Text("محادثة جديدة من هنا")
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.AccountTree,
+                            contentDescription = null
+                        )
+                    }
+                )
             }
         }
     }
@@ -821,15 +1243,37 @@ private fun ErrorMessage(
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onErrorContainer
             )
-            Column(modifier = Modifier.weight(1f)) {
-                Text("خطأ", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onErrorContainer)
-                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    "خطأ",
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+
+                Text(
+                    error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
+
             IconButton(onClick = onCopy) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onErrorContainer)
+                Icon(
+                    Icons.Filled.ContentCopy,
+                    contentDescription = "Copy",
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
+
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onErrorContainer)
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Dismiss",
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
         }
     }
@@ -868,8 +1312,16 @@ private fun InputBar(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                AssistChip(onClick = {}, label = { Text("📎 صورة مرفقة") })
-                TextButton(onClick = onRemoveImage) { Text("إزالة") }
+                AssistChip(
+                    onClick = {},
+                    label = {
+                        Text("📎 صورة مرفقة")
+                    }
+                )
+
+                TextButton(onClick = onRemoveImage) {
+                    Text("إزالة")
+                }
             }
         }
 
@@ -883,23 +1335,40 @@ private fun InputBar(
                 modifier = Modifier.weight(1f),
                 minLines = 2,
                 maxLines = 6,
-                label = { Text(if (isEnhanced) "النص المُحسَّن" else "اكتب رسالتك") },
+                label = {
+                    Text(
+                        if (isEnhanced) "النص المُحسَّن" else "اكتب رسالتك"
+                    )
+                },
                 supportingText = {
                     val bits = buildList {
                         if (hasIdentity) add("Identity")
                         if (isEnhanced) add("Enhanced")
                     }
-                    if (bits.isNotEmpty()) Text(bits.joinToString(" • "))
+
+                    if (bits.isNotEmpty()) {
+                        Text(bits.joinToString(" • "))
+                    }
                 },
                 keyboardOptions = KeyboardOptions(
                     imeAction = ImeAction.Send,
                     autoCorrect = false
                 ),
-                keyboardActions = KeyboardActions(onSend = { onSend() })
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        onSend()
+                    }
+                )
             )
 
-            IconButton(onClick = onSend, enabled = !isLoading && displayedText.isNotBlank()) {
-                Icon(Icons.Filled.Send, contentDescription = "Send")
+            IconButton(
+                onClick = onSend,
+                enabled = !isLoading && displayedText.isNotBlank()
+            ) {
+                Icon(
+                    Icons.Filled.Send,
+                    contentDescription = "Send"
+                )
             }
         }
 
@@ -908,24 +1377,75 @@ private fun InputBar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onOpenGallery, enabled = !isLoading) { Icon(Icons.Filled.Image, contentDescription = "Gallery") }
-            IconButton(onClick = onOpenCamera, enabled = !isLoading) { Icon(Icons.Filled.CameraAlt, contentDescription = "Camera") }
-            IconButton(onClick = onOpenFile, enabled = !isLoading) { Icon(Icons.Filled.AttachFile, contentDescription = "File") }
-            IconButton(onClick = onOpenWebImport, enabled = !isLoading) { Icon(Icons.Filled.Language, contentDescription = "Web") }
+            IconButton(
+                onClick = onOpenGallery,
+                enabled = !isLoading
+            ) {
+                Icon(
+                    Icons.Filled.Image,
+                    contentDescription = "Gallery"
+                )
+            }
+
+            IconButton(
+                onClick = onOpenCamera,
+                enabled = !isLoading
+            ) {
+                Icon(
+                    Icons.Filled.CameraAlt,
+                    contentDescription = "Camera"
+                )
+            }
+
+            IconButton(
+                onClick = onOpenFile,
+                enabled = !isLoading
+            ) {
+                Icon(
+                    Icons.Filled.AttachFile,
+                    contentDescription = "File"
+                )
+            }
+
+            IconButton(
+                onClick = onOpenWebImport,
+                enabled = !isLoading
+            ) {
+                Icon(
+                    Icons.Filled.Language,
+                    contentDescription = "Web"
+                )
+            }
 
             Spacer(Modifier.weight(1f))
 
             Box {
-                IconButton(onClick = { styleMenu = true }, enabled = !isLoading) {
-                    Icon(Icons.Filled.Tune, contentDescription = "Refine style")
+                IconButton(
+                    onClick = {
+                        styleMenu = true
+                    },
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Filled.Tune,
+                        contentDescription = "Refine style"
+                    )
                 }
-                DropdownMenu(expanded = styleMenu, onDismissRequest = { styleMenu = false }) {
-                    enumValues<QueryStyle>().forEach { s ->
+
+                DropdownMenu(
+                    expanded = styleMenu,
+                    onDismissRequest = {
+                        styleMenu = false
+                    }
+                ) {
+                    enumValues<QueryStyle>().forEach { style ->
                         DropdownMenuItem(
-                            text = { Text(s.name) },
+                            text = {
+                                Text(style.name)
+                            },
                             onClick = {
                                 styleMenu = false
-                                onRefineStyle(s)
+                                onRefineStyle(style)
                             }
                         )
                     }
@@ -933,13 +1453,22 @@ private fun InputBar(
             }
 
             if (isEnhanced) {
-                TextButton(onClick = onClearEnhanced, enabled = !isLoading) { Text("إلغاء التحسين") }
+                TextButton(
+                    onClick = onClearEnhanced,
+                    enabled = !isLoading
+                ) {
+                    Text("إلغاء التحسين")
+                }
             } else {
                 TextButton(
                     onClick = onEnhance,
-                    enabled = !isLoading && !isEnhancing && displayedText.isNotBlank()
+                    enabled = !isLoading &&
+                        !isEnhancing &&
+                        displayedText.isNotBlank()
                 ) {
-                    Text(if (isEnhancing) "جارٍ التحسين…" else "تحسين السؤال")
+                    Text(
+                        if (isEnhancing) "جارٍ التحسين…" else "تحسين السؤال"
+                    )
                 }
             }
         }
@@ -953,69 +1482,128 @@ private fun SaveMemoryDialog(
     onDismiss: () -> Unit,
     onSave: (category: String, isShared: Boolean) -> Unit
 ) {
-    var category by remember { mutableStateOf("OTHER") }
-    var isShared by remember { mutableStateOf(true) }
+    var category by remember {
+        mutableStateOf("OTHER")
+    }
+
+    var isShared by remember {
+        mutableStateOf(true)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("حفظ كذاكرة") },
+        title = {
+            Text("حفظ كذاكرة")
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
                     "المحادثة: ${conversationId ?: "-"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
                 Text(message.content.take(500))
+
                 OutlinedTextField(
                     value = category,
-                    onValueChange = { category = it },
-                    label = { Text("Category") },
+                    onValueChange = {
+                        category = it
+                    },
+                    label = {
+                        Text("Category")
+                    },
                     singleLine = true
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = isShared, onCheckedChange = { isShared = it })
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Switch(
+                        checked = isShared,
+                        onCheckedChange = {
+                            isShared = it
+                        }
+                    )
+
                     Spacer(Modifier.width(8.dp))
                     Text("Shared")
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(category.trim().ifBlank { "OTHER" }, isShared) }) { Text("حفظ") }
+            TextButton(
+                onClick = {
+                    onSave(
+                        category.trim().ifBlank { "OTHER" },
+                        isShared
+                    )
+                }
+            ) {
+                Text("حفظ")
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء")
+            }
+        }
     )
 }
 
 @Composable
 private fun WebPageImportDialog(
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String) -> Unit
 ) {
-    var url by remember { mutableStateOf("") }
+    var url by remember {
+        mutableStateOf("")
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("استيراد صفحة ويب") },
+        title = {
+            Text("استيراد صفحة ويب")
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
                     "أدخل رابط الصفحة لحفظها/تلخيصها ضمن الذاكرة.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
                 OutlinedTextField(
                     value = url,
-                    onValueChange = { url = it },
-                    label = { Text("URL") },
+                    onValueChange = {
+                        url = it
+                    },
+                    label = {
+                        Text("URL")
+                    },
                     singleLine = true
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(url.trim()) }, enabled = url.isNotBlank()) { Text("متابعة") }
+            TextButton(
+                onClick = {
+                    onConfirm(url.trim())
+                },
+                enabled = url.isNotBlank()
+            ) {
+                Text("متابعة")
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء")
+            }
+        }
     )
 }
 
@@ -1023,16 +1611,28 @@ private fun WebPageImportDialog(
 
 private fun guessIsUser(message: Message): Boolean {
     runCatching {
-        val f = message.javaClass.declaredFields.firstOrNull { it.name == "isUser" } ?: return@runCatching
-        f.isAccessible = true
-        val v = f.get(message) as? Boolean ?: return@runCatching
-        return v
+        val field = message.javaClass.declaredFields
+            .firstOrNull { it.name == "isUser" }
+            ?: return@runCatching
+
+        field.isAccessible = true
+        val value = field.get(message) as? Boolean
+            ?: return@runCatching
+
+        return value
     }
 
     runCatching {
-        val f = message.javaClass.declaredFields.firstOrNull { it.name == "role" } ?: return@runCatching
-        f.isAccessible = true
-        val role = (f.get(message) as? String)?.lowercase(Locale.ROOT) ?: return@runCatching
+        val field = message.javaClass.declaredFields
+            .firstOrNull { it.name == "role" }
+            ?: return@runCatching
+
+        field.isAccessible = true
+
+        val role = (field.get(message) as? String)
+            ?.lowercase(Locale.ROOT)
+            ?: return@runCatching
+
         return role == "user"
     }
 
