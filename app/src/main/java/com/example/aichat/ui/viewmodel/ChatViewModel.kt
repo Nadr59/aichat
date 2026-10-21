@@ -1,4 +1,3 @@
-
 package com.example.aichat.ui.viewmodel
 
 import android.app.Application
@@ -429,7 +428,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         memoryAccessEnabled = parent.memoryAccessEnabled,
                         agentId = parent.agentId,
                         workspaceId = ws.id,
-                        parentConversationId = parentId
+                        parentConversationId = parentId,
+                        branchContextMessageCount = messagesToCopy.size
                     )
                 )
 
