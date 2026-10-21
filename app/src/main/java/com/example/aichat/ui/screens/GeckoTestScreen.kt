@@ -3,6 +3,8 @@
 package com.example.aichat.ui.screens
 
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -20,17 +22,24 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
@@ -39,6 +48,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -200,6 +211,10 @@ fun GeckoTestScreen(
 
     // ✅ شجرة الويب
     var showWebTreeSheet by rememberSaveable { mutableStateOf(false) }
+
+    // ✅ قائمة المزيد + نافذة السجلات
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var showDebugLogs by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         webAgentId = aiSettings.webAgentIdOrNull
@@ -501,17 +516,9 @@ fun GeckoTestScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (currentTitle != platform.name && currentTitle.isNotBlank()) {
-                        Text(
-                            text = currentTitle,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+
                     Text(
-                        text = "Web Agent: ${webAgentName ?: "بدون وكيل"}",
+                        text = "الوكيل: ${webAgentName ?: "بدون وكيل"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
@@ -520,47 +527,133 @@ fun GeckoTestScreen(
                 }
             },
             navigationIcon = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    IconButton(onClick = handleBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
-                    }
-                    IconButton(onClick = onHome) {
-                        Icon(Icons.Filled.Home, contentDescription = "الرئيسية")
-                    }
+                IconButton(onClick = onHome) {
+                    Icon(
+                        Icons.Filled.Home,
+                        contentDescription = "العودة إلى الشاشة الرئيسية"
+                    )
                 }
             },
             actions = {
+                // الوكيل
                 IconButton(onClick = { showWebAgentDialog = true }) {
-                    Icon(Icons.Filled.SmartToy, contentDescription = "Web Agent")
+                    Icon(
+                        Icons.Filled.SmartToy,
+                        contentDescription = "اختيار الوكيل"
+                    )
                 }
 
-                // ✅ زر الشجرة (للويب) - شجرة واحدة مشتركة (web:global)
-                if (chatViewModel != null && conversationRepository != null) {
-                    IconButton(onClick = { showWebTreeSheet = true }) {
-                        Icon(Icons.Filled.AccountTree, contentDescription = "الشجرة")
-                    }
-                }
-
+                // الحفظ
                 if (chatViewModel != null && platform.memoryEnabled) {
-                    IconButton(onClick = saveToMemory, enabled = !isSavingMemory && !isLoading) {
+                    IconButton(
+                        onClick = saveToMemory,
+                        enabled = !isSavingMemory && !isLoading
+                    ) {
                         Text(if (isSavingMemory) "⏳" else "🧠")
                     }
-                    IconButton(onClick = { memoryInjectionEnabled = !memoryInjectionEnabled }) {
-                        Text(if (memoryInjectionEnabled) "📄✅" else "📄❌")
+                }
+
+                // الفروع
+                if (chatViewModel != null && conversationRepository != null) {
+                    IconButton(onClick = { showWebTreeSheet = true }) {
+                        Icon(
+                            Icons.Filled.AccountTree,
+                            contentDescription = "شجرة المحادثات"
+                        )
                     }
                 }
 
-                IconButton(onClick = { if (session.isOpen) session.reload() }) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
-                }
-                IconButton(onClick = { openExternal(context, currentUrl) }) {
-                    Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح خارجي")
+                // بقية الأدوات في قائمة واحدة
+                Box {
+                    IconButton(onClick = { showMoreMenu = true }) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = "المزيد"
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showMoreMenu,
+                        onDismissRequest = { showMoreMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("عرض السجلات") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.BugReport,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                showMoreMenu = false
+                                showDebugLogs = true
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    if (memoryInjectionEnabled)
+                                        "إيقاف حقن الذاكرة"
+                                    else
+                                        "تفعيل حقن الذاكرة"
+                                )
+                            },
+                            onClick = {
+                                memoryInjectionEnabled = !memoryInjectionEnabled
+                                showMoreMenu = false
+                            },
+                            enabled = chatViewModel != null && platform.memoryEnabled
+                        )
+
+                        DropdownMenuItem(
+                            text = { Text("الرجوع داخل الصفحة") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                showMoreMenu = false
+                                if (canGoBack) {
+                                    runCatching { session.goBack() }
+                                } else {
+                                    onBack()
+                                }
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = { Text("تحديث الصفحة") },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Refresh, contentDescription = null)
+                            },
+                            onClick = {
+                                showMoreMenu = false
+                                if (session.isOpen) session.reload()
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = { Text("فتح في المتصفح الخارجي") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.OpenInBrowser,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                showMoreMenu = false
+                                openExternal(context, currentUrl)
+                            }
+                        )
+                    }
                 }
             },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.background
+            )
         )
 
         if (enabledPlatforms.isNotEmpty()) {
@@ -827,6 +920,120 @@ fun GeckoTestScreen(
                             }
                         )
                         Text("تفعيل وثيقة الدقة")
+                    }
+                }
+            }
+        )
+    }
+
+    // =========================
+    // ✅ نافذة السجلات
+    // =========================
+    if (showDebugLogs) {
+        AlertDialog(
+            onDismissRequest = { showDebugLogs = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.BugReport,
+                        contentDescription = null
+                    )
+
+                    Spacer(Modifier.size(8.dp))
+
+                    Text(
+                        text = "سجلات التشخيص",
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    IconButton(
+                        onClick = { showDebugLogs = false }
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "إغلاق"
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val logs = app.debugLog
+
+                    if (logs.isEmpty()) {
+                        Text(
+                            "لا توجد سجلات حتى الآن.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        SelectionContainer {
+                            Text(
+                                text = logs.joinToString("\n"),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(
+                            Context.CLIPBOARD_SERVICE
+                        ) as ClipboardManager
+
+                        val text = app.debugLog.joinToString("\n")
+
+                        clipboard.setPrimaryClip(
+                            ClipData.newPlainText("AiChat Debug Logs", text)
+                        )
+
+                        Toast.makeText(
+                            context,
+                            if (text.isBlank())
+                                "لا توجد سجلات لنسخها"
+                            else
+                                "تم نسخ السجلات",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                ) {
+                    Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = null
+                    )
+                    Spacer(Modifier.size(4.dp))
+                    Text("نسخ الكل")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            app.debugLog.clear()
+                        }
+                    ) {
+                        Icon(
+                            Icons.Filled.DeleteOutline,
+                            contentDescription = null
+                        )
+                        Spacer(Modifier.size(4.dp))
+                        Text("مسح")
+                    }
+
+                    TextButton(
+                        onClick = { showDebugLogs = false }
+                    ) {
+                        Text("إغلاق")
                     }
                 }
             }
