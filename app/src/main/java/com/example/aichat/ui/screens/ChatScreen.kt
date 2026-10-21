@@ -1,4 +1,3 @@
-
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -125,6 +124,30 @@ fun ChatScreen(
     ) {
         val cid = conversationId ?: return@remember null
         allConversations.firstOrNull { it.id == cid }
+    }
+
+    val branchContextMessageCount =
+        currentConversation?.branchContextMessageCount ?: 0
+
+    val visibleMessages = remember(
+        messages,
+        branchContextMessageCount
+    ) {
+        messages.drop(
+            branchContextMessageCount.coerceIn(0, messages.size)
+        )
+    }
+
+    val branchSourceTitle = remember(
+        parentConversationId,
+        allConversations
+    ) {
+        parentConversationId?.let { parentId ->
+            allConversations
+                .firstOrNull { it.id == parentId }
+                ?.title
+                ?.ifBlank { "محادثة سابقة" }
+        }
     }
 
     // Breadcrumb: root -> ... -> current
@@ -277,8 +300,8 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size, isLoading) {
-        val total = messages.size + if (isLoading) 1 else 0
+    LaunchedEffect(visibleMessages.size, isLoading) {
+        val total = visibleMessages.size + if (isLoading) 1 else 0
 
         if (total > 0) {
             runCatching {
@@ -375,44 +398,55 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (messages.isEmpty() && !isLoading) {
-                EmptyChatView(
-                    modifier = Modifier.weight(1f)
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentPadding = PaddingValues(
-                        12.dp,
-                        16.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(
-                        messages,
-                        key = { it.id }
-                    ) { msg ->
-                        MessageBubble(
-                            message = msg,
-                            onCopy = {
-                                copyToClipboard(msg.content)
-                            },
-                            onSaveMemory = {
-                                memoryMessage = msg
-                            },
-                            onBranch = {
-                                viewModel.branchFromMessage(msg.id)
-                            },
-                            branchEnabled = !isLoading
-                        )
-                    }
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                if (branchContextMessageCount > 0) {
+                    BranchContextCard(
+                        sourceTitle = branchSourceTitle ?: "المحادثة الأصلية",
+                        contextCount = branchContextMessageCount
+                    )
+                }
 
-                    if (isLoading) {
-                        item("thinking") {
-                            ThinkingBubble()
+                if (visibleMessages.isEmpty() && !isLoading) {
+                    EmptyChatView(
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(
+                            12.dp,
+                            16.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(
+                            visibleMessages,
+                            key = { it.id }
+                        ) { msg ->
+                            MessageBubble(
+                                message = msg,
+                                onCopy = {
+                                    copyToClipboard(msg.content)
+                                },
+                                onSaveMemory = {
+                                    memoryMessage = msg
+                                },
+                                onBranch = {
+                                    viewModel.branchFromMessage(msg.id)
+                                },
+                                branchEnabled = !isLoading
+                            )
+                        }
+
+                        if (isLoading) {
+                            item("thinking") {
+                                ThinkingBubble()
+                            }
                         }
                     }
                 }
@@ -1066,6 +1100,59 @@ private fun ConversationNavRow(
 /* ----------------------------- UI components ----------------------------- */
 
 @Composable
+private fun BranchContextCard(
+    sourceTitle: String,
+    contextCount: Int
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = 12.dp,
+                vertical = 10.dp
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Filled.AccountTree,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    "متابعة من محادثة سابقة",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+
+                Text(
+                    sourceTitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 1
+                )
+
+                Text(
+                    "$contextCount رسالة محفوظة في السياق",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun EmptyChatView(
     modifier: Modifier = Modifier
 ) {
@@ -1337,7 +1424,7 @@ private fun InputBar(
                 maxLines = 6,
                 label = {
                     Text(
-                        if (isEnhanced) "النص المُحسَّن" else "اكتب رسالتك"
+                        if (isEnhanced) "النص المُحسَّن" else "اكتب رسالتك"
                     )
                 },
                 supportingText = {
