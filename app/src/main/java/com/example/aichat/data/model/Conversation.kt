@@ -23,5 +23,7 @@ data class Conversation(
     val memoryAccessEnabled: Boolean = true,
     val agentId: String? = null,          // Agent لكل محادثة (API)
     val workspaceId: Long? = null,        // ✅ v11: ربط المحادثة بـ Workspace
-    val parentConversationId: Long? = null // ✅ v11: لدعم شجرة/تفرعات اختيارياً
+    val parentConversationId: Long? = null, 
+    // ✅ v11: لدعم شجرة/تفرعات اختيارياً
+    val branchContextMessageCount: Int = 0
 )
