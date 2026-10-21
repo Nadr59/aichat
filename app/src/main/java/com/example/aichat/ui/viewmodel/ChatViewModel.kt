@@ -1,4 +1,4 @@
-// app/src/main/java/com/example/aichat/ui/viewmodel/ChatViewModel.kt
+
 package com.example.aichat.ui.viewmodel
 
 import android.app.Application
@@ -51,11 +51,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val repository = ChatRepository(application)
     val customRequestCount: StateFlow<Int> = repository.customRequestCount
 
-    // IMPORTANT: GeckoTestScreen reads this via reflection for Workspace Summary injection.
     private val conversationRepository = ConversationRepository(chatDao)
     private val memoryRepository = MemoryRepository(memoryDao, application)
-
-    // ✅ Agents
     private val agentRepository = AgentRepository(agentDao)
 
     private val memoryContextBuilder = MemoryContextBuilder()
@@ -82,7 +79,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentAgentId = MutableStateFlow<String?>(null)
     val currentAgentId: StateFlow<String?> = _currentAgentId.asStateFlow()
 
-    // ✅ Workspace (v11)
     private val _currentWorkspaceId = MutableStateFlow<Long?>(null)
     val currentWorkspaceId: StateFlow<Long?> = _currentWorkspaceId.asStateFlow()
 
@@ -193,7 +189,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ============================================================
-    // Workspace helpers (v11)
+    // Workspace helpers
     // ============================================================
 
     private fun apiScopeKey(): String {
@@ -393,11 +389,82 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * ✅ Reset workspace بالكامل (API workspace الحالي)
-     * - يمسح كل المحادثات/الفروع داخل نفس workspace
-     * - ويصفّر Workspace Summary
-     *
-     * ملاحظة: لا يمسح Shared Memories.
+     * ينشئ فرعًا من الرسالة المختارة، وينسخ كل الرسائل السابقة لها
+     * بما فيها الرسالة المختارة، مع إنشاء معرّفات جديدة للرسائل.
+     */
+    fun branchFromMessage(messageId: Long) {
+        val parentId = _currentConversationId.value
+
+        if (parentId == null) {
+            _error.value = "لا يمكن إنشاء فرع قبل فتح محادثة."
+            return
+        }
+
+        if (_isLoading.value) {
+            _error.value = "انتظر انتهاء الرد الحالي قبل إنشاء فرع."
+            return
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                val parent = conversationRepository.getConversationById(parentId)
+                    ?: throw IllegalStateException("المحادثة الأصلية غير موجودة.")
+
+                val originalMessages = conversationRepository.getMessagesOnce(parentId)
+                val selectedIndex = originalMessages.indexOfFirst { it.id == messageId }
+
+                if (selectedIndex < 0) {
+                    throw IllegalStateException("لم يتم العثور على الرسالة المختارة.")
+                }
+
+                val messagesToCopy = originalMessages.take(selectedIndex + 1)
+                val ws = ensureWorkspaceForConversation(parentId)
+
+                val baseTitle = parent.title.trim().ifBlank { "محادثة" }.take(45)
+                val branchTitle = "فرع: $baseTitle".take(60)
+
+                val newId = conversationRepository.insertConversation(
+                    Conversation(
+                        title = branchTitle,
+                        memoryAccessEnabled = parent.memoryAccessEnabled,
+                        agentId = parent.agentId,
+                        workspaceId = ws.id,
+                        parentConversationId = parentId
+                    )
+                )
+
+                conversationRepository.updateTitleAndTimestamp(
+                    id = newId,
+                    title = branchTitle,
+                    updatedAt = System.currentTimeMillis()
+                )
+
+                messagesToCopy.forEach { message ->
+                    conversationRepository.insertMessage(
+                        message.copy(
+                            id = 0,
+                            conversationId = newId
+                        )
+                    )
+                }
+
+                _selectedImageBase64.value = null
+                _memoryContext.value = ""
+                _enhancedQuery.value = null
+                _error.value = null
+                _successMessage.value = "تم إنشاء فرع من الرسالة المختارة."
+
+                openConversation(newId)
+            }.onFailure { e ->
+                _error.value = "فشل إنشاء الفرع: ${e.message ?: "خطأ غير معروف"}"
+            }
+        }
+    }
+
+    /**
+     * Reset workspace بالكامل (API workspace الحالي).
+     * يمسح المحادثات والفروع داخل نفس workspace وملخصه.
+     * لا يمسح Shared Memories.
      */
     fun resetCurrentWorkspaceFully() {
         if (_isLoading.value) return
@@ -405,7 +472,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val convId = _currentConversationId.value
         viewModelScope.launch {
             runCatching {
-                // 1) حدّد Workspace الصحيح
                 val workspaceIdToReset: Long = when {
                     convId != null -> {
                         val conv = conversationRepository.getConversationById(convId)
@@ -420,17 +486,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // 2) أوقف أي collect للمحادثة الحالية قبل الحذف
                 messagesCollectJob?.cancel()
                 messagesCollectJob = null
 
-                // 3) reset في DB
                 conversationRepository.resetWorkspaceFully(workspaceIdToReset)
-
-                // 4) صفّر واجهة المستخدم (مهم لأن المحادثة الحالية قد تكون حُذفت)
                 newConversation()
-
-                // 5) حدّث الحالة: workspace موجود لكن Summary فاضي
                 setCurrentWorkspaceById(workspaceIdToReset)
 
                 _successMessage.value = "✅ تم تصفير Workspace بالكامل (محادثات + ملخص)."
@@ -455,7 +515,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _memoryAccessEnabled.value = true
         _enhancedQuery.value = null
         _isEnhancing.value = false
-        // لا نمسح workspace summary هنا (استمرارية) — إلا إذا resetCurrentWorkspaceFully
     }
 
     fun toggleMemoryAccess(enabled: Boolean) {
@@ -650,28 +709,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // =========================
-    // Web — GLOBAL WORKSPACE (Tree-enabled)
+    // Web — GLOBAL WORKSPACE
     // =========================
 
     private fun webGlobalScopeKey(): String = "web:global"
     private fun webGlobalWorkspaceTitle(): String = "WEB • Global"
-
-    // عنوان افتراضي فقط (لن نفرضه على كل المحادثات)
     private fun webDefaultConversationTitle(): String = "Web"
 
     private val _lastWebUserText = MutableStateFlow<String?>(null)
-
-    // ✅ هذا هو مؤشر "المحادثة الحالية" للويب (ضمن web:global)
     private val _currentWebConversationId = MutableStateFlow<Long?>(null)
-
-    // ✅ expose للـ UI (بدون reflection)
     val currentWebConversationId: StateFlow<Long?> = _currentWebConversationId.asStateFlow()
 
-    // ✅ نحتفظ بـ workspaceId للويب لتسهيل عرض الشجرة/التصفية
     private val _webWorkspaceId = MutableStateFlow<Long?>(null)
     val webWorkspaceId: StateFlow<Long?> = _webWorkspaceId.asStateFlow()
 
-    // ✅ قائمة محادثات الويب فقط (ضمن web:global) — مفيدة لشاشة الشجرة في GeckoTestScreen
     val webConversations: StateFlow<List<Conversation>> =
         combine(conversations, webWorkspaceId) { all, wsId ->
             if (wsId == null) emptyList()
@@ -679,7 +730,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
-        // تجهيز Workspace web:global مبكرًا
         viewModelScope.launch {
             runCatching {
                 val ws = conversationRepository.getOrCreateWorkspace(
@@ -710,10 +760,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _lastWebUserText.value = null
     }
 
-    /**
-     * إنشاء محادثة ويب جديدة (Root) ضمن web:global
-     * وتصبح هي المحادثة الحالية للويب.
-     */
     fun newWebConversation(title: String? = null) {
         viewModelScope.launch {
             runCatching {
@@ -745,9 +791,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * تفريع من "المحادثة الحالية للويب" ضمن web:global.
-     */
     fun branchFromCurrentWebConversation() {
         val parentId = _currentWebConversationId.value
         if (parentId == null) {
@@ -792,10 +835,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Reset كامل لـ web:global (محادثات + رسائل + summary)
-     * ⚠️ لا يمسح Shared Memories.
-     */
     fun resetWebGlobalWorkspaceFully() {
         if (_isLoading.value) return
 
@@ -855,12 +894,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return newId
     }
 
-    /**
-     * يتم استدعاؤها من GeckoTestScreen قبل إرسال السياق إلى صفحة الويب.
-     *
-     * platformName اختياري (للتوافق مع الاستدعاء القديم).
-     * إن مرّرته، نستخدمه لتحسين عنوان المحادثة الجديدة عند أول إنشاء.
-     */
     fun onWebUserMessageSent(userText: String, platformName: String? = null) {
         val clean = userText.trim()
         if (clean.isBlank()) return
@@ -884,7 +917,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                // تحديث timestamp + (اختياري) تحديث العنوان إذا كان فارغ/افتراضي
                 val now = System.currentTimeMillis()
                 val conv = conversationRepository.getConversationById(convId)
                 val currentTitle = conv?.title.orEmpty().trim()
@@ -928,7 +960,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                // تحديث timestamp فقط (ولا نفرض عنوان ثابت)
                 val now = System.currentTimeMillis()
                 val conv = conversationRepository.getConversationById(convId)
                 val title = conv?.title?.trim().orEmpty().ifBlank { buildWebTitle(platformName, null) }
