@@ -974,6 +974,23 @@ watchForResponse();
 
 }
 
+function startArenaCaptureFromWebsite(reason) {
+  if (CURRENT_PLATFORM.id !== "arena") return;
+
+  // لا تعِد تهيئة دورة التقاط بدأت للتو.
+  if (
+    captureActive &&
+    !captureFinished &&
+    Date.now() - captureStartedAt < 4000
+  ) {
+    log("ℹ️ Arena capture already active reason=" + reason);
+    return;
+  }
+
+  log("🎯 Arena website send detected reason=" + reason);
+  startResponseCapture("arena_" + reason);
+}
+
 function finishCapture(answer) {
 if (captureFinished) return;
 
@@ -1242,6 +1259,63 @@ try {
   log("❌ Automatic response observer failed: " + String(e));  
 }
 
+}
+
+function startArenaSendObserver() {
+  if (CURRENT_PLATFORM.id !== "arena") return;
+
+  // الإرسال عن طريق Enter من مربع الكتابة.
+  document.addEventListener("keydown", function (event) {
+    if (!event || event.key !== "Enter") return;
+    if (event.shiftKey || event.isComposing) return;
+
+    var target = event.target;
+    if (!target || !target.closest) return;
+
+    var input = target.closest(
+      "textarea, input, [contenteditable='true'], [role='textbox']"
+    );
+
+    if (!input) return;
+
+    startArenaCaptureFromWebsite("enter");
+  }, true);
+
+  // الإرسال بالنقر على زر الإرسال.
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+
+    var button = target.closest("button");
+    if (!button) return;
+
+    var label = [
+      button.getAttribute("aria-label") || "",
+      button.getAttribute("data-testid") || "",
+      button.getAttribute("title") || "",
+      button.innerText || ""
+    ].join(" ").toLowerCase();
+
+    if (!/(send|submit|إرسال|ارسال)/i.test(label)) return;
+
+    startArenaCaptureFromWebsite("send_button");
+  }, true);
+
+  // دعم النماذج التي ترسل السؤال عبر submit.
+  document.addEventListener("submit", function (event) {
+    var form = event.target;
+    if (!form) return;
+
+    var input = form.querySelector(
+      "textarea, input, [contenteditable='true'], [role='textbox']"
+    );
+
+    if (!input) return;
+
+    startArenaCaptureFromWebsite("form_submit");
+  }, true);
+
+  log("👁️ Arena website-send observer installed");
 }
 
 // ============================================================
@@ -1954,12 +2028,13 @@ if (message.type === "MANUAL_CAPTURE") {
 }
 
 });
-
+ 
 // ============================================================
 // Start automatic website response observer
 // ============================================================
 
 startAutoResponseObserver();
+startArenaSendObserver();
 
 // ============================================================
 // READY
