@@ -287,7 +287,7 @@ fun GeckoTestScreen(
     fun webKind(): WebKind = classifyHost(targetDomainStable())
 
     // ✅ مساحة عمل مستقلة لكل منصة على حدة:
-    fun webWorkspaceScopeKey(): String = "web:${platform.id}"
+    fun webWorkspaceScopeKey(): String = "web:global"
 
     // ============================================================
     // Gecko delegates
