@@ -835,6 +835,83 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * ينشئ فرع ويب من الرسالة المختارة، وينسخ سياق المحادثة حتى تلك الرسالة.
+     */
+    fun branchFromWebMessage(messageId: Long) {
+        val parentId = _currentWebConversationId.value
+
+        if (parentId == null) {
+            _error.value = "لا توجد محادثة ويب مفتوحة لإنشاء فرع منها."
+            return
+        }
+
+        if (_isLoading.value) {
+            _error.value = "انتظر انتهاء العملية الحالية قبل إنشاء الفرع."
+            return
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                val parent = conversationRepository.getConversationById(parentId)
+                    ?: throw IllegalStateException("المحادثة الأصلية غير موجودة.")
+
+                val originalMessages =
+                    conversationRepository.getMessagesOnce(parentId)
+
+                val selectedIndex =
+                    originalMessages.indexOfFirst { it.id == messageId }
+
+                if (selectedIndex < 0) {
+                    throw IllegalStateException("الرسالة المختارة غير موجودة في المحادثة.")
+                }
+
+                val messagesToCopy = originalMessages.take(selectedIndex + 1)
+                val workspace = ensureWebWorkspace()
+                val branchTitle = "فرع: ${
+                    parent.title.trim()
+                        .ifBlank { webDefaultConversationTitle() }
+                        .take(45)
+                }".take(60)
+
+                val newId = conversationRepository.insertConversation(
+                    Conversation(
+                        title = branchTitle,
+                        memoryAccessEnabled = parent.memoryAccessEnabled,
+                        agentId = parent.agentId,
+                        workspaceId = parent.workspaceId ?: workspace.id,
+                        parentConversationId = parent.id,
+                        branchContextMessageCount = messagesToCopy.size
+                    )
+                )
+
+                conversationRepository.updateTitleAndTimestamp(
+                    id = newId,
+                    title = branchTitle,
+                    updatedAt = System.currentTimeMillis()
+                )
+
+                messagesToCopy.forEach { message ->
+                    conversationRepository.insertMessage(
+                        message.copy(
+                            id = 0,
+                            conversationId = newId
+                        )
+                    )
+                }
+
+                _currentWebConversationId.value = newId
+                _lastWebUserText.value = null
+                _error.value = null
+                _successMessage.value = "تم إنشاء فرع ويب من الرسالة المختارة."
+            }.onFailure { e ->
+                _error.value = "فشل إنشاء فرع ويب: ${
+                    e.message ?: "خطأ غير معروف"
+                }"
+            }
+        }
+    }
+
     fun resetWebGlobalWorkspaceFully() {
         if (_isLoading.value) return
 
