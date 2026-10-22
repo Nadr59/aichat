@@ -731,6 +731,68 @@ return res;
 
 }
 
+// ============================================================
+// Arena DOM diagnostic (temporary)
+// ============================================================
+
+function debugArenaDom(stage) {
+  if (CURRENT_PLATFORM.id !== "arena") return;
+
+  var selectors = [
+    "main [data-message-author-role]",
+    "main [data-role]",
+    "main [data-testid*='message' i]",
+    "main [data-testid*='response' i]",
+    "main [class*='message' i]",
+    "main [class*='assistant' i]",
+    "main [class*='response' i]",
+    "main [class*='prose' i]",
+    "main [class*='markdown' i]"
+  ];
+
+  var seen = [];
+
+  log("🧭 Arena DOM snapshot stage=" + stage);
+
+  for (var i = 0; i < selectors.length; i++) {
+    var nodes = [];
+
+    try {
+      nodes = document.querySelectorAll(selectors[i]);
+    } catch (_) {}
+
+    log("🧭 Arena selector=" + selectors[i] +
+        " count=" + nodes.length);
+
+    var start = Math.max(0, nodes.length - 3);
+
+    for (var j = start; j < nodes.length; j++) {
+      var el = nodes[j];
+
+      if (!el || seen.indexOf(el) !== -1) continue;
+      seen.push(el);
+
+      if (!isProbablyVisible(el)) continue;
+
+      var text = cleanAssistantResponse(getElementText(el));
+      var cls = "";
+
+      try {
+        cls = typeof el.className === "string"
+          ? el.className.substring(0, 100)
+          : "";
+      } catch (_) {}
+
+      log("🧭 Arena node tag=" + el.tagName +
+          " class=" + cls +
+          " role=" + (el.getAttribute("role") || "") +
+          " testid=" + (el.getAttribute("data-testid") || "") +
+          " len=" + text.length +
+          " text=" + text.substring(0, 100));
+    }
+  }
+}
+
 function cleanAssistantResponse(text) {
 if (!text) return "";
 
@@ -970,6 +1032,10 @@ log(
   " baselineLen=" + (baselineAssistant ? baselineAssistant.length : 0)  
 );  
 
+if (CURRENT_PLATFORM.id === "arena") {  
+  debugArenaDom("capture_start");  
+}  
+
 watchForResponse();
 
 }
@@ -1052,6 +1118,14 @@ function watchForResponse() {
 if (!captureActive || captureFinished) return;
 
 var current = getCurrentAssistantText();  
+
+if (  
+  CURRENT_PLATFORM.id === "arena" &&  
+  Date.now() - captureStartedAt >= 4000 &&  
+  Date.now() - captureStartedAt < 5500  
+) {  
+  debugArenaDom("capture_after_4s");  
+}  
 
 if (  
   CURRENT_PLATFORM.id === "arena" &&  
