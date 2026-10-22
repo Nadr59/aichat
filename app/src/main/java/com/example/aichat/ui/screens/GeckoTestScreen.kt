@@ -96,6 +96,7 @@ import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.AgentProfile
 import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
+import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.data.model.Workspace
 import com.example.aichat.repository.AgentPromptBuilder
@@ -129,7 +130,9 @@ import java.util.Locale
  * - يستخدم مباشرة:
  *   - repo.observeAllWorkspaces() لإيجاد Workspace web:global
  *   - repo.observeConversationsByWorkspace(wsId) لعرض الشجرة
- * - نستخدم reflection فقط لقراءة/تعديل _currentWebConversationId (لأنه private داخل ChatViewModel الحالي).
+ * - التنقل بين المحادثات واختيارها يتم الآن عبر واجهة عامة في ChatViewModel
+ *   (currentWebConversationId / openWebConversation / clearWebConversationSelection)
+ *   بدل الكتابة المباشرة إلى MutableStateFlow عبر Reflection.
  */
 @Composable
 fun GeckoTestScreen(
@@ -1067,16 +1070,13 @@ private fun WebGlobalTreeBottomSheet(
     }
     val ws: Workspace? by wsFlow.collectAsStateWithLifecycle(initialValue = null)
 
-    val currentWebConversationIdStateFlow: MutableStateFlow<Long?>? = remember(vm) {
-        resolveMutableStateFlowLongNullable(
-            vm,
-            fieldNameHints = listOf("_currentWebConversationId", "currentWebConversationId")
-        )
+    val currentId by vm.currentWebConversationId.collectAsStateWithLifecycle(
+        initialValue = null
+    )
+
+    fun openConversation(id: Long) {
+        vm.openWebConversation(id)
     }
-    val currentIdState: State<Long?> =
-        currentWebConversationIdStateFlow?.collectAsStateWithLifecycle(initialValue = null)
-            ?: remember { mutableStateOf<Long?>(null) }
-    val currentId: Long? = currentIdState.value
 
     val convsFlow = remember(repo, ws?.id) {
         ws?.id?.let { repo.observeConversationsByWorkspace(it) }
@@ -1085,10 +1085,6 @@ private fun WebGlobalTreeBottomSheet(
     val convsRaw: List<Conversation> by convsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     val convs: List<Conversation> = remember(convsRaw) { convsRaw.sortedByDescending { it.updatedAt } }
     val byId: Map<Long, Conversation> = remember(convs) { convs.associateBy { it.id } }
-
-    fun openConversation(id: Long) {
-        setMutableStateFlowValue(currentWebConversationIdStateFlow, id)
-    }
 
     fun pathToRoot(id: Long): List<Conversation> {
         val out = ArrayList<Conversation>(8)
@@ -1117,6 +1113,15 @@ private fun WebGlobalTreeBottomSheet(
     val roots: List<Conversation> = remember(convs) {
         convs.filter { it.parentConversationId == null }.sortedByDescending { it.updatedAt }
     }
+
+    val currentMessagesFlow = remember(repo, currentId) {
+        currentId?.let { repo.getMessages(it) }
+            ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    }
+
+    val currentMessages by currentMessagesFlow.collectAsStateWithLifecycle(
+        initialValue = emptyList()
+    )
 
     var showResetConfirm by rememberSaveable { mutableStateOf(false) }
 
@@ -1247,8 +1252,55 @@ private fun WebGlobalTreeBottomSheet(
                         ) { Text("🪵 تفريع") }
 
                         OutlinedButton(
-                            onClick = { setMutableStateFlowValue(currentWebConversationIdStateFlow, null) }
-                        ) { Text("⛔ إلغاء التحديد") }
+                            onClick = { vm.clearWebConversationSelection() }
+                        ) {
+                            Text("⛔ إلغاء التحديد")
+                        }
+                    }
+                }
+            }
+
+            if (currentId != null) {
+                Text(
+                    text = "رسائل المحادثة — اختر نقطة التفريع",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                if (currentMessages.isEmpty()) {
+                    Text(
+                        text = "لا توجد رسائل محفوظة في هذه المحادثة.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    currentMessages.forEach { message ->
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = if (message.role == "user") "أنت" else "المساعد",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+
+                                Text(
+                                    text = message.content.take(500),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+
+                                OutlinedButton(
+                                    onClick = {
+                                        vm.branchFromWebMessage(message.id)
+                                        onDismiss()
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("إنشاء فرع من هذه الرسالة")
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1354,7 +1406,7 @@ private fun WebGlobalTreeBottomSheet(
                         scope.launch {
                             runCatching {
                                 repo.resetWorkspaceFully(wsId)
-                                setMutableStateFlowValue(currentWebConversationIdStateFlow, null)
+                                vm.clearWebConversationSelection()
                                 Toast.makeText(context, "✅ تم Reset", Toast.LENGTH_SHORT).show()
                                 showResetConfirm = false
                                 onDismiss()
@@ -1389,64 +1441,6 @@ private fun ConversationRowLite(
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
-}
-
-private fun resolveMutableStateFlowLongNullable(
-    vm: ChatViewModel,
-    fieldNameHints: List<String>
-): MutableStateFlow<Long?>? {
-    val wanted = MutableStateFlow::class.java
-    var c: Class<*>? = vm.javaClass
-
-    // 1) exact name match first
-    while (true) {
-        val cls = c ?: break
-
-        for (name in fieldNameHints) {
-            val f = try {
-                cls.getDeclaredField(name)
-            } catch (_: NoSuchFieldException) {
-                null
-            } catch (_: SecurityException) {
-                null
-            } ?: continue
-
-            if (!wanted.isAssignableFrom(f.type)) continue
-            f.isAccessible = true
-
-            @Suppress("UNCHECKED_CAST")
-            return (f.get(vm) as? MutableStateFlow<Any?>) as? MutableStateFlow<Long?>
-        }
-
-        c = cls.superclass
-    }
-
-    // 2) fallback: any field contains "web" and "conversation" and is MutableStateFlow
-    c = vm.javaClass
-    while (true) {
-        val cls = c ?: break
-
-        val f = cls.declaredFields.firstOrNull { ff ->
-            wanted.isAssignableFrom(ff.type) &&
-                ff.name.lowercase(Locale.ROOT).contains("web") &&
-                ff.name.lowercase(Locale.ROOT).contains("conversation")
-        }
-
-        if (f != null) {
-            f.isAccessible = true
-            @Suppress("UNCHECKED_CAST")
-            return (f.get(vm) as? MutableStateFlow<Any?>) as? MutableStateFlow<Long?>
-        }
-
-        c = cls.superclass
-    }
-
-    return null
-}
-
-private fun setMutableStateFlowValue(flow: MutableStateFlow<Long?>?, value: Long?) {
-    if (flow == null) return
-    runCatching { flow.value = value }
 }
 
 /* ============================ Send bar (كما كان) ============================ */
