@@ -122,13 +122,13 @@ import java.util.Locale
 /**
  * GeckoTestScreen (Tabs + GeckoView + SendBar) +:
  * ✅ Web Agent injection
- * ✅ Workspace Summary injection (scopeKey = web:global)
- * ✅ زر "الشجرة" + BottomSheet لشجرة web:global
+ * ✅ Workspace Summary injection (scopeKey = web:<platformId>)
+ * ✅ زر "الشجرة" + BottomSheet لشجرة كل منصة بشكل مستقل
  *
  * ملاحظة:
  * - BottomSheet الآن لا يعتمد على reflection لمعرفة "محادثات Workspace".
  * - يستخدم مباشرة:
- *   - repo.observeAllWorkspaces() لإيجاد Workspace web:global
+ *   - repo.observeAllWorkspaces() لإيجاد Workspace الخاص بالمنصة الحالية
  *   - repo.observeConversationsByWorkspace(wsId) لعرض الشجرة
  * - التنقل بين المحادثات واختيارها يتم الآن عبر واجهة عامة في ChatViewModel
  *   (currentWebConversationId / openWebConversation / clearWebConversationSelection)
@@ -262,6 +262,9 @@ fun GeckoTestScreen(
     var isEnhancing by remember(sessionKey) { mutableStateOf(false) }
     var includeMemory by remember(sessionKey) { mutableStateOf(false) }
     var isSending by remember(sessionKey) { mutableStateOf(false) }
+    var showSendBar by rememberSaveable(sessionKey) {
+        mutableStateOf(true)
+    }
 
     var searchResults by remember(sessionKey) { mutableStateOf(emptyList<MemoryItem>()) }
     var selectedIds by remember(sessionKey) { mutableStateOf(emptyList<Long>()) }
@@ -283,8 +286,8 @@ fun GeckoTestScreen(
 
     fun webKind(): WebKind = classifyHost(targetDomainStable())
 
-    // ✅ ذاكرة وشجرة مشتركة لكل منصات الويب:
-    fun webWorkspaceScopeKeyGlobal(): String = "web:global"
+    // ✅ مساحة عمل مستقلة لكل منصة على حدة:
+    fun webWorkspaceScopeKey(): String = "web:${platform.id}"
 
     // ============================================================
     // Gecko delegates
@@ -566,6 +569,13 @@ fun GeckoTestScreen(
                     }
                 }
 
+                // إظهار/إخفاء مربع الإدخال
+                IconButton(
+                    onClick = { showSendBar = !showSendBar }
+                ) {
+                    Text(if (showSendBar) "⌄" else "⌨️")
+                }
+
                 // بقية الأدوات في قائمة واحدة
                 Box {
                     IconButton(onClick = { showMoreMenu = true }) {
@@ -735,146 +745,148 @@ fun GeckoTestScreen(
             }
         }
 
-        WebSendBar(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding(),
-            text = displayedText,
-            onTextChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
-            isEnhanced = enhancedQuery != null,
-            isEnhancing = isEnhancing,
-            isSending = isSending,
-            memoryEnabled = memoryInjectionEnabled && platform.memoryEnabled && chatViewModel != null,
-            includeMemory = includeMemory,
-            curatorReasoning = curatorReasoning,
-            onToggleMemory = { includeMemory = !includeMemory },
-            onEnhance = {
-                val t = displayedText.trim()
-                if (t.isBlank()) return@WebSendBar
+        if (showSendBar) {
+            WebSendBar(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding(),
+                text = displayedText,
+                onTextChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
+                isEnhanced = enhancedQuery != null,
+                isEnhancing = isEnhancing,
+                isSending = isSending,
+                memoryEnabled = memoryInjectionEnabled && platform.memoryEnabled && chatViewModel != null,
+                includeMemory = includeMemory,
+                curatorReasoning = curatorReasoning,
+                onToggleMemory = { includeMemory = !includeMemory },
+                onEnhance = {
+                    val t = displayedText.trim()
+                    if (t.isBlank()) return@WebSendBar
 
-                isEnhancing = true
-                scope.launch {
-                    try {
-                        enhancedQuery = memoryCuratorService.enhanceQuery(
-                            userQuery = t,
-                            mediatorIdentityText = aiSettings.mediatorIdentityText
-                        )
-                    } finally {
-                        isEnhancing = false
+                    isEnhancing = true
+                    scope.launch {
+                        try {
+                            enhancedQuery = memoryCuratorService.enhanceQuery(
+                                userQuery = t,
+                                mediatorIdentityText = aiSettings.mediatorIdentityText
+                            )
+                        } finally {
+                            isEnhancing = false
+                        }
                     }
-                }
-            },
-            onClearEnhanced = { enhancedQuery = null },
-            onSend = {
-                val vm = chatViewModel
-                val question = displayedText.trim()
-                if (question.isBlank()) return@WebSendBar
-                if (isSending) return@WebSendBar
+                },
+                onClearEnhanced = { enhancedQuery = null },
+                onSend = {
+                    val vm = chatViewModel
+                    val question = displayedText.trim()
+                    if (question.isBlank()) return@WebSendBar
+                    if (isSending) return@WebSendBar
 
-                if (isLoading) {
-                    Toast.makeText(context, "⏳ انتظر حتى تكتمل الصفحة ثم أرسل", Toast.LENGTH_SHORT).show()
-                    return@WebSendBar
-                }
+                    if (isLoading) {
+                        Toast.makeText(context, "⏳ انتظر حتى تكتمل الصفحة ثم أرسل", Toast.LENGTH_SHORT).show()
+                        return@WebSendBar
+                    }
 
-                isSending = true
+                    isSending = true
 
-                scope.launch {
-                    try {
-                        // ✅ تسجيل رسالة المستخدم داخل VM قبل الالتقاط/الرد
-                        runCatching { vm?.onWebUserMessageSent(question) }
+                    scope.launch {
+                        try {
+                            // ✅ تسجيل رسالة المستخدم داخل VM قبل الالتقاط/الرد
+                            runCatching { vm?.onWebUserMessageSent(question) }
 
-                        val memoryAllowed = memoryInjectionEnabled && includeMemory && platform.memoryEnabled && vm != null
+                            val memoryAllowed = memoryInjectionEnabled && includeMemory && platform.memoryEnabled && vm != null
 
-                        val memoryXml: String =
-                            if (!memoryAllowed) {
-                                ""
-                            } else {
-                                if (curatedForText == question && selectedIds.isNotEmpty() && searchResults.isNotEmpty()) {
-                                    memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
+                            val memoryXml: String =
+                                if (!memoryAllowed) {
+                                    ""
                                 } else {
-                                    val candidates = vm!!.searchSharedMemories(question)
-                                    if (candidates.isEmpty()) "" else {
-                                        val curator = memoryCuratorService.curateSelection(question, candidates)
-                                        if (curator.selectedIds.isEmpty()) "" else {
-                                            memoryWindowBuilder.build(
-                                                selectedIds = curator.selectedIds,
-                                                candidates = candidates
-                                            )
+                                    if (curatedForText == question && selectedIds.isNotEmpty() && searchResults.isNotEmpty()) {
+                                        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
+                                    } else {
+                                        val candidates = vm!!.searchSharedMemories(question)
+                                        if (candidates.isEmpty()) "" else {
+                                            val curator = memoryCuratorService.curateSelection(question, candidates)
+                                            if (curator.selectedIds.isEmpty()) "" else {
+                                                memoryWindowBuilder.build(
+                                                    selectedIds = curator.selectedIds,
+                                                    candidates = candidates
+                                                )
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                        // ✅ Workspace Summary injection (مشترك لكل الويب)
-                        val workspaceSummary: String = conversationRepository
-                            ?.let { repo ->
-                                runCatching {
-                                    val ws = repo.getOrCreateWorkspace(
-                                        scopeKey = webWorkspaceScopeKeyGlobal(),
-                                        title = "WEB • Global"
-                                    )
-                                    ws.summary.trim()
-                                }.getOrNull()
-                            }
-                            .orEmpty()
+                            // ✅ Workspace Summary injection (مستقل لكل منصة)
+                            val workspaceSummary: String = conversationRepository
+                                ?.let { repo ->
+                                    runCatching {
+                                        val ws = repo.getOrCreateWorkspace(
+                                            scopeKey = webWorkspaceScopeKey(),
+                                            title = "WEB • ${platform.name}"
+                                        )
+                                        ws.summary.trim()
+                                    }.getOrNull()
+                                }
+                                .orEmpty()
 
-                        val extraNotes = aiSettings.customSystemInstruction.trim()
-                        val includeAccuracy = accuracyEnabled
-                        val kind = webKind()
+                            val extraNotes = aiSettings.customSystemInstruction.trim()
+                            val includeAccuracy = accuracyEnabled
+                            val kind = webKind()
 
-                        val contextBlock = buildString {
-                            if (webAgentPrompt.isNotBlank()) {
-                                appendLine("AGENT_PERSONA:")
-                                appendLine(webAgentPrompt.trim())
-                                appendLine()
-                            }
+                            val contextBlock = buildString {
+                                if (webAgentPrompt.isNotBlank()) {
+                                    appendLine("AGENT_PERSONA:")
+                                    appendLine(webAgentPrompt.trim())
+                                    appendLine()
+                                }
 
-                            if (workspaceSummary.isNotBlank()) {
-                                appendLine("WORKSPACE_SUMMARY:")
-                                appendLine(workspaceSummary)
-                                appendLine()
-                            }
+                                if (workspaceSummary.isNotBlank()) {
+                                    appendLine("WORKSPACE_SUMMARY:")
+                                    appendLine(workspaceSummary)
+                                    appendLine()
+                                }
 
-                            if (includeAccuracy) {
-                                appendLine("ACCURACY_POLICY:")
-                                appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-                                appendLine()
-                            }
-                            if (extraNotes.isNotBlank()) {
-                                appendLine("EXTRA_NOTES:")
-                                appendLine(extraNotes)
-                                appendLine()
-                            }
-                            if (memoryXml.isNotBlank()) {
-                                appendLine("SHARED_MEMORIES_XML:")
-                                appendLine(memoryXml)
-                                appendLine()
-                            }
-                        }.trim()
+                                if (includeAccuracy) {
+                                    appendLine("ACCURACY_POLICY:")
+                                    appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
+                                    appendLine()
+                                }
+                                if (extraNotes.isNotBlank()) {
+                                    appendLine("EXTRA_NOTES:")
+                                    appendLine(extraNotes)
+                                    appendLine()
+                                }
+                                if (memoryXml.isNotBlank()) {
+                                    appendLine("SHARED_MEMORIES_XML:")
+                                    appendLine(memoryXml)
+                                    appendLine()
+                                }
+                            }.trim()
 
-                        val finalText = buildFinalTextForPlatform(kind = kind, contextBlock = contextBlock, question = question)
+                            val finalText = buildFinalTextForPlatform(kind = kind, contextBlock = contextBlock, question = question)
 
-                        val sendWithEnterFinal = if (kind == WebKind.ARENA) false else platform.sendWithEnter
-                        val sendSelectorFinal = if (kind == WebKind.ARENA) "" else platform.sendSelector
+                            val sendWithEnterFinal = if (kind == WebKind.ARENA) false else platform.sendWithEnter
+                            val sendSelectorFinal = if (kind == WebKind.ARENA) "" else platform.sendSelector
 
-                        app.setContextPending(
-                            text = finalText,
-                            targetDomain = targetDomainStable(),
-                            inputSelector = platform.inputSelector,
-                            sendSelector = sendSelectorFinal,
-                            sendWithEnter = sendWithEnterFinal
-                        )
+                            app.setContextPending(
+                                text = finalText,
+                                targetDomain = targetDomainStable(),
+                                inputSelector = platform.inputSelector,
+                                sendSelector = sendSelectorFinal,
+                                sendWithEnter = sendWithEnterFinal
+                            )
 
-                        query = ""
-                        enhancedQuery = null
-                    } catch (e: Exception) {
-                        isSending = false
-                        Toast.makeText(context, "⚠️ فشل تجهيز الإرسال: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
+                            query = ""
+                            enhancedQuery = null
+                        } catch (e: Exception) {
+                            isSending = false
+                            Toast.makeText(context, "⚠️ فشل تجهيز الإرسال: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
-            }
-        )
+            )
+        }
     }
 
     // =========================
@@ -886,6 +898,7 @@ fun GeckoTestScreen(
             vm = chatViewModel,
             platformName = platform.name,
             webAgentId = webAgentId,
+            scopeKey = webWorkspaceScopeKey(),
             onDismiss = { showWebTreeSheet = false }
         )
     }
@@ -1052,6 +1065,7 @@ private fun WebGlobalTreeBottomSheet(
     vm: ChatViewModel,
     platformName: String,
     webAgentId: String?,
+    scopeKey: String,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1059,13 +1073,18 @@ private fun WebGlobalTreeBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Ensure workspace exists
-    LaunchedEffect(repo) {
-        runCatching { repo.getOrCreateWorkspace(scopeKey = "web:global", title = "WEB • Global") }
+    LaunchedEffect(repo, scopeKey) {
+        runCatching {
+            repo.getOrCreateWorkspace(
+                scopeKey = scopeKey,
+                title = "WEB • $platformName"
+            )
+        }
     }
 
-    val wsFlow = remember(repo) {
+    val wsFlow = remember(repo, scopeKey) {
         repo.observeAllWorkspaces().map { all ->
-            all.firstOrNull { it.scopeKey == "web:global" }
+            all.firstOrNull { it.scopeKey == scopeKey }
         }
     }
     val ws: Workspace? by wsFlow.collectAsStateWithLifecycle(initialValue = null)
@@ -1085,6 +1104,13 @@ private fun WebGlobalTreeBottomSheet(
     val convsRaw: List<Conversation> by convsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     val convs: List<Conversation> = remember(convsRaw) { convsRaw.sortedByDescending { it.updatedAt } }
     val byId: Map<Long, Conversation> = remember(convs) { convs.associateBy { it.id } }
+
+    // ✅ منع استخدام معرّف محادثة تابع لمزود آخر (يحمي من ربط فرع بمحادثة لا تنتمي لهذه المساحة)
+    LaunchedEffect(currentId, byId) {
+        if (currentId != null && currentId !in byId) {
+            vm.clearWebConversationSelection()
+        }
+    }
 
     fun pathToRoot(id: Long): List<Conversation> {
         val out = ArrayList<Conversation>(8)
@@ -1138,12 +1164,12 @@ private fun WebGlobalTreeBottomSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "🌳 شجرة الويب (مشتركة)",
+                text = "🌳 شجرة $platformName",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "Workspace: web:global",
+                text = "Workspace: $scopeKey",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1374,14 +1400,14 @@ private fun WebGlobalTreeBottomSheet(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Reset workspace بالكامل (يحذف كل محادثات ورسائل web:global + يصفر summary).",
+                        text = "Reset workspace بالكامل (يحذف كل محادثات ورسائل $scopeKey + يصفر summary).",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedButton(
                         onClick = { showResetConfirm = true },
                         enabled = ws != null
-                    ) { Text("🧨 Reset web:global") }
+                    ) { Text("🧨 Reset $scopeKey") }
                 }
             }
 
@@ -1393,7 +1419,7 @@ private fun WebGlobalTreeBottomSheet(
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
             title = { Text("تأكيد Reset") },
-            text = { Text("سيتم حذف كل المحادثات والرسائل ضمن web:global وتصفير Workspace Summary. هل أنت متأكد؟") },
+            text = { Text("سيتم حذف كل المحادثات والرسائل ضمن $scopeKey وتصفير Workspace Summary. هل أنت متأكد؟") },
             confirmButton = {
                 Button(
                     onClick = {
