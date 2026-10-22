@@ -60,25 +60,28 @@ venice: {
   legacyContainerMode: false  
 },  
 
-arena: {  
-  id: "arena",  
-  name: "Arena",  
-  matches: function () { return HOST === "arena.ai"; },  
-  responseSelectors: [  
-    "main .prose",  
-    ".prose.prose-base",  
-    "div.prose"  
-  ],  
-  userSelectors: [  
-    "[data-message-author-role='user']",  
-    ".user-message",  
-    ".human-message",  
-    ".message.user"  
-  ],  
-  userTextSelector: "main .prose, .prose, .message-content, [data-message-content]",  
-  extractResponse: function (el) { return getElementText(el); },  
-  legacyContainerMode: false  
-},  
+arena: {
+  id: "arena",
+  name: "Arena",
+  matches: function () {
+    return HOST === "arena.ai";
+  },
+  responseSelectors: [
+    "main .prose"
+  ],
+  userSelectors: [
+    "main [class*='bg-surface-raised'][class*='w-fit']",
+    "[data-message-author-role='user']",
+    ".user-message",
+    ".human-message",
+    ".message.user"
+  ],
+  userTextSelector: ".prose, .message-content, [data-message-content]",
+  extractResponse: function (el) {
+    return getElementText(el);
+  },
+  legacyContainerMode: false
+},
 
 generic: {  
   id: "generic",  
@@ -731,66 +734,39 @@ return res;
 
 }
 
-// ============================================================
-// Arena DOM diagnostic (temporary)
-// ============================================================
+function getArenaAssistantElements() {
+  if (CURRENT_PLATFORM.id !== "arena") return [];
 
-function debugArenaDom(stage) {
-  if (CURRENT_PLATFORM.id !== "arena") return;
-
-  var selectors = [
-    "main [data-message-author-role]",
-    "main [data-role]",
-    "main [data-testid*='message' i]",
-    "main [data-testid*='response' i]",
-    "main [class*='message' i]",
-    "main [class*='assistant' i]",
-    "main [class*='response' i]",
-    "main [class*='prose' i]",
-    "main [class*='markdown' i]"
-  ];
-
-  var seen = [];
-
-  log("🧭 Arena DOM snapshot stage=" + stage);
+  var nodes = [];
+  var selectors = CURRENT_PLATFORM.responseSelectors || [];
 
   for (var i = 0; i < selectors.length; i++) {
-    var nodes = [];
-
     try {
-      nodes = document.querySelectorAll(selectors[i]);
+      var found = document.querySelectorAll(selectors[i]);
+
+      for (var j = 0; j < found.length; j++) {
+        var el = found[j];
+
+        if (!el || !isProbablyVisible(el)) continue;
+
+        // لا تعتبر محتوى فقاعة المستخدم إجابة للمساعد.
+        try {
+          if (
+            el.closest(
+              "[class*='bg-surface-raised'][class*='w-fit']"
+            )
+          ) {
+            continue;
+          }
+        } catch (_) {}
+
+        if (getElementText(el)) uniquePush(nodes, el);
+      }
     } catch (_) {}
-
-    log("🧭 Arena selector=" + selectors[i] +
-        " count=" + nodes.length);
-
-    var start = Math.max(0, nodes.length - 3);
-
-    for (var j = start; j < nodes.length; j++) {
-      var el = nodes[j];
-
-      if (!el || seen.indexOf(el) !== -1) continue;
-      seen.push(el);
-
-      if (!isProbablyVisible(el)) continue;
-
-      var text = cleanAssistantResponse(getElementText(el));
-      var cls = "";
-
-      try {
-        cls = typeof el.className === "string"
-          ? el.className.substring(0, 100)
-          : "";
-      } catch (_) {}
-
-      log("🧭 Arena node tag=" + el.tagName +
-          " class=" + cls +
-          " role=" + (el.getAttribute("role") || "") +
-          " testid=" + (el.getAttribute("data-testid") || "") +
-          " len=" + text.length +
-          " text=" + text.substring(0, 100));
-    }
   }
+
+  nodes.sort(compareDocumentOrder);
+  return nodes;
 }
 
 function cleanAssistantResponse(text) {
@@ -888,68 +864,75 @@ return "";
 }
 
 function getCurrentAssistantText() {
-if (CURRENT_PLATFORM.id !== "chatgpt") {
-return extractLatestPlatformResponse();
-}
+  if (CURRENT_PLATFORM.id === "arena") {
+    var arenaNodes = getArenaAssistantElements();
 
-var elements = getPlatformResponseElements();  
+    for (var a = arenaNodes.length - 1; a >= 0; a--) {
+      var arenaText = cleanAssistantResponse(
+        CURRENT_PLATFORM.extractResponse(arenaNodes[a])
+      );
 
-// افحص أحدث عنصر مساعد أولًا، ثم ارجع إلى الأقدم  
-// فقط إذا كان العنصر الأحدث فارغًا أو يحتوي نصًا غير صالح.  
-for (var i = elements.length - 1; i >= 0; i--) {  
-  var el = elements[i];  
-  if (!el) continue;  
+      if (!arenaText) continue;
+      if (isArenaRejectedCandidate(arenaText)) continue;
 
-  var target = el;  
+      return arenaText;
+    }
 
-  try {  
-    // فضّل محتوى الإجابة على الحاوية التي قد تضم أزرارًا  
-    // أو عناصر واجهة إضافية.  
-    var content = el.querySelector(  
-      ".markdown, [data-message-content], .whitespace-pre-wrap"  
-    );  
+    return "";
+  }
 
-    if (content) target = content;  
-  } catch (_) {}  
+  if (CURRENT_PLATFORM.id !== "chatgpt") {
+    return extractLatestPlatformResponse();
+  }
 
-  var text = "";  
+  var elements = getPlatformResponseElements();
 
-  try {  
-    text = cleanAssistantResponse(  
-      CURRENT_PLATFORM.extractResponse(target)  
-    );  
-  } catch (_) {  
-    text = cleanAssistantResponse(getElementText(target));  
-  }  
+  for (var i = elements.length - 1; i >= 0; i--) {
+    var el = elements[i];
+    if (!el) continue;
 
-  if (!text) continue;  
-  if (isInvalidChatGPTResponse(text)) continue;  
+    var target = el;
 
-  // لا نقبل ردًا يبدو مجرد تعليمات أو سياقًا محقونًا.  
-  if (looksLikeInjectedPrompt(text)) continue;  
+    try {
+      var content = el.querySelector(
+        ".markdown, [data-message-content], .whitespace-pre-wrap"
+      );
 
-  return text;  
-}  
+      if (content) target = content;
+    } catch (_) {}
 
-// حل احتياطي للتوافق مع بعض إصدارات واجهة ChatGPT القديمة.  
-// لا نعيد نص التذييل الثابت حتى لو طابق إحدى العلامات.  
-var containers = getChatGPTConversationContainers();  
+    var text = "";
 
-for (var j = containers.length - 1; j >= 0; j--) {  
-  var conversationText = getElementText(containers[j]);  
-  var legacyText = cleanAssistantResponse(  
-    extractChatGPTAssistantText(conversationText)  
-  );  
+    try {
+      text = cleanAssistantResponse(
+        CURRENT_PLATFORM.extractResponse(target)
+      );
+    } catch (_) {
+      text = cleanAssistantResponse(getElementText(target));
+    }
 
-  if (!legacyText) continue;  
-  if (isInvalidChatGPTResponse(legacyText)) continue;  
-  if (looksLikeInjectedPrompt(legacyText)) continue;  
+    if (!text) continue;
+    if (isInvalidChatGPTResponse(text)) continue;
+    if (looksLikeInjectedPrompt(text)) continue;
 
-  return legacyText;  
-}  
+    return text;
+  }
 
-return "";
+  var containers = getChatGPTConversationContainers();
 
+  for (var j = containers.length - 1; j >= 0; j--) {
+    var legacyText = cleanAssistantResponse(
+      extractChatGPTAssistantText(getElementText(containers[j]))
+    );
+
+    if (!legacyText) continue;
+    if (isInvalidChatGPTResponse(legacyText)) continue;
+    if (looksLikeInjectedPrompt(legacyText)) continue;
+
+    return legacyText;
+  }
+
+  return "";
 }
 
 // ============================================================
@@ -1031,10 +1014,6 @@ log(
   " reason=" + (reason || "explicit") +  
   " baselineLen=" + (baselineAssistant ? baselineAssistant.length : 0)  
 );  
-
-if (CURRENT_PLATFORM.id === "arena") {  
-  debugArenaDom("capture_start");  
-}  
 
 watchForResponse();
 
@@ -1118,14 +1097,6 @@ function watchForResponse() {
 if (!captureActive || captureFinished) return;
 
 var current = getCurrentAssistantText();  
-
-if (  
-  CURRENT_PLATFORM.id === "arena" &&  
-  Date.now() - captureStartedAt >= 4000 &&  
-  Date.now() - captureStartedAt < 5500  
-) {  
-  debugArenaDom("capture_after_4s");  
-}  
 
 if (  
   CURRENT_PLATFORM.id === "arena" &&  
