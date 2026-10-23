@@ -382,8 +382,13 @@ fun GeckoTestScreen(
         app.onContextWritten = { _, _, _ -> isSending = false }
 
         if (vm != null && p.memoryEnabled) {
-            app.onAiResponseCaptured = { _, text ->
-                vm.onWebAiResponse(p.id, p.name, text)
+            app.onAiResponseCaptured = { source, text ->
+                val responsePlatformId = source.ifBlank { p.id }
+                vm.onWebAiResponse(
+                    platformId = responsePlatformId,
+                    platformName = p.name,
+                    text = text
+                )
             }
             app.onManualCaptureResult = { success, text, debug ->
                 timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -792,8 +797,22 @@ fun GeckoTestScreen(
 
                     scope.launch {
                         try {
-                            // ✅ تسجيل رسالة المستخدم داخل VM قبل الالتقاط/الرد
-                            runCatching { vm?.onWebUserMessageSent(question) }
+                            // ✅ تسجيل رسالة المستخدم داخل VM مع تتبّع الطلب المعلّق قبل الإرسال الفعلي
+                            val tracked = vm?.onWebUserMessageSentAndTrack(
+                                userText = question,
+                                platformId = platform.id,
+                                platformName = platform.name
+                            ) ?: false
+
+                            if (!tracked) {
+                                isSending = false
+                                Toast.makeText(
+                                    context,
+                                    "تعذر تسجيل السؤال في محادثة الويب.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return@launch
+                            }
 
                             val memoryAllowed = memoryInjectionEnabled && includeMemory && platform.memoryEnabled && vm != null
 
