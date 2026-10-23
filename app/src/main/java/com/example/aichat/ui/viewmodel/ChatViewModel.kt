@@ -716,6 +716,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun webGlobalWorkspaceTitle(): String = "WEB • Global"
     private fun webDefaultConversationTitle(): String = "Web"
 
+    private data class PendingWebRequest(
+        val conversationId: Long,
+        val workspaceId: Long,
+        val userText: String
+    )
+
+    private val pendingWebRequests =
+        mutableMapOf<String, ArrayDeque<PendingWebRequest>>()
+
     private val _lastWebUserText = MutableStateFlow<String?>(null)
     private val _currentWebConversationId = MutableStateFlow<Long?>(null)
     val currentWebConversationId: StateFlow<Long?> = _currentWebConversationId.asStateFlow()
@@ -1011,6 +1020,77 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun onWebUserMessageSentAndTrack(
+        userText: String,
+        platformId: String,
+        platformName: String? = null
+    ): Boolean {
+        val clean = userText.trim()
+        val platformKey = platformId.trim().lowercase(Locale.ROOT)
+
+        if (clean.isBlank() || platformKey.isBlank()) return false
+
+        return try {
+            val ws = ensureWebWorkspace()
+
+            val convId = ensureWebConversation(
+                workspaceId = ws.id,
+                suggestedTitleForNewConversation =
+                    buildWebTitle(platformName, clean)
+            )
+
+            conversationRepository.insertMessage(
+                Message(
+                    conversationId = convId,
+                    role = "user",
+                    content = clean,
+                    messageType = "text"
+                )
+            )
+
+            val conv = conversationRepository.getConversationById(convId)
+            val currentTitle = conv?.title.orEmpty().trim()
+
+            val computedTitle =
+                if (
+                    currentTitle.isBlank() ||
+                    currentTitle == webDefaultConversationTitle()
+                ) {
+                    buildWebTitle(platformName, clean)
+                } else {
+                    currentTitle
+                }
+
+            conversationRepository.updateTitleAndTimestamp(
+                id = convId,
+                title = computedTitle.take(60)
+                    .ifBlank { webDefaultConversationTitle() },
+                updatedAt = System.currentTimeMillis()
+            )
+
+            synchronized(pendingWebRequests) {
+                val queue = pendingWebRequests.getOrPut(platformKey) {
+                    ArrayDeque()
+                }
+
+                queue.addLast(
+                    PendingWebRequest(
+                        conversationId = convId,
+                        workspaceId = ws.id,
+                        userText = clean
+                    )
+                )
+            }
+
+            _lastWebUserText.value = clean
+            true
+        } catch (e: Exception) {
+            _error.value =
+                "فشل تسجيل سؤال الويب: ${e.message ?: "خطأ غير معروف"}"
+            false
+        }
+    }
+
     fun onWebAiResponse(
         platformId: String,
         platformName: String,
@@ -1018,37 +1098,70 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         forceSaveToMemory: Boolean = false
     ) {
         val clean = text.trim()
+        val platformKey = platformId.trim().lowercase(Locale.ROOT)
+
         if (clean.isBlank()) return
 
         viewModelScope.launch {
             try {
-                val ws = ensureWebWorkspace()
-                val convId = ensureWebConversation(
-                    workspaceId = ws.id,
-                    suggestedTitleForNewConversation = buildWebTitle(platformName, seedText = null)
-                )
+                val pending = synchronized(pendingWebRequests) {
+                    val queue = pendingWebRequests[platformKey]
+
+                    if (queue.isNullOrEmpty()) {
+                        null
+                    } else {
+                        val request = queue.removeFirst()
+
+                        if (queue.isEmpty()) {
+                            pendingWebRequests.remove(platformKey)
+                        }
+
+                        request
+                    }
+                }
+
+                val target = if (pending != null) {
+                    pending
+                } else {
+                    // توافق مع الالتقاط اليدوي أو الردود التي لا يقابلها طلب مسجل.
+                    val ws = ensureWebWorkspace()
+                    val convId = ensureWebConversation(
+                        workspaceId = ws.id,
+                        suggestedTitleForNewConversation =
+                            buildWebTitle(platformName, null)
+                    )
+
+                    PendingWebRequest(
+                        conversationId = convId,
+                        workspaceId = ws.id,
+                        userText = _lastWebUserText.value.orEmpty()
+                    )
+                }
 
                 val messageId = conversationRepository.insertMessage(
                     Message(
-                        conversationId = convId,
+                        conversationId = target.conversationId,
                         role = "assistant",
                         content = clean,
                         messageType = "text"
                     )
                 )
 
-                val now = System.currentTimeMillis()
-                val conv = conversationRepository.getConversationById(convId)
-                val title = conv?.title?.trim().orEmpty().ifBlank { buildWebTitle(platformName, null) }
-
-                conversationRepository.updateTitleAndTimestamp(
-                    id = convId,
-                    title = title.take(60),
-                    updatedAt = now
+                val conv = conversationRepository.getConversationById(
+                    target.conversationId
                 )
 
-                val shouldSave = forceSaveToMemory || aiSettings.autoSave
-                if (shouldSave) {
+                val title = conv?.title?.trim()
+                    .orEmpty()
+                    .ifBlank { buildWebTitle(platformName, null) }
+
+                conversationRepository.updateTitleAndTimestamp(
+                    id = target.conversationId,
+                    title = title.take(60),
+                    updatedAt = System.currentTimeMillis()
+                )
+
+                if (forceSaveToMemory || aiSettings.autoSave) {
                     memoryRepository.addMemory(
                         content = clean,
                         sourceConversationId = null,
@@ -1058,16 +1171,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
 
-                val lastUser = _lastWebUserText.value.orEmpty()
                 updateWorkspaceSummaryAsyncForWorkspace(
-                    workspaceId = ws.id,
-                    userText = lastUser,
+                    workspaceId = target.workspaceId,
+                    userText = target.userText,
                     assistantText = clean
                 )
-                _lastWebUserText.value = null
 
-            } catch (_: Exception) {
-                // ignore
+                if (_lastWebUserText.value == target.userText) {
+                    _lastWebUserText.value = null
+                }
+            } catch (e: Exception) {
+                (getApplication<Application>() as? AichatApp)
+                    ?.logDebug(
+                        "WEB_RESPONSE_SAVE_ERROR: ${e.message}"
+                    )
             }
         }
     }
