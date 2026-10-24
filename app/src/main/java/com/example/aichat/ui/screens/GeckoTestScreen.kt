@@ -215,6 +215,11 @@ fun GeckoTestScreen(
     // ✅ شجرة الويب
     var showWebTreeSheet by rememberSaveable { mutableStateOf(false) }
 
+    // ✅ طلب انتقال معلّق إلى منصة أخرى (بعد تجهيز ملخص الفرع، بانتظار جاهزية المنصة الهدف)
+    var pendingWebHandoff by remember {
+        mutableStateOf<PendingWebHandoff?>(null)
+    }
+
     // ✅ قائمة المزيد + نافذة السجلات
     var showMoreMenu by remember { mutableStateOf(false) }
     var showDebugLogs by rememberSaveable { mutableStateOf(false) }
@@ -414,6 +419,111 @@ fun GeckoTestScreen(
             app.onAiResponseCaptured = null
             app.onManualCaptureResult = null
             app.onContextWritten = null
+        }
+    }
+
+    // ============================================================
+    // Web handoff injection (الانتقال إلى منصة أخرى بسياق مُلخَّص)
+    // ============================================================
+
+    LaunchedEffect(
+        pendingWebHandoff?.id,
+        activePlatformId,
+        isLoading
+    ) {
+        val handoff = pendingWebHandoff ?: return@LaunchedEffect
+
+        if (activePlatformId != handoff.targetPlatformId) {
+            return@LaunchedEffect
+        }
+
+        if (isLoading) {
+            return@LaunchedEffect
+        }
+
+        val vm = chatViewModel ?: run {
+            pendingWebHandoff = null
+            return@LaunchedEffect
+        }
+
+        // استهلاك الطلب أولًا لمنع تكرار الإرسال عند إعادة التركيب.
+        pendingWebHandoff = null
+        isSending = true
+
+        try {
+            val continuationQuestion =
+                "تابع النقاش اعتمادًا على سياق المحادثة السابقة. " +
+                "ابدأ من آخر نقطة في الملخص، وأجب عن المسألة غير المحسومة دون إعادة النقاش من البداية."
+
+            val tracked = vm.onWebUserMessageSentAndTrack(
+                userText = continuationQuestion,
+                platformId = platform.id,
+                platformName = platform.name
+            )
+
+            if (!tracked) {
+                isSending = false
+                Toast.makeText(
+                    context,
+                    "تعذر تسجيل طلب المتابعة في الفرع.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@LaunchedEffect
+            }
+
+            val contextBlock = buildString {
+                if (webAgentPrompt.isNotBlank()) {
+                    appendLine("AGENT_PERSONA:")
+                    appendLine(webAgentPrompt.trim())
+                    appendLine()
+                }
+
+                appendLine("WEB_HANDOFF_SUMMARY:")
+                appendLine(handoff.summary.trim())
+                appendLine()
+
+                if (accuracyEnabled) {
+                    appendLine("ACCURACY_POLICY:")
+                    appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
+                    appendLine()
+                }
+
+                val notes = aiSettings.customSystemInstruction.trim()
+                if (notes.isNotBlank()) {
+                    appendLine("EXTRA_NOTES:")
+                    appendLine(notes)
+                    appendLine()
+                }
+            }.trim()
+
+            val finalText = buildFinalTextForPlatform(
+                kind = webKind(),
+                contextBlock = contextBlock,
+                question = continuationQuestion
+            )
+
+            val kind = webKind()
+
+            app.setContextPending(
+                text = finalText,
+                targetDomain = targetDomainStable(),
+                inputSelector = platform.inputSelector,
+                sendSelector = if (kind == WebKind.ARENA) "" else platform.sendSelector,
+                sendWithEnter = if (kind == WebKind.ARENA) false else platform.sendWithEnter
+            )
+
+            Toast.makeText(
+                context,
+                "تم تجهيز السياق في ${platform.name}.",
+                Toast.LENGTH_SHORT
+            ).show()
+        } catch (e: Exception) {
+            isSending = false
+            Toast.makeText(
+                context,
+                "فشل تجهيز متابعة السياق: ${e.message ?: "خطأ"}",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -918,6 +1028,50 @@ fun GeckoTestScreen(
             platformName = platform.name,
             webAgentId = webAgentId,
             scopeKey = webWorkspaceScopeKey(),
+            enabledPlatforms = enabledPlatforms,
+            onHandoffRequested = { messageId, targetPlatform ->
+                scope.launch {
+                    try {
+                        if (targetPlatform.id == platform.id) {
+                            Toast.makeText(
+                                context,
+                                "اختر منصة أخرى غير المنصة الحالية.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@launch
+                        }
+
+                        Toast.makeText(
+                            context,
+                            "جاري تجهيز سياق الانتقال...",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        val summary =
+                            chatViewModel.createWebHandoffFromMessage(messageId)
+
+                        if (summary.isBlank()) {
+                            throw IllegalStateException("ملخص السياق فارغ.")
+                        }
+
+                        pendingWebHandoff = PendingWebHandoff(
+                            id = System.currentTimeMillis(),
+                            targetPlatformId = targetPlatform.id,
+                            summary = summary
+                        )
+
+                        activePlatformId = targetPlatform.id
+                        showWebTreeSheet = false
+                    } catch (e: Exception) {
+                        Toast.makeText(
+                            context,
+                            "تعذر تجهيز الانتقال: ${e.message ?: "خطأ غير معروف"}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            },
+            currentPlatformId = platform.id,
             onDismiss = { showWebTreeSheet = false }
         )
     }
@@ -1076,6 +1230,15 @@ fun GeckoTestScreen(
     }
 }
 
+/**
+ * طلب انتقال معلّق إلى منصة أخرى بعد إنشاء فرع المتابعة وتجهيز ملخص السياق.
+ */
+private data class PendingWebHandoff(
+    val id: Long,
+    val targetPlatformId: String,
+    val summary: String
+)
+
 /* ============================ Web Tree BottomSheet ============================ */
 
 @Composable
@@ -1085,6 +1248,9 @@ private fun WebGlobalTreeBottomSheet(
     platformName: String,
     webAgentId: String?,
     scopeKey: String,
+    enabledPlatforms: List<WebPlatform>,
+    onHandoffRequested: (Long, WebPlatform) -> Unit,
+    currentPlatformId: String,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1169,6 +1335,11 @@ private fun WebGlobalTreeBottomSheet(
     )
 
     var showResetConfirm by rememberSaveable { mutableStateOf(false) }
+
+    // ✅ معرّف الرسالة التي طُلبت المتابعة منها إلى منصة أخرى (لعرض نافذة اختيار المنصة)
+    var handoffMessageId by remember {
+        mutableStateOf<Long?>(null)
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1344,6 +1515,16 @@ private fun WebGlobalTreeBottomSheet(
                                 ) {
                                     Text("إنشاء فرع من هذه الرسالة")
                                 }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        handoffMessageId = message.id
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = enabledPlatforms.size > 1
+                                ) {
+                                    Text("متابعة من هذه الرسالة في منصة أخرى")
+                                }
                             }
                         }
                     }
@@ -1432,6 +1613,66 @@ private fun WebGlobalTreeBottomSheet(
 
             Spacer(Modifier.height(10.dp))
         }
+    }
+
+    if (handoffMessageId != null) {
+        AlertDialog(
+            onDismissRequest = {
+                handoffMessageId = null
+            },
+            title = {
+                Text("اختر منصة متابعة النقاش")
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "سيُنشأ فرع من الرسالة المختارة، ويُنقل ملخص السياق إلى المنصة الأخرى."
+                    )
+
+                    enabledPlatforms
+                        .filter { it.id != currentPlatformId }
+                        .forEach { target ->
+                            OutlinedButton(
+                                onClick = {
+                                    val selectedMessageId = handoffMessageId
+                                    handoffMessageId = null
+
+                                    if (selectedMessageId != null) {
+                                        onHandoffRequested(
+                                            selectedMessageId,
+                                            target
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(target.iconEmoji)
+                                    Text(target.name)
+                                }
+                            }
+                        }
+
+                    if (enabledPlatforms.none { it.id != currentPlatformId }) {
+                        Text("لا توجد منصة أخرى مفعّلة.")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        handoffMessageId = null
+                    }
+                ) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 
     if (showResetConfirm) {
@@ -1664,8 +1905,8 @@ private fun GeckoUnavailableDialog(
         text = {
             Text(
                 "تعذر تهيئة محرك GeckoView.\n\n" +
-                    "يمكنك فتح $platformTitle في المتصفح الخارجي.\n\n" +
-                    platformUrl
+                "يمكنك فتح $platformTitle في المتصفح الخارجي.\n\n" +
+                platformUrl
             )
         },
         confirmButton = { Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") } },
