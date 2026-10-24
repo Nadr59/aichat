@@ -1,1936 +1,1571 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+package com.example.aichat.ui.viewmodel
 
-package com.example.aichat.ui.screens
-
-import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
+import android.app.Application
+import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Handler
-import android.os.Looper
-import android.view.ViewGroup
-import android.widget.Toast
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AccountTree
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.OpenInBrowser
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.provider.OpenableColumns
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.aichat.AichatApp
-import com.example.aichat.GeckoSessionManager
 import com.example.aichat.data.local.AiSettings
-import com.example.aichat.data.local.SystemPrompt
-import com.example.aichat.data.model.AgentProfile
+import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.data.model.Message
-import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.data.model.Workspace
 import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.AgentRepository
+import com.example.aichat.repository.ChatRepository
 import com.example.aichat.repository.ConversationRepository
+import com.example.aichat.repository.EmbeddingService
+import com.example.aichat.repository.FileProcessor
+import com.example.aichat.repository.ImageProcessor
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
+import com.example.aichat.repository.MemoryRepository
 import com.example.aichat.repository.MemoryWindowBuilder
-import com.example.aichat.repository.WebPlatformRepository
-import com.example.aichat.ui.components.AgentPickerDialog
-import com.example.aichat.ui.viewmodel.ChatViewModel
-import kotlinx.coroutines.delay
+import com.example.aichat.repository.WebPageFetcher
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import org.mozilla.geckoview.AllowOrDeny
-import org.mozilla.geckoview.GeckoResult
-import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoView
-import org.mozilla.geckoview.WebRequestError
+import java.security.MessageDigest
 import java.util.Locale
 
-/**
- * GeckoTestScreen (Tabs + GeckoView + SendBar) +:
- * ✅ Web Agent injection
- * ✅ Workspace Summary injection (scopeKey = web:<platformId>)
- * ✅ زر "الشجرة" + BottomSheet لشجرة كل منصة بشكل مستقل
- *
- * ملاحظة:
- * - BottomSheet الآن لا يعتمد على reflection لمعرفة "محادثات Workspace".
- * - يستخدم مباشرة:
- *   - repo.observeAllWorkspaces() لإيجاد Workspace الخاص بالمنصة الحالية
- *   - repo.observeConversationsByWorkspace(wsId) لعرض الشجرة
- * - التنقل بين المحادثات واختيارها يتم الآن عبر واجهة عامة في ChatViewModel
- *   (currentWebConversationId / openWebConversation / clearWebConversationSelection)
- *   بدل الكتابة المباشرة إلى MutableStateFlow عبر Reflection.
- */
-@Composable
-fun GeckoTestScreen(
-    webPlatformRepository: WebPlatformRepository,
-    aiSettings: AiSettings,
-    agentRepository: AgentRepository,
-    chatViewModel: ChatViewModel? = null,
-    initialPlatformId: String? = null,
-    onBack: () -> Unit = {},
-    onHome: () -> Unit = {},
-    modifier: Modifier = Modifier,
+class ChatViewModel(application: Application) : AndroidViewModel(application) {
+
+private val db = ChatDatabase.getInstance(application)
+private val chatDao = db.chatDao()
+private val memoryDao = db.memoryDao()
+private val agentDao = db.agentDao()
+
+private val aiSettings = AiSettings(application)
+
+val repository = ChatRepository(application)
+val customRequestCount: StateFlow = repository.customRequestCount
+
+private val conversationRepository = ConversationRepository(chatDao)
+private val memoryRepository = MemoryRepository(memoryDao, application)
+private val agentRepository = AgentRepository(agentDao)
+
+private val memoryContextBuilder = MemoryContextBuilder()
+private val memoryWindowBuilder = MemoryWindowBuilder()
+private val memoryCuratorService = MemoryCuratorService(aiSettings, memoryContextBuilder)
+
+private val embeddingService = EmbeddingService { aiSettings.geminiKey }
+private val fileProcessor = FileProcessor(application)
+private val webPageFetcher = WebPageFetcher()
+private val imageProcessor = ImageProcessor(application)
+
+private var messagesCollectJob: Job? = null
+
+val conversations: StateFlow<List> =
+conversationRepository.getAllConversations()
+.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+private val _currentConversationId = MutableStateFlow<Long?>(null)
+val currentConversationId: StateFlow<Long?> = _currentConversationId.asStateFlow()
+
+private val _currentParentConversationId = MutableStateFlow<Long?>(null)
+val currentParentConversationId: StateFlow<Long?> = _currentParentConversationId.asStateFlow()
+
+private val _currentAgentId = MutableStateFlow<String?>(null)
+val currentAgentId: StateFlow<String?> = _currentAgentId.asStateFlow()
+
+private val _currentWorkspaceId = MutableStateFlow<Long?>(null)
+val currentWorkspaceId: StateFlow<Long?> = _currentWorkspaceId.asStateFlow()
+
+private val _workspaceSummary = MutableStateFlow("")
+val workspaceSummary: StateFlow = _workspaceSummary.asStateFlow()
+
+private val _messages = MutableStateFlow<List>(emptyList())
+val messages: StateFlow<List> = _messages.asStateFlow()
+
+private val _isLoading = MutableStateFlow(false)
+val isLoading: StateFlow = _isLoading.asStateFlow()
+
+private val _error = MutableStateFlow<String?>(null)
+val error: StateFlow<String?> = _error.asStateFlow()
+
+private val _successMessage = MutableStateFlow<String?>(null)
+val successMessage: StateFlow<String?> = _successMessage.asStateFlow()
+
+private val _selectedImageBase64 = MutableStateFlow<String?>(null)
+val selectedImageBase64: StateFlow<String?> = _selectedImageBase64.asStateFlow()
+
+private val _memoryAccessEnabled = MutableStateFlow(true)
+val memoryAccessEnabled: StateFlow = _memoryAccessEnabled.asStateFlow()
+
+private val _memoryContext = MutableStateFlow("")
+val memoryContext: StateFlow = _memoryContext.asStateFlow()
+
+private val _enhancedQuery = MutableStateFlow<String?>(null)
+val enhancedQuery: StateFlow<String?> = _enhancedQuery.asStateFlow()
+
+private val _isEnhancing = MutableStateFlow(false)
+val isEnhancing: StateFlow = _isEnhancing.asStateFlow()
+
+val sharedMemories: StateFlow<List> =
+memoryRepository.getSharedMemories()
+.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+fun getConversationMemories(conversationId: Long): Flow<List> =
+memoryRepository.getConversationMemories(conversationId)
+
+fun observeChildConversations(parentConversationId: Long): Flow<List> =
+conversationRepository.observeChildConversations(parentConversationId)
+
+fun addMemory(
+content: String,
+category: String = "OTHER",
+isShared: Boolean = true,
+sourceMessageId: Long? = null
 ) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val app = context.applicationContext as AichatApp
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val scope = rememberCoroutineScope()
+val clean = content.trim()
+if (clean.isBlank()) return
+
+val convId = _currentConversationId.value          
+if (!isShared && convId == null) return          
+      
+val sourceConvId = if (isShared) null else convId          
+      
+viewModelScope.launch {          
+    memoryRepository.addMemory(          
+        content = clean,          
+        sourceConversationId = sourceConvId,          
+        sourceMessageId = sourceMessageId,          
+        category = category,          
+        isShared = isShared          
+    )          
+}
+
+}
+
+fun addManualMemory(
+content: String,
+category: String = "OTHER",
+isShared: Boolean = true,
+conversationId: Long? = _currentConversationId.value
+) {
+val clean = content.trim()
+if (clean.isBlank()) return
+
+val finalShared = if (!isShared && conversationId == null) true else isShared          
+val sourceConvId = if (finalShared) null else conversationId          
+      
+viewModelScope.launch {          
+    memoryRepository.addMemory(          
+        content = clean,          
+        sourceConversationId = sourceConvId,          
+        sourceMessageId = null,          
+        category = category,          
+        isShared = finalShared          
+    )          
+}
+
+}
+
+fun updateMemory(memory: MemoryItem) {
+viewModelScope.launch { memoryRepository.updateMemory(memory) }
+}
+
+fun deleteMemory(memory: MemoryItem) {
+viewModelScope.launch { memoryRepository.deleteMemory(memory) }
+}
+
+suspend fun searchSharedMemories(query: String): List =
+memoryRepository.searchSharedMemories(query)
+
+suspend fun getMemoryById(memoryId: Long): MemoryItem? =
+memoryRepository.getMemoryById(memoryId)
+
+fun deleteConversationMemories(conversationId: Long) {
+viewModelScope.launch { memoryRepository.deleteConversationMemories(conversationId) }
+}
+
+// ============================================================
+// Workspace helpers
+// ============================================================
+
+private fun apiScopeKey(): String {
+val provider = aiSettings.provider.trim().lowercase(Locale.ROOT)
+val model = aiSettings.getActiveModel().trim().lowercase(Locale.ROOT)
+return "api:$provider:$model"
+}
+
+private fun apiWorkspaceTitle(): String {
+val provider = aiSettings.provider.trim()
+val model = aiSettings.getActiveModel().trim()
+return "API • $provider • $model"
+}
+
+private suspend fun setCurrentWorkspaceById(workspaceId: Long?) {
+_currentWorkspaceId.value = workspaceId
+val ws = workspaceId?.let { conversationRepository.getWorkspaceById(it) }
+_workspaceSummary.value = ws?.summary.orEmpty()
+}
+
+private suspend fun ensureWorkspaceForConversation(conversationId: Long): Workspace {
+val conv = conversationRepository.getConversationById(conversationId)
+val existingWsId = conv?.workspaceId
+val existingWs = existingWsId?.let { conversationRepository.getWorkspaceById(it) }
+
+if (existingWs != null) {          
+    setCurrentWorkspaceById(existingWs.id)          
+    return existingWs          
+}          
+      
+val ws = conversationRepository.getOrCreateWorkspace(          
+    scopeKey = apiScopeKey(),          
+    title = apiWorkspaceTitle()          
+)          
+      
+if (conv != null) {          
+    conversationRepository.updateConversationWorkspace(          
+        conversationId = conversationId,          
+        workspaceId = ws.id,          
+        parentConversationId = conv.parentConversationId          
+    )          
+}          
+      
+setCurrentWorkspaceById(ws.id)          
+return ws
+
+}
+
+private fun buildWorkspacePrompt(summary: String): String {
+val s = summary.trim()
+if (s.isBlank()) return ""
+return buildString {
+appendLine("WORKSPACE_SUMMARY:")
+appendLine(s)
+}.trim()
+}
+
+private suspend fun generateUpdatedWorkspaceSummary(
+previousSummary: String,
+userText: String,
+assistantText: String
+): String {
+val prev = previousSummary.trim().take(2000)
+val u = userText.trim().take(1500)
+val a = assistantText.trim().take(2000)
+
+val prompt = buildString {          
+    appendLine("مهمتك: تحديث ملخص جلسة (Workspace Summary) لاستمرار السياق بين محادثات متعددة.")          
+    appendLine()          
+    appendLine("الملخص السابق (قد يكون فارغًا):")          
+    appendLine(prev.ifBlank { "(فارغ)" })          
+    appendLine()          
+    appendLine("التبادل الجديد:")          
+    appendLine("USER: ${u.ifBlank { "(غير متوفر)" }}")          
+    appendLine("ASSISTANT: $a")          
+    appendLine()          
+    appendLine("قواعد الإخراج:")          
+    appendLine("- أعد الملخص المحدّث فقط دون شرح إضافي.")          
+    appendLine("- اجعله بالعربية.")          
+    appendLine("- حافظ على الحقائق المهمة والتفضيلات والمهام والقرارات والأسماء.")          
+    appendLine("- لا تكرر نص الحوار حرفيًا، لخّصه.")          
+    appendLine("- طول أقصى ~1200 حرف.")          
+}.trim()          
+      
+return repository.sendMessage(          
+    history = emptyList(),          
+    userMessage = prompt,          
+    imageBase64 = null,          
+    memoryContext = "",          
+    hasMemorySource = false,          
+    agentPrompt = ""          
+).trim()
+
+}
+
+private fun updateWorkspaceSummaryAsync(
+workspaceId: Long,
+userText: String,
+assistantText: String
+) {
+val prev = _workspaceSummary.value
+viewModelScope.launch {
+runCatching {
+val updated = generateUpdatedWorkspaceSummary(prev, userText, assistantText)
+if (updated.isNotBlank()) {
+conversationRepository.updateWorkspaceSummary(workspaceId, updated)
+_workspaceSummary.value = updated
+}
+}
+}
+}
+
+private fun updateWorkspaceSummaryAsyncForWorkspace(
+workspaceId: Long,
+userText: String,
+assistantText: String
+) {
+viewModelScope.launch {
+runCatching {
+val prev = conversationRepository.getWorkspaceById(workspaceId)?.summary.orEmpty()
+val updated = generateUpdatedWorkspaceSummary(prev, userText, assistantText)
+if (updated.isNotBlank()) {
+conversationRepository.updateWorkspaceSummary(workspaceId, updated)
+if (_currentWorkspaceId.value == workspaceId) _workspaceSummary.value = updated
+}
+}
+}
+}
+
+// =========================
+// Conversations (API)
+// =========================
+
+fun openConversation(conversationId: Long) {
+_currentConversationId.value = conversationId
+_memoryContext.value = ""
+_enhancedQuery.value = null
+
+startCollecting(conversationId)          
+      
+viewModelScope.launch {          
+    val conv = conversationRepository.getConversationById(conversationId)          
+    _currentParentConversationId.value = conv?.parentConversationId          
+    _memoryAccessEnabled.value = conv?.memoryAccessEnabled ?: true          
+    _currentAgentId.value = conv?.agentId          
+      
+    val wsId = conv?.workspaceId          
+    if (wsId != null) setCurrentWorkspaceById(wsId)          
+    else runCatching { ensureWorkspaceForConversation(conversationId) }          
+}
+
+}
+
+fun branchFromCurrentConversation() {
+val parentId = _currentConversationId.value
+if (parentId == null) {
+_error.value = "لا يمكن إنشاء فرع قبل فتح/إنشاء محادثة."
+return
+}
+if (_isLoading.value) return
+
+viewModelScope.launch {          
+    runCatching {          
+        val parent = conversationRepository.getConversationById(parentId)          
+            ?: throw IllegalStateException("المحادثة الأصل غير موجودة")          
+      
+        val ws = ensureWorkspaceForConversation(parentId)          
+      
+        val branchTitle = buildString {          
+            val base = parent.title.trim().ifBlank { "محادثة" }.take(45)          
+            append("فرع: ")          
+            append(base)          
+        }.take(60)          
+      
+        val newId = conversationRepository.insertConversation(          
+            Conversation(          
+                title = branchTitle.ifBlank { "فرع جديد" },          
+                memoryAccessEnabled = parent.memoryAccessEnabled,          
+                agentId = parent.agentId,          
+                workspaceId = ws.id,          
+                parentConversationId = parentId          
+            )          
+        )          
+      
+        conversationRepository.updateTitleAndTimestamp(          
+            id = newId,          
+            title = branchTitle.ifBlank { "فرع جديد" },          
+            updatedAt = System.currentTimeMillis()          
+        )          
+      
+        _selectedImageBase64.value = null          
+        _memoryContext.value = ""          
+        _enhancedQuery.value = null          
+      
+        openConversation(newId)          
+    }.onFailure { e ->          
+        _error.value = "فشل إنشاء فرع: ${e.message ?: "خطأ غير معروف"}"          
+    }          
+}
 
-    // محاولة الحصول على ConversationRepository (لا نغيّر signature الشاشة).
-    // إن كان موجودًا داخل ChatViewModel (حتى لو private) سنستخرجه بالـ reflection.
-    val conversationRepository: ConversationRepository? = remember(chatViewModel) {
-        resolveConversationRepositoryFromViewModel(chatViewModel)
-    }
-
-    // ✅ مهم: ضمان وجود المنصات الافتراضية
-    LaunchedEffect(webPlatformRepository) {
-        runCatching { webPlatformRepository.seedDefaults() }
-    }
-
-    val enabledPlatforms by webPlatformRepository.enabledPlatforms.collectAsStateWithLifecycle(initialValue = emptyList())
-    val agents by agentRepository.observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
-
-    var activePlatformId by rememberSaveable { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(enabledPlatforms, initialPlatformId) {
-        if (enabledPlatforms.isEmpty()) return@LaunchedEffect
-
-        val wanted = initialPlatformId?.takeIf { it.isNotBlank() }
-        activePlatformId = when {
-            activePlatformId != null && enabledPlatforms.any { it.id == activePlatformId } -> activePlatformId
-            wanted != null && enabledPlatforms.any { it.id == wanted } -> wanted
-            else -> enabledPlatforms.first().id
-        }
-    }
-
-    val platform: WebPlatform? = remember(enabledPlatforms, activePlatformId) {
-        activePlatformId?.let { id -> enabledPlatforms.firstOrNull { it.id == id } }
-            ?: enabledPlatforms.firstOrNull()
-    }
-
-    if (platform == null) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (enabledPlatforms.isEmpty()) Text("لا توجد منصات مفعلة بعد.")
-            else CircularProgressIndicator()
-        }
-        return
-    }
-
-    val runtime = remember { app.getOrCreateGeckoRuntime() }
-    if (runtime == null) {
-        GeckoUnavailableDialog(
-            platformTitle = platform.name,
-            platformUrl = platform.url,
-            onOpenBrowser = {
-                openExternal(context, platform.url)
-                onBack()
-            },
-            onBack = onBack
-        )
-        return
-    }
-
-    // =========================
-    // Web Agent (Picker + injection)
-    // =========================
-    var showWebAgentDialog by rememberSaveable { mutableStateOf(false) }
-    var webAgentId by rememberSaveable { mutableStateOf(aiSettings.webAgentIdOrNull) }
-    var accuracyEnabled by rememberSaveable { mutableStateOf(aiSettings.accuracyPromptEnabled) }
-
-    // ✅ شجرة الويب
-    var showWebTreeSheet by rememberSaveable { mutableStateOf(false) }
-
-    // ✅ طلب انتقال معلّق إلى منصة أخرى (بعد تجهيز ملخص الفرع، بانتظار جاهزية المنصة الهدف)
-    var pendingWebHandoff by remember {
-        mutableStateOf<PendingWebHandoff?>(null)
-    }
-
-    // ✅ قائمة المزيد + نافذة السجلات
-    var showMoreMenu by remember { mutableStateOf(false) }
-    var showDebugLogs by rememberSaveable { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        webAgentId = aiSettings.webAgentIdOrNull
-        accuracyEnabled = aiSettings.accuracyPromptEnabled
-    }
-
-    val webAgentName = remember(webAgentId, agents) {
-        webAgentId?.let { id -> agents.firstOrNull { it.id == id }?.name }
-    }
-
-    val webAgent: AgentProfile? by produceState<AgentProfile?>(initialValue = null, webAgentId) {
-        value = webAgentId?.let { id -> runCatching { agentRepository.getById(id) }.getOrNull() }
-    }
-
-    val webAgentPrompt = remember(webAgent) {
-        webAgent?.let { AgentPromptBuilder.build(it) }.orEmpty()
-    }
-
-    // =========================
-    // Session state
-    // =========================
-    val sessionKey = platform.id
-    val session = remember(sessionKey) { GeckoSessionManager.getOrCreate(sessionKey) }
-
-    var isLoading by remember(sessionKey) { mutableStateOf(!session.isOpen) }
-    var progress by remember(sessionKey) { mutableIntStateOf(0) }
-    var canGoBack by remember(sessionKey) { mutableStateOf(false) }
-    var currentUrl by remember(sessionKey) { mutableStateOf(platform.url) }
-    var currentTitle by remember(sessionKey) { mutableStateOf(platform.name) }
-    var loadError by remember(sessionKey) { mutableStateOf<String?>(null) }
-
-    // capture
-    var isSavingMemory by remember(sessionKey) { mutableStateOf(false) }
-    var timeoutRunnable by remember(sessionKey) { mutableStateOf<Runnable?>(null) }
-
-    // memory injection toggle
-    var memoryInjectionEnabled by remember(sessionKey) { mutableStateOf(true) }
-
-    // send bar state
-    var query by remember(sessionKey) { mutableStateOf("") }
-    var enhancedQuery by remember(sessionKey) { mutableStateOf<String?>(null) }
-    var isEnhancing by remember(sessionKey) { mutableStateOf(false) }
-    var includeMemory by remember(sessionKey) { mutableStateOf(false) }
-    var isSending by remember(sessionKey) { mutableStateOf(false) }
-    var showSendBar by rememberSaveable(sessionKey) {
-        mutableStateOf(true)
-    }
-
-    var searchResults by remember(sessionKey) { mutableStateOf(emptyList<MemoryItem>()) }
-    var selectedIds by remember(sessionKey) { mutableStateOf(emptyList<Long>()) }
-    var curatorReasoning by remember(sessionKey) { mutableStateOf("") }
-    var curatedForText by remember(sessionKey) { mutableStateOf("") }
-
-    val displayedText = enhancedQuery ?: query
-
-    val memoryCuratorService = remember {
-        MemoryCuratorService(settings = aiSettings, fallbackBuilder = MemoryContextBuilder())
-    }
-    val memoryWindowBuilder = remember { MemoryWindowBuilder() }
-
-    fun hostOrEmptyFrom(urlStr: String): String =
-        runCatching { Uri.parse(urlStr).host.orEmpty() }.getOrDefault("")
-
-    fun targetDomainStable(): String =
-        if (platform.url.isNotBlank()) hostOrEmptyFrom(platform.url) else hostOrEmptyFrom(currentUrl)
-
-    fun webKind(): WebKind = classifyHost(targetDomainStable())
-
-    // ✅ مساحة عمل مستقلة لكل منصة على حدة:
-    fun webWorkspaceScopeKey(): String = "web:global"
-
-    // ============================================================
-    // Gecko delegates
-    // ============================================================
-
-    DisposableEffect(session, sessionKey) {
-        session.progressDelegate =
-            object : GeckoSession.ProgressDelegate {
-                override fun onPageStart(session: GeckoSession, url: String) {
-                    isLoading = true
-                    progress = 0
-                    loadError = null
-                    currentUrl = url
-                }
-
-                override fun onProgressChange(session: GeckoSession, progress_: Int) {
-                    progress = progress_
-                }
-
-                override fun onPageStop(session: GeckoSession, success: Boolean) {
-                    isLoading = false
-                }
-            }
-
-        session.contentDelegate =
-            object : GeckoSession.ContentDelegate {
-                override fun onTitleChange(session: GeckoSession, title: String?) {
-                    if (!title.isNullOrBlank()) currentTitle = title.take(60)
-                }
-            }
-
-        session.navigationDelegate =
-            object : GeckoSession.NavigationDelegate {
-                override fun onCanGoBack(session: GeckoSession, canGoBack_: Boolean) {
-                    canGoBack = canGoBack_
-                }
-
-                override fun onLoadRequest(
-                    session: GeckoSession,
-                    request: GeckoSession.NavigationDelegate.LoadRequest
-                ): GeckoResult<AllowOrDeny>? {
-                    val uri = Uri.parse(request.uri)
-                    val scheme = uri.scheme?.lowercase()
-
-                    if (scheme == "https" || scheme == "http") {
-                        if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
-                            return GeckoResult.deny()
-                        }
-                    }
-
-                    return if (scheme in listOf("http", "https", "about", "blob", "data")) {
-                        GeckoResult.allow()
-                    } else {
-                        openExternal(context, request.uri)
-                        GeckoResult.deny()
-                    }
-                }
-
-                override fun onLoadError(
-                    session: GeckoSession,
-                    uri: String?,
-                    error: WebRequestError
-                ): GeckoResult<String>? {
-                    isLoading = false
-                    loadError =
-                        when (error.category) {
-                            WebRequestError.ERROR_CATEGORY_NETWORK -> "تعذر الاتصال بالإنترنت"
-                            WebRequestError.ERROR_CATEGORY_URI -> "الرابط غير صالح"
-                            WebRequestError.ERROR_CATEGORY_SECURITY -> "مشكلة في شهادة الأمان"
-                            else -> "حدث خطأ أثناء تحميل الصفحة"
-                        }
-                    return null
-                }
-            }
-
-        onDispose {
-            runCatching { session.setActive(false) }
-            runCatching { session.progressDelegate = null }
-            runCatching { session.contentDelegate = null }
-            runCatching { session.navigationDelegate = null }
-        }
-    }
-
-    // ============================================================
-    // Extension callbacks
-    // ============================================================
-
-    DisposableEffect(platform.id) {
-        val p = platform
-        val vm = chatViewModel
-
-        app.onContextWritten = { _, _, _ -> isSending = false }
-
-        if (vm != null && p.memoryEnabled) {
-            app.onAiResponseCaptured = { source, text ->
-                val responsePlatformId = source.ifBlank { p.id }
-                vm.onWebAiResponse(
-                    platformId = responsePlatformId,
-                    platformName = p.name,
-                    text = text
-                )
-            }
-            app.onManualCaptureResult = { success, text, debug ->
-                timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-                timeoutRunnable = null
-                isSavingMemory = false
-
-                if (success && text.isNotBlank()) {
-                    vm.onWebAiResponse(p.id, p.name, text, forceSaveToMemory = true)
-                    Toast.makeText(context, "✅ تم الحفظ\n${text.take(50)}", Toast.LENGTH_LONG).show()
-                } else {
-                    val info =
-                        debug?.let {
-                            "assistant=${it.optInt("assistant")} bodyLen=${it.optInt("bodyLen")}"
-                        } ?: "no response"
-                    Toast.makeText(context, "⚠️ فشل الاستخراج\n$info", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-
-        onDispose {
-            timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-            timeoutRunnable = null
-            app.onAiResponseCaptured = null
-            app.onManualCaptureResult = null
-            app.onContextWritten = null
-        }
-    }
-
-    // ============================================================
-    // Web handoff injection (الانتقال إلى منصة أخرى بسياق مُلخَّص)
-    // ============================================================
-
-    LaunchedEffect(
-        pendingWebHandoff?.id,
-        activePlatformId,
-        isLoading
-    ) {
-        val handoff = pendingWebHandoff ?: return@LaunchedEffect
-
-        if (activePlatformId != handoff.targetPlatformId) {
-            return@LaunchedEffect
-        }
-
-        if (isLoading) {
-            return@LaunchedEffect
-        }
-
-        val vm = chatViewModel ?: run {
-            pendingWebHandoff = null
-            return@LaunchedEffect
-        }
-
-        // استهلاك الطلب أولًا لمنع تكرار الإرسال عند إعادة التركيب.
-        pendingWebHandoff = null
-        isSending = true
-
-        try {
-            val continuationQuestion =
-                "تابع النقاش اعتمادًا على سياق المحادثة السابقة. " +
-                "ابدأ من آخر نقطة في الملخص، وأجب عن المسألة غير المحسومة دون إعادة النقاش من البداية."
-
-            val tracked = vm.onWebUserMessageSentAndTrack(
-                userText = continuationQuestion,
-                platformId = platform.id,
-                platformName = platform.name
-            )
-
-            if (!tracked) {
-                isSending = false
-                Toast.makeText(
-                    context,
-                    "تعذر تسجيل طلب المتابعة في الفرع.",
-                    Toast.LENGTH_LONG
-                ).show()
-                return@LaunchedEffect
-            }
-
-            val contextBlock = buildString {
-                if (webAgentPrompt.isNotBlank()) {
-                    appendLine("AGENT_PERSONA:")
-                    appendLine(webAgentPrompt.trim())
-                    appendLine()
-                }
-
-                appendLine("WEB_HANDOFF_SUMMARY:")
-                appendLine(handoff.summary.trim())
-                appendLine()
-
-                if (accuracyEnabled) {
-                    appendLine("ACCURACY_POLICY:")
-                    appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-                    appendLine()
-                }
-
-                val notes = aiSettings.customSystemInstruction.trim()
-                if (notes.isNotBlank()) {
-                    appendLine("EXTRA_NOTES:")
-                    appendLine(notes)
-                    appendLine()
-                }
-            }.trim()
-
-            val finalText = buildFinalTextForPlatform(
-                kind = webKind(),
-                contextBlock = contextBlock,
-                question = continuationQuestion
-            )
-
-            val kind = webKind()
-
-            app.setContextPending(
-                text = finalText,
-                targetDomain = targetDomainStable(),
-                inputSelector = platform.inputSelector,
-                sendSelector = if (kind == WebKind.ARENA) "" else platform.sendSelector,
-                sendWithEnter = if (kind == WebKind.ARENA) false else platform.sendWithEnter
-            )
-
-            Toast.makeText(
-                context,
-                "تم تجهيز السياق في ${platform.name}.",
-                Toast.LENGTH_SHORT
-            ).show()
-        } catch (e: Exception) {
-            isSending = false
-            Toast.makeText(
-                context,
-                "فشل تجهيز متابعة السياق: ${e.message ?: "خطأ"}",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
-    // ============================================================
-    // Memory search + curator selection (UI only)
-    // ============================================================
-
-    LaunchedEffect(includeMemory, displayedText, memoryInjectionEnabled, platform.id) {
-        val memoryAllowed = memoryInjectionEnabled && platform.memoryEnabled && chatViewModel != null
-
-        if (!memoryAllowed) {
-            includeMemory = false
-            searchResults = emptyList()
-            selectedIds = emptyList()
-            curatorReasoning = ""
-            curatedForText = ""
-            return@LaunchedEffect
-        }
-
-        val q = displayedText.trim()
-        if (!includeMemory || q.length <= 2) {
-            searchResults = emptyList()
-            selectedIds = emptyList()
-            curatorReasoning = ""
-            curatedForText = ""
-            return@LaunchedEffect
-        }
-
-        delay(350)
-
-        try {
-            val candidates = chatViewModel!!.searchSharedMemories(q)
-            searchResults = candidates
-
-            if (candidates.isEmpty()) {
-                selectedIds = emptyList()
-                curatorReasoning = ""
-                curatedForText = q
-            } else {
-                val curatorResult = memoryCuratorService.curateSelection(q, candidates)
-                selectedIds = curatorResult.selectedIds
-                curatorReasoning = curatorResult.reasoning
-                curatedForText = q
-            }
-        } catch (_: Exception) {
-            searchResults = emptyList()
-            selectedIds = emptyList()
-            curatorReasoning = ""
-            curatedForText = ""
-        }
-    }
-
-    // ============================================================
-    // Capture action
-    // ============================================================
-
-    val saveToMemory: () -> Unit = save@{
-        if (isSavingMemory || isLoading) return@save
-        if (!platform.memoryEnabled || chatViewModel == null) return@save
-
-        timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        isSavingMemory = true
-
-        Toast.makeText(context, "🧠 جاري البحث في الصفحة...", Toast.LENGTH_SHORT).show()
-        app.triggerCapture()
-
-        val r = Runnable {
-            if (isSavingMemory) {
-                isSavingMemory = false
-                Toast.makeText(context, "❌ انتهت المهلة", Toast.LENGTH_LONG).show()
-            }
-        }
-        timeoutRunnable = r
-        mainHandler.postDelayed(r, 5000L)
-    }
-
-    // ============================================================
-    // Back handling
-    // ============================================================
-
-    val handleBack: () -> Unit = {
-        if (canGoBack) runCatching { session.goBack() }.onFailure { onBack() } else onBack()
-    }
-    BackHandler { handleBack() }
-
-    DisposableEffect(lifecycleOwner, session) {
-        val observer =
-            LifecycleEventObserver { _, event ->
-                when (event) {
-                    Lifecycle.Event.ON_STOP -> runCatching { session.setActive(false) }
-                    Lifecycle.Event.ON_START -> runCatching { session.setActive(true) }
-                    else -> Unit
-                }
-            }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    // ============================================================
-    // UI
-    // ============================================================
-
-    Column(modifier = modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                Column {
-                    Text(
-                        text = platform.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    Text(
-                        text = "الوكيل: ${webAgentName ?: "بدون وكيل"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onHome) {
-                    Icon(
-                        Icons.Filled.Home,
-                        contentDescription = "العودة إلى الشاشة الرئيسية"
-                    )
-                }
-            },
-            actions = {
-                // الوكيل
-                IconButton(onClick = { showWebAgentDialog = true }) {
-                    Icon(
-                        Icons.Filled.SmartToy,
-                        contentDescription = "اختيار الوكيل"
-                    )
-                }
-
-                // الحفظ
-                if (chatViewModel != null && platform.memoryEnabled) {
-                    IconButton(
-                        onClick = saveToMemory,
-                        enabled = !isSavingMemory && !isLoading
-                    ) {
-                        Text(if (isSavingMemory) "⏳" else "🧠")
-                    }
-                }
-
-                // الفروع
-                if (chatViewModel != null && conversationRepository != null) {
-                    IconButton(onClick = { showWebTreeSheet = true }) {
-                        Icon(
-                            Icons.Filled.AccountTree,
-                            contentDescription = "شجرة المحادثات"
-                        )
-                    }
-                }
-
-                // إظهار/إخفاء مربع الإدخال
-                IconButton(
-                    onClick = { showSendBar = !showSendBar }
-                ) {
-                    Text(if (showSendBar) "⌄" else "⌨️")
-                }
-
-                // بقية الأدوات في قائمة واحدة
-                Box {
-                    IconButton(onClick = { showMoreMenu = true }) {
-                        Icon(
-                            Icons.Filled.MoreVert,
-                            contentDescription = "المزيد"
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = showMoreMenu,
-                        onDismissRequest = { showMoreMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("عرض السجلات") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Filled.BugReport,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                showDebugLogs = true
-                            }
-                        )
-
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (memoryInjectionEnabled)
-                                        "إيقاف حقن الذاكرة"
-                                    else
-                                        "تفعيل حقن الذاكرة"
-                                )
-                            },
-                            onClick = {
-                                memoryInjectionEnabled = !memoryInjectionEnabled
-                                showMoreMenu = false
-                            },
-                            enabled = chatViewModel != null && platform.memoryEnabled
-                        )
-
-                        DropdownMenuItem(
-                            text = { Text("الرجوع داخل الصفحة") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                if (canGoBack) {
-                                    runCatching { session.goBack() }
-                                } else {
-                                    onBack()
-                                }
-                            }
-                        )
-
-                        DropdownMenuItem(
-                            text = { Text("تحديث الصفحة") },
-                            leadingIcon = {
-                                Icon(Icons.Filled.Refresh, contentDescription = null)
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                if (session.isOpen) session.reload()
-                            }
-                        )
-
-                        DropdownMenuItem(
-                            text = { Text("فتح في المتصفح الخارجي") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Filled.OpenInBrowser,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                openExternal(context, currentUrl)
-                            }
-                        )
-                    }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.background
-            )
-        )
-
-        if (enabledPlatforms.isNotEmpty()) {
-            val selectedIndex =
-                enabledPlatforms.indexOfFirst { it.id == platform.id }.let { if (it >= 0) it else 0 }
-
-            ScrollableTabRow(selectedTabIndex = selectedIndex, edgePadding = 8.dp) {
-                enabledPlatforms.forEach { tabPlatform ->
-                    val isSelected = tabPlatform.id == platform.id
-                    Tab(
-                        selected = isSelected,
-                        onClick = { if (!isSelected) activePlatformId = tabPlatform.id },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                if (tabPlatform.iconEmoji.isNotBlank()) Text(tabPlatform.iconEmoji)
-                                Text(tabPlatform.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    )
-                }
-            }
-        }
-
-        Box(modifier = Modifier.weight(1f)) {
-            key(sessionKey) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        GeckoView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-
-                            setSession(session)
-
-                            if (!session.isOpen) {
-                                session.open(runtime)
-                                session.setActive(true)
-                                isLoading = true
-                                session.loadUri(platform.url)
-                            } else {
-                                session.setActive(true)
-                            }
-                        }
-                    },
-                    update = { view ->
-                        runCatching { view.setSession(session) }
-                        runCatching { if (session.isOpen) session.setActive(true) }
-                    }
-                )
-            }
-
-            if (isLoading) {
-                LinearProgressIndicator(
-                    progress = { progress / 100f },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .align(Alignment.TopCenter)
-                )
-            }
-
-            loadError?.let { message ->
-                LoadErrorView(
-                    message = message,
-                    onRetry = {
-                        loadError = null
-                        if (session.isOpen) session.reload()
-                    },
-                    onOpenBrowser = { openExternal(context, currentUrl) }
-                )
-            }
-        }
-
-        if (showSendBar) {
-            WebSendBar(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding(),
-                text = displayedText,
-                onTextChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
-                isEnhanced = enhancedQuery != null,
-                isEnhancing = isEnhancing,
-                isSending = isSending,
-                memoryEnabled = memoryInjectionEnabled && platform.memoryEnabled && chatViewModel != null,
-                includeMemory = includeMemory,
-                curatorReasoning = curatorReasoning,
-                onToggleMemory = { includeMemory = !includeMemory },
-                onEnhance = {
-                    val t = displayedText.trim()
-                    if (t.isBlank()) return@WebSendBar
-
-                    isEnhancing = true
-                    scope.launch {
-                        try {
-                            enhancedQuery = memoryCuratorService.enhanceQuery(
-                                userQuery = t,
-                                mediatorIdentityText = aiSettings.mediatorIdentityText
-                            )
-                        } finally {
-                            isEnhancing = false
-                        }
-                    }
-                },
-                onClearEnhanced = { enhancedQuery = null },
-                onSend = {
-                    val vm = chatViewModel
-                    val question = displayedText.trim()
-                    if (question.isBlank()) return@WebSendBar
-                    if (isSending) return@WebSendBar
-
-                    if (isLoading) {
-                        Toast.makeText(context, "⏳ انتظر حتى تكتمل الصفحة ثم أرسل", Toast.LENGTH_SHORT).show()
-                        return@WebSendBar
-                    }
-
-                    isSending = true
-
-                    scope.launch {
-                        try {
-                            // ✅ تسجيل رسالة المستخدم داخل VM مع تتبّع الطلب المعلّق قبل الإرسال الفعلي
-                            val tracked = vm?.onWebUserMessageSentAndTrack(
-                                userText = question,
-                                platformId = platform.id,
-                                platformName = platform.name
-                            ) ?: false
-
-                            if (!tracked) {
-                                isSending = false
-                                Toast.makeText(
-                                    context,
-                                    "تعذر تسجيل السؤال في محادثة الويب.",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                                return@launch
-                            }
-
-                            val memoryAllowed = memoryInjectionEnabled && includeMemory && platform.memoryEnabled && vm != null
-
-                            val memoryXml: String =
-                                if (!memoryAllowed) {
-                                    ""
-                                } else {
-                                    if (curatedForText == question && selectedIds.isNotEmpty() && searchResults.isNotEmpty()) {
-                                        memoryWindowBuilder.build(selectedIds = selectedIds, candidates = searchResults)
-                                    } else {
-                                        val candidates = vm!!.searchSharedMemories(question)
-                                        if (candidates.isEmpty()) "" else {
-                                            val curator = memoryCuratorService.curateSelection(question, candidates)
-                                            if (curator.selectedIds.isEmpty()) "" else {
-                                                memoryWindowBuilder.build(
-                                                    selectedIds = curator.selectedIds,
-                                                    candidates = candidates
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                            // ✅ Workspace Summary injection (مستقل لكل منصة)
-                            val workspaceSummary: String = conversationRepository
-                                ?.let { repo ->
-                                    runCatching {
-                                        val ws = repo.getOrCreateWorkspace(
-                                            scopeKey = webWorkspaceScopeKey(),
-                                            title = "WEB • ${platform.name}"
-                                        )
-                                        ws.summary.trim()
-                                    }.getOrNull()
-                                }
-                                .orEmpty()
-
-                            val extraNotes = aiSettings.customSystemInstruction.trim()
-                            val includeAccuracy = accuracyEnabled
-                            val kind = webKind()
-
-                            val contextBlock = buildString {
-                                if (webAgentPrompt.isNotBlank()) {
-                                    appendLine("AGENT_PERSONA:")
-                                    appendLine(webAgentPrompt.trim())
-                                    appendLine()
-                                }
-
-                                if (workspaceSummary.isNotBlank()) {
-                                    appendLine("WORKSPACE_SUMMARY:")
-                                    appendLine(workspaceSummary)
-                                    appendLine()
-                                }
-
-                                if (includeAccuracy) {
-                                    appendLine("ACCURACY_POLICY:")
-                                    appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-                                    appendLine()
-                                }
-                                if (extraNotes.isNotBlank()) {
-                                    appendLine("EXTRA_NOTES:")
-                                    appendLine(extraNotes)
-                                    appendLine()
-                                }
-                                if (memoryXml.isNotBlank()) {
-                                    appendLine("SHARED_MEMORIES_XML:")
-                                    appendLine(memoryXml)
-                                    appendLine()
-                                }
-                            }.trim()
-
-                            val finalText = buildFinalTextForPlatform(kind = kind, contextBlock = contextBlock, question = question)
-
-                            val sendWithEnterFinal = if (kind == WebKind.ARENA) false else platform.sendWithEnter
-                            val sendSelectorFinal = if (kind == WebKind.ARENA) "" else platform.sendSelector
-
-                            app.setContextPending(
-                                text = finalText,
-                                targetDomain = targetDomainStable(),
-                                inputSelector = platform.inputSelector,
-                                sendSelector = sendSelectorFinal,
-                                sendWithEnter = sendWithEnterFinal
-                            )
-
-                            query = ""
-                            enhancedQuery = null
-                        } catch (e: Exception) {
-                            isSending = false
-                            Toast.makeText(context, "⚠️ فشل تجهيز الإرسال: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            )
-        }
-    }
-
-    // =========================
-    // ✅ Web Conversation Tree (BottomSheet)
-    // =========================
-    if (showWebTreeSheet && chatViewModel != null && conversationRepository != null) {
-        WebGlobalTreeBottomSheet(
-            repo = conversationRepository,
-            vm = chatViewModel,
-            platformName = platform.name,
-            webAgentId = webAgentId,
-            scopeKey = webWorkspaceScopeKey(),
-            enabledPlatforms = enabledPlatforms,
-            onHandoffRequested = { messageId, targetPlatform ->
-                scope.launch {
-                    try {
-                        if (targetPlatform.id == platform.id) {
-                            Toast.makeText(
-                                context,
-                                "اختر منصة أخرى غير المنصة الحالية.",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                            return@launch
-                        }
-
-                        Toast.makeText(
-                            context,
-                            "جاري تجهيز سياق الانتقال...",
-                            Toast.LENGTH_SHORT
-                        ).show()
-
-                        val summary =
-                            chatViewModel.createWebHandoffFromMessage(messageId)
-
-                        if (summary.isBlank()) {
-                            throw IllegalStateException("ملخص السياق فارغ.")
-                        }
-
-                        pendingWebHandoff = PendingWebHandoff(
-                            id = System.currentTimeMillis(),
-                            targetPlatformId = targetPlatform.id,
-                            summary = summary
-                        )
-
-                        activePlatformId = targetPlatform.id
-                        showWebTreeSheet = false
-                    } catch (e: Exception) {
-                        Toast.makeText(
-                            context,
-                            "تعذر تجهيز الانتقال: ${e.message ?: "خطأ غير معروف"}",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
-            },
-            currentPlatformId = platform.id,
-            onDismiss = { showWebTreeSheet = false }
-        )
-    }
-
-    // =========================
-    // ✅ Web Agent picker dialog
-    // =========================
-    if (showWebAgentDialog) {
-        AgentPickerDialog(
-            title = "Web Agent",
-            agents = agents,
-            selectedId = webAgentId,
-            onDismiss = { showWebAgentDialog = false },
-            onSelect = { id ->
-                webAgentId = id
-                aiSettings.webAgentId = id?.trim().orEmpty()
-                showWebAgentDialog = false
-            },
-            extraTopContent = {
-                Column {
-                    TextButton(
-                        onClick = {
-                            webAgentId = null
-                            aiSettings.webAgentId = ""
-                            showWebAgentDialog = false
-                        }
-                    ) { Text("بدون وكيل") }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = accuracyEnabled,
-                            onCheckedChange = { v ->
-                                accuracyEnabled = v
-                                aiSettings.accuracyPromptEnabled = v
-                            }
-                        )
-                        Text("تفعيل وثيقة الدقة")
-                    }
-                }
-            }
-        )
-    }
-
-    // =========================
-    // ✅ نافذة السجلات
-    // =========================
-    if (showDebugLogs) {
-        AlertDialog(
-            onDismissRequest = { showDebugLogs = false },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.BugReport,
-                        contentDescription = null
-                    )
-
-                    Spacer(Modifier.size(8.dp))
-
-                    Text(
-                        text = "سجلات التشخيص",
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    IconButton(
-                        onClick = { showDebugLogs = false }
-                    ) {
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = "إغلاق"
-                        )
-                    }
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    val logs = app.debugLog
-
-                    if (logs.isEmpty()) {
-                        Text(
-                            "لا توجد سجلات حتى الآن.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        SelectionContainer {
-                            Text(
-                                text = logs.joinToString("\n"),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val clipboard = context.getSystemService(
-                            Context.CLIPBOARD_SERVICE
-                        ) as ClipboardManager
-
-                        val text = app.debugLog.joinToString("\n")
-
-                        clipboard.setPrimaryClip(
-                            ClipData.newPlainText("AiChat Debug Logs", text)
-                        )
-
-                        Toast.makeText(
-                            context,
-                            if (text.isBlank())
-                                "لا توجد سجلات لنسخها"
-                            else
-                                "تم نسخ السجلات",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                ) {
-                    Icon(
-                        Icons.Filled.ContentCopy,
-                        contentDescription = null
-                    )
-                    Spacer(Modifier.size(4.dp))
-                    Text("نسخ الكل")
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        onClick = {
-                            app.debugLog.clear()
-                        }
-                    ) {
-                        Icon(
-                            Icons.Filled.DeleteOutline,
-                            contentDescription = null
-                        )
-                        Spacer(Modifier.size(4.dp))
-                        Text("مسح")
-                    }
-
-                    TextButton(
-                        onClick = { showDebugLogs = false }
-                    ) {
-                        Text("إغلاق")
-                    }
-                }
-            }
-        )
-    }
 }
 
 /**
- * طلب انتقال معلّق إلى منصة أخرى بعد إنشاء فرع المتابعة وتجهيز ملخص السياق.
- */
-private data class PendingWebHandoff(
-    val id: Long,
-    val targetPlatformId: String,
-    val summary: String
+
+- ينشئ فرعًا من الرسالة المختارة، وينسخ كل الرسائل السابقة لها
+
+- بما فيها الرسالة المختارة، مع إنشاء معرّفات جديدة للرسائل.
+  */
+  fun branchFromMessage(messageId: Long) {
+  val parentId = _currentConversationId.value
+
+  if (parentId == null) {
+  _error.value = "لا يمكن إنشاء فرع قبل فتح محادثة."
+  return
+  }
+
+  if (_isLoading.value) {
+  _error.value = "انتظر انتهاء الرد الحالي قبل إنشاء فرع."
+  return
+  }
+
+  viewModelScope.launch {
+  runCatching {
+  val parent = conversationRepository.getConversationById(parentId)
+  ?: throw IllegalStateException("المحادثة الأصلية غير موجودة.")
+
+  val originalMessages = conversationRepository.getMessagesOnce(parentId)          
+       val selectedIndex = originalMessages.indexOfFirst { it.id == messageId }          
+
+       if (selectedIndex < 0) {          
+           throw IllegalStateException("لم يتم العثور على الرسالة المختارة.")          
+       }          
+
+       val messagesToCopy = originalMessages.take(selectedIndex + 1)          
+       val ws = ensureWorkspaceForConversation(parentId)          
+
+       val baseTitle = parent.title.trim().ifBlank { "محادثة" }.take(45)          
+       val branchTitle = "فرع: $baseTitle".take(60)          
+
+       val newId = conversationRepository.insertConversation(          
+           Conversation(          
+               title = branchTitle,          
+               memoryAccessEnabled = parent.memoryAccessEnabled,          
+               agentId = parent.agentId,          
+               workspaceId = ws.id,          
+               parentConversationId = parentId,          
+               branchContextMessageCount = messagesToCopy.size          
+           )          
+       )          
+
+       conversationRepository.updateTitleAndTimestamp(          
+           id = newId,          
+           title = branchTitle,          
+           updatedAt = System.currentTimeMillis()          
+       )          
+
+       messagesToCopy.forEach { message ->          
+           conversationRepository.insertMessage(          
+               message.copy(          
+                   id = 0,          
+                   conversationId = newId          
+               )          
+           )          
+       }          
+
+       _selectedImageBase64.value = null          
+       _memoryContext.value = ""          
+       _enhancedQuery.value = null          
+       _error.value = null          
+       _successMessage.value = "تم إنشاء فرع من الرسالة المختارة."          
+
+       openConversation(newId)          
+   }.onFailure { e ->          
+       _error.value = "فشل إنشاء الفرع: ${e.message ?: "خطأ غير معروف"}"          
+   }
+
+  }
+  }
+
+/**
+
+- Reset workspace بالكامل (API workspace الحالي).
+
+- يمسح المحادثات والفروع داخل نفس workspace وملخصه.
+
+- لا يمسح Shared Memories.
+  */
+  fun resetCurrentWorkspaceFully() {
+  if (_isLoading.value) return
+
+  val convId = _currentConversationId.value
+  viewModelScope.launch {
+  runCatching {
+  val workspaceIdToReset: Long = when {
+  convId != null -> {
+  val conv = conversationRepository.getConversationById(convId)
+  conv?.workspaceId ?: ensureWorkspaceForConversation(convId).id
+  }
+  _currentWorkspaceId.value != null -> _currentWorkspaceId.value!!
+  else -> {
+  conversationRepository.getOrCreateWorkspace(
+  scopeKey = apiScopeKey(),
+  title = apiWorkspaceTitle()
+  ).id
+  }
+  }
+
+  messagesCollectJob?.cancel()          
+       messagesCollectJob = null          
+
+       conversationRepository.resetWorkspaceFully(workspaceIdToReset)          
+       newConversation()          
+       setCurrentWorkspaceById(workspaceIdToReset)          
+
+       _successMessage.value = "✅ تم تصفير Workspace بالكامل (محادثات + ملخص)."          
+   }.onFailure { e ->          
+       _error.value = "فشل تصفير Workspace: ${e.message ?: "خطأ غير معروف"}"          
+   }
+
+  }
+  }
+
+fun newConversation() {
+messagesCollectJob?.cancel()
+messagesCollectJob = null
+
+_currentConversationId.value = null          
+_currentParentConversationId.value = null          
+_currentAgentId.value = null          
+_messages.value = emptyList()          
+_selectedImageBase64.value = null          
+_memoryContext.value = ""          
+_error.value = null          
+_successMessage.value = null          
+_memoryAccessEnabled.value = true          
+_enhancedQuery.value = null          
+_isEnhancing.value = false
+
+}
+
+fun toggleMemoryAccess(enabled: Boolean) {
+_memoryAccessEnabled.value = enabled
+val id = _currentConversationId.value ?: return
+viewModelScope.launch { conversationRepository.updateMemoryAccess(id, enabled) }
+}
+
+fun setConversationAgent(agentId: String?) {
+_currentAgentId.value = agentId
+val id = _currentConversationId.value ?: return
+viewModelScope.launch { conversationRepository.updateAgentId(id, agentId) }
+}
+
+private fun startCollecting(conversationId: Long) {
+messagesCollectJob?.cancel()
+messagesCollectJob =
+viewModelScope.launch {
+conversationRepository.getMessages(conversationId).collect { _messages.value = it }
+}
+}
+
+// =========================
+// Query enhancement
+// =========================
+
+fun enhanceUserQuery(userText: String) {
+val text = userText.trim()
+if (text.isBlank()) return
+
+_isEnhancing.value = true          
+viewModelScope.launch {          
+    try {          
+        _enhancedQuery.value = memoryCuratorService.enhanceQuery(          
+            userQuery = text,          
+            mediatorIdentityText = aiSettings.mediatorIdentityText          
+        )          
+    } catch (e: Exception) {          
+        _error.value = "فشل تحسين السؤال: ${e.message}"          
+    } finally {          
+        _isEnhancing.value = false          
+    }          
+}
+
+}
+
+fun refineQueryStyle(userText: String, style: QueryStyle) {
+val text = userText.trim()
+if (text.isBlank()) return
+
+_isEnhancing.value = true          
+viewModelScope.launch {          
+    try {          
+        _enhancedQuery.value = memoryCuratorService.refineQueryStyle(text, style)          
+    } catch (e: Exception) {          
+        _error.value = "فشل تحسين الصياغة: ${e.message}"          
+    } finally {          
+        _isEnhancing.value = false          
+    }          
+}
+
+}
+
+fun updateEnhancedQuery(newText: String) {
+_enhancedQuery.value = newText
+}
+
+fun clearEnhancedQuery() {
+_enhancedQuery.value = null
+}
+
+// =========================
+// Sending messages (API)
+// =========================
+
+fun sendChatMessage(userText: String) {
+val text = userText.trim()
+if (text.isBlank()) return
+if (_isLoading.value) return
+
+_isLoading.value = true          
+_error.value = null          
+      
+viewModelScope.launch {          
+    try {          
+        val imageBase64 = _selectedImageBase64.value          
+      
+        val ws = conversationRepository.getOrCreateWorkspace(          
+            scopeKey = apiScopeKey(),          
+            title = apiWorkspaceTitle()          
+        )          
+        setCurrentWorkspaceById(ws.id)          
+      
+        val convId = _currentConversationId.value ?: run {          
+            val id = conversationRepository.insertConversation(          
+                Conversation(          
+                    title = text.take(50).ifBlank { "محادثة جديدة" },          
+                    memoryAccessEnabled = _memoryAccessEnabled.value,          
+                    agentId = _currentAgentId.value,          
+                    workspaceId = ws.id,          
+                    parentConversationId = null          
+                )          
+            )          
+            _currentConversationId.value = id          
+            startCollecting(id)          
+            id          
+        }          
+      
+        runCatching { ensureWorkspaceForConversation(convId) }          
+      
+        val historySnapshot = conversationRepository.getMessagesOnce(convId)          
+      
+        conversationRepository.insertMessage(          
+            Message(          
+                conversationId = convId,          
+                role = "user",          
+                content = text,          
+                imageBase64 = imageBase64,          
+                messageType = "text"          
+            )          
+        )          
+        _selectedImageBase64.value = null          
+      
+        var memoryContextText = ""          
+        var hasMemorySource = false          
+      
+        if (_memoryAccessEnabled.value) {          
+            val memories = memoryRepository.searchSharedMemories(text)          
+            if (memories.isNotEmpty()) {          
+                val curatorResult = memoryCuratorService.curateSelection(text, memories)          
+      
+                (getApplication<Application>() as? AichatApp)?.apply {          
+                    logDebug("🧠 CURATOR selected=${curatorResult.selectedIds} fallback=${curatorResult.isFallback} reason=${curatorResult.fallbackReason}")          
+                    logDebug("🧠 CURATOR reasoning=${curatorResult.reasoning}")          
+                }          
+      
+                memoryContextText = memoryWindowBuilder.build(          
+                    selectedIds = curatorResult.selectedIds,          
+                    candidates = memories          
+                )          
+                hasMemorySource = memoryContextText.isNotBlank()          
+            }          
+        }          
+      
+        _memoryContext.value = memoryContextText          
+      
+        val agentPrompt = _currentAgentId.value          
+            ?.let { agentRepository.getById(it) }          
+            ?.let { AgentPromptBuilder.build(it) }          
+            .orEmpty()          
+      
+        val wsPrompt = buildWorkspacePrompt(_workspaceSummary.value)          
+      
+        val combinedAgentPrompt = listOfNotNull(          
+            agentPrompt.takeIf { it.isNotBlank() },          
+            wsPrompt.takeIf { it.isNotBlank() }          
+        ).joinToString("\n\n").trim()          
+      
+        val response = repository.sendMessage(          
+            history = historySnapshot,          
+            userMessage = text,          
+            imageBase64 = imageBase64,          
+            memoryContext = memoryContextText,          
+            hasMemorySource = hasMemorySource,          
+            agentPrompt = combinedAgentPrompt          
+        )          
+      
+        conversationRepository.insertMessage(          
+            Message(          
+                conversationId = convId,          
+                role = "assistant",          
+                content = response,          
+                messageType = "text"          
+            )          
+        )          
+      
+        _currentWorkspaceId.value?.let { workspaceId ->          
+            updateWorkspaceSummaryAsync(workspaceId, text, response)          
+        }          
+      
+        val title = historySnapshot.firstOrNull { it.role == "user" }?.content ?: text          
+        conversationRepository.updateTitleAndTimestamp(          
+            id = convId,          
+            title = title.take(50),          
+            updatedAt = System.currentTimeMillis()          
+        )          
+      
+    } catch (e: Exception) {          
+        _error.value = e.message ?: "حدث خطأ غير معروف"          
+    } finally {          
+        _isLoading.value = false          
+    }          
+}
+
+}
+
+// =========================
+// Web — GLOBAL WORKSPACE
+// =========================
+
+private fun webGlobalScopeKey(): String = "web:global"
+private fun webGlobalWorkspaceTitle(): String = "WEB • Global"
+private fun webDefaultConversationTitle(): String = "Web"
+
+private data class PendingWebRequest(
+val conversationId: Long,
+val workspaceId: Long,
+val userText: String
 )
 
-/* ============================ Web Tree BottomSheet ============================ */
+private val pendingWebRequests =
+mutableMapOf<String, ArrayDeque>()
 
-@Composable
-private fun WebGlobalTreeBottomSheet(
-    repo: ConversationRepository,
-    vm: ChatViewModel,
-    platformName: String,
-    webAgentId: String?,
-    scopeKey: String,
-    enabledPlatforms: List<WebPlatform>,
-    onHandoffRequested: (Long, WebPlatform) -> Unit,
-    currentPlatformId: String,
-    onDismiss: () -> Unit,
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+private val _lastWebUserText = MutableStateFlow<String?>(null)
+private val _currentWebConversationId = MutableStateFlow<Long?>(null)
+val currentWebConversationId: StateFlow<Long?> = _currentWebConversationId.asStateFlow()
 
-    // Ensure workspace exists
-    LaunchedEffect(repo, scopeKey) {
-        runCatching {
-            repo.getOrCreateWorkspace(
-                scopeKey = scopeKey,
-                title = "WEB • $platformName"
-            )
-        }
-    }
+private val _webWorkspaceId = MutableStateFlow<Long?>(null)
+val webWorkspaceId: StateFlow<Long?> = _webWorkspaceId.asStateFlow()
 
-    val wsFlow = remember(repo, scopeKey) {
-        repo.observeAllWorkspaces().map { all ->
-            all.firstOrNull { it.scopeKey == scopeKey }
-        }
-    }
-    val ws: Workspace? by wsFlow.collectAsStateWithLifecycle(initialValue = null)
+val webConversations: StateFlow<List> =
+combine(conversations, webWorkspaceId) { all, wsId ->
+if (wsId == null) emptyList()
+else all.filter { it.workspaceId == wsId }
+}.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    val currentId by vm.currentWebConversationId.collectAsStateWithLifecycle(
-        initialValue = null
-    )
-
-    fun openConversation(id: Long) {
-        vm.openWebConversation(id)
-    }
-
-    val convsFlow = remember(repo, ws?.id) {
-        ws?.id?.let { repo.observeConversationsByWorkspace(it) }
-            ?: kotlinx.coroutines.flow.flowOf(emptyList())
-    }
-    val convsRaw: List<Conversation> by convsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
-    val convs: List<Conversation> = remember(convsRaw) { convsRaw.sortedByDescending { it.updatedAt } }
-    val byId: Map<Long, Conversation> = remember(convs) { convs.associateBy { it.id } }
-
-    // ✅ منع استخدام معرّف محادثة تابع لمزود آخر (يحمي من ربط فرع بمحادثة لا تنتمي لهذه المساحة)
-    LaunchedEffect(currentId, byId) {
-        if (currentId != null && currentId !in byId) {
-            vm.clearWebConversationSelection()
-        }
-    }
-
-    fun pathToRoot(id: Long): List<Conversation> {
-        val out = ArrayList<Conversation>(8)
-        var cur: Conversation? = byId[id]
-        val seen = HashSet<Long>()
-        while (cur != null && seen.add(cur.id)) {
-            out.add(cur)
-            val p = cur.parentConversationId ?: break
-            cur = byId[p]
-        }
-        return out.asReversed()
-    }
-
-    val currentConv: Conversation? = remember(currentId, byId) { currentId?.let { byId[it] } }
-    val breadcrumb: List<Conversation> = remember(currentId, byId) { currentId?.let { pathToRoot(it) }.orEmpty() }
-    val parentConv: Conversation? = remember(currentConv, byId) { currentConv?.parentConversationId?.let { byId[it] } }
-
-    val children: List<Conversation> = remember(currentId, convs) {
-        if (currentId == null) emptyList()
-        else convs.filter { it.parentConversationId == currentId }.sortedByDescending { it.updatedAt }
-    }
-    val siblings: List<Conversation> = remember(currentConv, convs) {
-        val pid = currentConv?.parentConversationId ?: return@remember emptyList()
-        convs.filter { it.parentConversationId == pid && it.id != currentConv.id }.sortedByDescending { it.updatedAt }
-    }
-    val roots: List<Conversation> = remember(convs) {
-        convs.filter { it.parentConversationId == null }.sortedByDescending { it.updatedAt }
-    }
-
-    val currentMessagesFlow = remember(repo, currentId) {
-        currentId?.let { repo.getMessages(it) }
-            ?: kotlinx.coroutines.flow.flowOf(emptyList())
-    }
-
-    val currentMessages by currentMessagesFlow.collectAsStateWithLifecycle(
-        initialValue = emptyList()
-    )
-
-    var showResetConfirm by rememberSaveable { mutableStateOf(false) }
-
-    // ✅ معرّف الرسالة التي طُلبت المتابعة منها إلى منصة أخرى (لعرض نافذة اختيار المنصة)
-    var handoffMessageId by remember {
-        mutableStateOf<Long?>(null)
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = "🌳 شجرة $platformName",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = "Workspace: $scopeKey",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            if (ws == null) {
-                Text("⚠️ تعذر تحميل Workspace.")
-            } else {
-                if (ws!!.summary.isNotBlank()) {
-                    Text(
-                        text = "WORKSPACE_SUMMARY (مختصر):\n${ws!!.summary.take(220)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                } else {
-                    Text(
-                        text = "WORKSPACE_SUMMARY فارغ حاليًا.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "المحادثة الحالية:",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = currentConv?.title?.takeIf { it.isNotBlank() } ?: "لا توجد محادثة محددة بعد",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text(
-                        text = "ID: ${currentId?.toString() ?: "—"}  •  Platform: $platformName",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                val workspaceId = ws?.id
-                                if (workspaceId == null) {
-                                    Toast.makeText(context, "Workspace غير متاح", Toast.LENGTH_SHORT).show()
-                                    return@OutlinedButton
-                                }
-                                scope.launch {
-                                    runCatching {
-                                        val title = "Web: $platformName".take(60)
-                                        val newId = repo.insertConversation(
-                                            Conversation(
-                                                title = title,
-                                                memoryAccessEnabled = true,
-                                                agentId = webAgentId,
-                                                workspaceId = workspaceId,
-                                                parentConversationId = null
-                                            )
-                                        )
-                                        repo.updateTitleAndTimestamp(
-                                            id = newId,
-                                            title = title,
-                                            updatedAt = System.currentTimeMillis()
-                                        )
-                                        openConversation(newId)
-                                    }.onFailure { e ->
-                                        Toast.makeText(context, "⚠️ فشل إنشاء محادثة: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            enabled = ws != null
-                        ) { Text("➕ محادثة جديدة") }
-
-                        OutlinedButton(
-                            onClick = {
-                                val workspaceId = ws?.id
-                                val pid = currentId
-                                if (workspaceId == null || pid == null) {
-                                    Toast.makeText(context, "اختر محادثة أولًا", Toast.LENGTH_SHORT).show()
-                                    return@OutlinedButton
-                                }
-                                scope.launch {
-                                    runCatching {
-                                        val base = (currentConv?.title ?: "Web: $platformName").trim().take(45)
-                                        val branchTitle = ("فرع: $base").take(60)
-                                        val newId = repo.insertConversation(
-                                            Conversation(
-                                                title = branchTitle,
-                                                memoryAccessEnabled = true,
-                                                agentId = webAgentId,
-                                                workspaceId = workspaceId,
-                                                parentConversationId = pid
-                                            )
-                                        )
-                                        repo.updateTitleAndTimestamp(
-                                            id = newId,
-                                            title = branchTitle,
-                                            updatedAt = System.currentTimeMillis()
-                                        )
-                                        openConversation(newId)
-                                    }.onFailure { e ->
-                                        Toast.makeText(context, "⚠️ فشل إنشاء فرع: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            enabled = ws != null && currentId != null
-                        ) { Text("🪵 تفريع") }
-
-                        OutlinedButton(
-                            onClick = { vm.clearWebConversationSelection() }
-                        ) {
-                            Text("⛔ إلغاء التحديد")
-                        }
-                    }
-                }
-            }
-
-            if (currentId != null) {
-                Text(
-                    text = "رسائل المحادثة — اختر نقطة التفريع",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                if (currentMessages.isEmpty()) {
-                    Text(
-                        text = "لا توجد رسائل محفوظة في هذه المحادثة.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    currentMessages.forEach { message ->
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = if (message.role == "user") "أنت" else "المساعد",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-
-                                Text(
-                                    text = message.content.take(500),
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-
-                                OutlinedButton(
-                                    onClick = {
-                                        vm.branchFromWebMessage(message.id)
-                                        onDismiss()
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("إنشاء فرع من هذه الرسالة")
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        handoffMessageId = message.id
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    enabled = enabledPlatforms.size > 1
-                                ) {
-                                    Text("متابعة من هذه الرسالة في منصة أخرى")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (currentId != null) {
-                Text("المسار (Breadcrumb):", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                if (breadcrumb.isEmpty()) {
-                    Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        breadcrumb.forEach { c ->
-                            OutlinedButton(onClick = { openConversation(c.id) }) {
-                                Text(c.title.takeIf { it.isNotBlank() }?.take(18) ?: "ID:${c.id}")
-                            }
-                        }
-                    }
-                }
-            }
-
-            parentConv?.let { p ->
-                Text("الأب:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                ConversationRowLite(
-                    title = p.title.takeIf { it.isNotBlank() } ?: "ID:${p.id}",
-                    subtitle = "ID: ${p.id}",
-                    onClick = { openConversation(p.id) }
-                )
-            }
-
-            if (siblings.isNotEmpty()) {
-                Text("الإخوة:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                siblings.take(12).forEach { c ->
-                    ConversationRowLite(
-                        title = c.title.takeIf { it.isNotBlank() } ?: "ID:${c.id}",
-                        subtitle = "ID: ${c.id}",
-                        onClick = { openConversation(c.id) }
-                    )
-                }
-                if (siblings.size > 12) Text("… +${siblings.size - 12}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            if (children.isNotEmpty()) {
-                Text("الأبناء:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                children.take(12).forEach { c ->
-                    ConversationRowLite(
-                        title = c.title.takeIf { it.isNotBlank() } ?: "ID:${c.id}",
-                        subtitle = "ID: ${c.id}",
-                        onClick = { openConversation(c.id) }
-                    )
-                }
-                if (children.size > 12) Text("… +${children.size - 12}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            if (roots.isNotEmpty()) {
-                Text("الجذور (Top-level):", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                roots.take(10).forEach { c ->
-                    ConversationRowLite(
-                        title = c.title.takeIf { it.isNotBlank() } ?: "ID:${c.id}",
-                        subtitle = "ID: ${c.id}",
-                        onClick = { openConversation(c.id) }
-                    )
-                }
-                if (roots.size > 10) Text("… +${roots.size - 10}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Danger zone",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Reset workspace بالكامل (يحذف كل محادثات ورسائل $scopeKey + يصفر summary).",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedButton(
-                        onClick = { showResetConfirm = true },
-                        enabled = ws != null
-                    ) { Text("🧨 Reset $scopeKey") }
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-        }
-    }
-
-    if (handoffMessageId != null) {
-        AlertDialog(
-            onDismissRequest = {
-                handoffMessageId = null
-            },
-            title = {
-                Text("اختر منصة متابعة النقاش")
-            },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "سيُنشأ فرع من الرسالة المختارة، ويُنقل ملخص السياق إلى المنصة الأخرى."
-                    )
-
-                    enabledPlatforms
-                        .filter { it.id != currentPlatformId }
-                        .forEach { target ->
-                            OutlinedButton(
-                                onClick = {
-                                    val selectedMessageId = handoffMessageId
-                                    handoffMessageId = null
-
-                                    if (selectedMessageId != null) {
-                                        onHandoffRequested(
-                                            selectedMessageId,
-                                            target
-                                        )
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(target.iconEmoji)
-                                    Text(target.name)
-                                }
-                            }
-                        }
-
-                    if (enabledPlatforms.none { it.id != currentPlatformId }) {
-                        Text("لا توجد منصة أخرى مفعّلة.")
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        handoffMessageId = null
-                    }
-                ) {
-                    Text("إلغاء")
-                }
-            }
-        )
-    }
-
-    if (showResetConfirm) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirm = false },
-            title = { Text("تأكيد Reset") },
-            text = { Text("سيتم حذف كل المحادثات والرسائل ضمن $scopeKey وتصفير Workspace Summary. هل أنت متأكد؟") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val wsId = ws?.id
-                        if (wsId == null) {
-                            Toast.makeText(context, "Workspace غير متاح", Toast.LENGTH_SHORT).show()
-                            showResetConfirm = false
-                            return@Button
-                        }
-                        scope.launch {
-                            runCatching {
-                                repo.resetWorkspaceFully(wsId)
-                                vm.clearWebConversationSelection()
-                                Toast.makeText(context, "✅ تم Reset", Toast.LENGTH_SHORT).show()
-                                showResetConfirm = false
-                                onDismiss()
-                            }.onFailure { e ->
-                                Toast.makeText(context, "⚠️ فشل Reset: ${e.message ?: "خطأ"}", Toast.LENGTH_LONG).show()
-                                showResetConfirm = false
-                            }
-                        }
-                    }
-                ) { Text("نعم") }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showResetConfirm = false }) { Text("إلغاء") }
-            }
-        )
-    }
+init {
+viewModelScope.launch {
+runCatching {
+val ws = conversationRepository.getOrCreateWorkspace(
+scopeKey = webGlobalScopeKey(),
+title = webGlobalWorkspaceTitle()
+)
+_webWorkspaceId.value = ws.id
+}
+}
 }
 
-@Composable
-private fun ConversationRowLite(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+private suspend fun ensureWebWorkspace(): Workspace {
+val ws = conversationRepository.getOrCreateWorkspace(
+scopeKey = webGlobalScopeKey(),
+title = webGlobalWorkspaceTitle()
+)
+_webWorkspaceId.value = ws.id
+return ws
 }
 
-/* ============================ Send bar (كما كان) ============================ */
-
-@Composable
-private fun WebSendBar(
-    modifier: Modifier = Modifier,
-    text: String,
-    onTextChange: (String) -> Unit,
-    isEnhanced: Boolean,
-    isEnhancing: Boolean,
-    isSending: Boolean,
-    memoryEnabled: Boolean,
-    includeMemory: Boolean,
-    curatorReasoning: String,
-    onToggleMemory: () -> Unit,
-    onEnhance: () -> Unit,
-    onClearEnhanced: () -> Unit,
-    onSend: () -> Unit
-) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (includeMemory && curatorReasoning.isNotBlank()) {
-                Text(
-                    text = "🧠 اختيار الوسيط: $curatorReasoning",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (memoryEnabled) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clickable(enabled = !isSending && !isEnhancing, onClick = onToggleMemory)
-                            .padding(horizontal = 6.dp, vertical = 6.dp)
-                    ) {
-                        Checkbox(
-                            checked = includeMemory,
-                            onCheckedChange = { onToggleMemory() },
-                            enabled = !isSending && !isEnhancing
-                        )
-                        Text("ذاكرة", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    modifier = Modifier.weight(1f),
-                    minLines = 1,
-                    maxLines = 5,
-                    enabled = !isSending,
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    label = { Text(if (isEnhanced) "مُحسّن ✨" else "اكتب رسالتك") }
-                )
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(
-                        onClick = if (isEnhanced) onClearEnhanced else onEnhance,
-                        enabled = text.isNotBlank() && !isSending && !isEnhancing
-                    ) {
-                        if (!isEnhanced && isEnhancing) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text(if (isEnhanced) "↩️" else "⚡")
-                        }
-                    }
-
-                    IconButton(
-                        onClick = onSend,
-                        enabled = text.isNotBlank() && !isSending && !isEnhancing
-                    ) {
-                        Text(if (isSending) "⏳" else "📤")
-                    }
-                }
-            }
-        }
-    }
+fun openWebConversation(conversationId: Long) {
+_currentWebConversationId.value = conversationId
+_lastWebUserText.value = null
 }
 
-/* ============================ Context formatting ============================ */
-
-private enum class WebKind { CHATGPT, VENICE, ARENA, OTHER }
-
-private const val AICHAT_CTX_BEGIN = "<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>"
-private const val AICHAT_CTX_END = "<<<AICHAT_HIDDEN_CONTEXT_END>>>"
-
-private fun classifyHost(host: String): WebKind {
-    val h = host.lowercase(Locale.ROOT)
-    return when {
-        h.contains("chatgpt.com") || h.contains("openai.com") -> WebKind.CHATGPT
-        h.contains("venice.ai") -> WebKind.VENICE
-        h.contains("lmsys") || h.contains("arena") -> WebKind.ARENA
-        else -> WebKind.OTHER
-    }
+fun clearWebConversationSelection() {
+_currentWebConversationId.value = null
+_lastWebUserText.value = null
 }
 
-private fun buildFinalTextForPlatform(kind: WebKind, contextBlock: String, question: String): String {
-    val ctx = contextBlock.trim()
-    if (ctx.isBlank()) return question
+fun newWebConversation(title: String? = null) {
+viewModelScope.launch {
+runCatching {
+val ws = ensureWebWorkspace()
+val now = System.currentTimeMillis()
 
-    return when (kind) {
-        WebKind.ARENA -> {
-            "### Context (visible)\n$ctx\n### End Context\n\n$question"
-        }
-        WebKind.CHATGPT, WebKind.VENICE -> {
-            "$AICHAT_CTX_BEGIN\n$ctx\n$AICHAT_CTX_END\n\n$question"
-        }
-        WebKind.OTHER -> {
-            "$ctx\n\n$question"
-        }
-    }
+val finalTitle = title?.trim().orEmpty().ifBlank { webDefaultConversationTitle() }.take(60)          
+        val newId = conversationRepository.insertConversation(          
+            Conversation(          
+                title = finalTitle,          
+                memoryAccessEnabled = true,          
+                agentId = aiSettings.webAgentIdOrNull,          
+                workspaceId = ws.id,          
+                parentConversationId = null          
+            )          
+        )          
+      
+        conversationRepository.updateTitleAndTimestamp(          
+            id = newId,          
+            title = finalTitle,          
+            updatedAt = now          
+        )          
+      
+        _currentWebConversationId.value = newId          
+        _successMessage.value = "✅ تم إنشاء محادثة ويب جديدة."          
+    }.onFailure { e ->          
+        _error.value = "فشل إنشاء محادثة ويب: ${e.message ?: "خطأ غير معروف"}"          
+    }          
 }
 
-/* ============================ Helpers / dialogs ============================ */
-
-private fun openExternal(context: Context, url: String) {
-    try {
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-    } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, "لا يوجد تطبيق لفتح هذا الرابط", Toast.LENGTH_SHORT).show()
-    }
 }
 
-@Composable
-private fun LoadErrorView(
-    message: String,
-    onRetry: () -> Unit,
-    onOpenBrowser: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text("⚠️", style = MaterialTheme.typography.displaySmall)
-            Text(text = message, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(4.dp))
-            Button(onClick = onRetry) { Text("إعادة المحاولة") }
-            OutlinedButton(onClick = onOpenBrowser) { Text("فتح في المتصفح") }
-        }
-    }
+fun branchFromCurrentWebConversation() {
+val parentId = _currentWebConversationId.value
+if (parentId == null) {
+_error.value = "لا يمكن إنشاء فرع قبل اختيار محادثة ويب."
+return
+}
+if (_isLoading.value) return
+
+viewModelScope.launch {          
+    runCatching {          
+        val ws = ensureWebWorkspace()          
+        val parent = conversationRepository.getConversationById(parentId)          
+            ?: throw IllegalStateException("محادثة الويب الأصل غير موجودة")          
+      
+        val branchTitle = buildString {          
+            val base = parent.title.trim().ifBlank { webDefaultConversationTitle() }.take(45)          
+            append("فرع: ")          
+            append(base)          
+        }.take(60)          
+      
+        val newId = conversationRepository.insertConversation(          
+            Conversation(          
+                title = branchTitle.ifBlank { "فرع جديد" },          
+                memoryAccessEnabled = true,          
+                agentId = aiSettings.webAgentIdOrNull,          
+                workspaceId = ws.id,          
+                parentConversationId = parentId          
+            )          
+        )          
+      
+        conversationRepository.updateTitleAndTimestamp(          
+            id = newId,          
+            title = branchTitle.ifBlank { "فرع جديد" },          
+            updatedAt = System.currentTimeMillis()          
+        )          
+      
+        _currentWebConversationId.value = newId          
+        _successMessage.value = "✅ تم إنشاء فرع ويب."          
+    }.onFailure { e ->          
+        _error.value = "فشل إنشاء فرع ويب: ${e.message ?: "خطأ غير معروف"}"          
+    }          
 }
 
-@Composable
-private fun GeckoUnavailableDialog(
-    platformTitle: String,
-    platformUrl: String,
-    onOpenBrowser: () -> Unit,
-    onBack: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onBack,
-        title = { Text("⚠️ GeckoView غير متاح") },
-        text = {
-            Text(
-                "تعذر تهيئة محرك GeckoView.\n\n" +
-                "يمكنك فتح $platformTitle في المتصفح الخارجي.\n\n" +
-                platformUrl
-            )
-        },
-        confirmButton = { Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") } },
-        dismissButton = { OutlinedButton(onClick = onBack) { Text("رجوع") } }
+}
+
+/**
+
+- ينشئ فرع ويب من الرسالة المختارة، وينسخ سياق المحادثة حتى تلك الرسالة.
+  */
+  fun branchFromWebMessage(messageId: Long) {
+  val parentId = _currentWebConversationId.value
+
+  if (parentId == null) {
+  _error.value = "لا توجد محادثة ويب مفتوحة لإنشاء فرع منها."
+  return
+  }
+
+  if (_isLoading.value) {
+  _error.value = "انتظر انتهاء العملية الحالية قبل إنشاء الفرع."
+  return
+  }
+
+  viewModelScope.launch {
+  runCatching {
+  val parent = conversationRepository.getConversationById(parentId)
+  ?: throw IllegalStateException("المحادثة الأصلية غير موجودة.")
+
+  val originalMessages =          
+           conversationRepository.getMessagesOnce(parentId)          
+
+       val selectedIndex =          
+           originalMessages.indexOfFirst { it.id == messageId }          
+
+       if (selectedIndex < 0) {          
+           throw IllegalStateException("الرسالة المختارة غير موجودة في المحادثة.")          
+       }          
+
+       val messagesToCopy = originalMessages.take(selectedIndex + 1)          
+       val workspace = ensureWebWorkspace()          
+       val branchTitle = "فرع: ${          
+           parent.title.trim()          
+               .ifBlank { webDefaultConversationTitle() }          
+               .take(45)          
+       }".take(60)          
+
+       val newId = conversationRepository.insertConversation(          
+           Conversation(          
+               title = branchTitle,          
+               memoryAccessEnabled = parent.memoryAccessEnabled,          
+               agentId = parent.agentId,          
+               workspaceId = parent.workspaceId ?: workspace.id,          
+               parentConversationId = parent.id,          
+               branchContextMessageCount = messagesToCopy.size          
+           )          
+       )          
+
+       conversationRepository.updateTitleAndTimestamp(          
+           id = newId,          
+           title = branchTitle,          
+           updatedAt = System.currentTimeMillis()          
+       )          
+
+       messagesToCopy.forEach { message ->          
+           conversationRepository.insertMessage(          
+               message.copy(          
+                   id = 0,          
+                   conversationId = newId          
+               )          
+           )          
+       }          
+
+       _currentWebConversationId.value = newId          
+       _lastWebUserText.value = null          
+       _error.value = null          
+       _successMessage.value = "تم إنشاء فرع ويب من الرسالة المختارة."          
+   }.onFailure { e ->          
+       _error.value = "فشل إنشاء فرع ويب: ${          
+           e.message ?: "خطأ غير معروف"          
+       }"          
+   }
+
+  }
+  }
+
+/**
+
+- ينشئ فرعًا من الرسالة المحددة، ثم يُنتج ملخصًا خاصًا
+
+- بالانتقال اعتمادًا على الرسائل حتى نقطة التفريع فقط.
+
+- 
+
+- يعيد نص السياق الجاهز للحقن في المنصة الهدف.
+  */
+  suspend fun createWebHandoffFromMessage(messageId: Long): String {
+  val parentId = _currentWebConversationId.value
+  ?: throw IllegalStateException("لا توجد محادثة ويب محددة.")
+
+  val parent = conversationRepository.getConversationById(parentId)
+  ?: throw IllegalStateException("المحادثة الأصلية غير موجودة.")
+
+  val originalMessages = conversationRepository.getMessagesOnce(parentId)
+  val selectedIndex = originalMessages.indexOfFirst { it.id == messageId }
+
+  if (selectedIndex < 0) {
+  throw IllegalStateException("الرسالة المحددة غير موجودة في المحادثة.")
+  }
+
+  val messagesToCopy = originalMessages.take(selectedIndex + 1)
+  if (messagesToCopy.isEmpty()) {
+  throw IllegalStateException("لا توجد رسائل لإنشاء السياق.")
+  }
+
+  val workspace = ensureWebWorkspace()
+  val branchTitle = "متابعة: ${
+  parent.title.trim()
+  .ifBlank { webDefaultConversationTitle() }
+  .take(42)
+  }".take(60)
+
+  val branchId = conversationRepository.insertConversation(
+  Conversation(
+  title = branchTitle,
+  memoryAccessEnabled = parent.memoryAccessEnabled,
+  agentId = parent.agentId,
+  workspaceId = parent.workspaceId ?: workspace.id,
+  parentConversationId = parent.id,
+  branchContextMessageCount = messagesToCopy.size
+  )
+  )
+
+  conversationRepository.updateTitleAndTimestamp(
+  id = branchId,
+  title = branchTitle,
+  updatedAt = System.currentTimeMillis()
+  )
+
+  messagesToCopy.forEach { message ->
+  conversationRepository.insertMessage(
+  message.copy(
+  id = 0,
+  conversationId = branchId
+  )
+  )
+  }
+
+  // تثبيت الفرع قبل العودة إلى الشاشة.
+  _currentWebConversationId.value = branchId
+  _lastWebUserText.value = null
+  _error.value = null
+  _successMessage.value = "تم إنشاء فرع متابعة للانتقال إلى المنصة الأخرى."
+
+  // نستخدم الرسائل السابقة لنقطة التفريع فقط، وليس ملخص Workspace العام.
+  val transcript = messagesToCopy.joinToString("\n\n") { message ->
+  val role = if (message.role == "user") "المستخدم" else "المساعد"
+  "$role: ${message.content.trim().take(1800)}"
+  }.take(9000)
+
+  val prompt = """
+  أنت تلخص سياق محادثة لنقله إلى منصة ذكاء اصطناعي أخرى.
+
+  لخص المعلومات التالية لتسهيل متابعة النقاش من النقطة نفسها.        
+
+   قواعد الملخص:        
+   - استخدم العربية.        
+   - احتفظ بالموضوع والسؤال الأساسي والحقائق والأسماء والقرارات المهمة.        
+   - احتفظ بما لم يُحسم بعد والأسئلة التي تحتاج إلى متابعة.        
+   - ميّز بين الحقائق والادعاءات والآراء.        
+   - لا تخترع معلومات أو تستكمل الحوار من عندك.        
+   - لا تضف موضوعات من محادثات أخرى.        
+   - أخرج الملخص فقط، بحد أقصى 1800 حرف.        
+
+   الرسائل:        
+   $transcript
+
+  """.trimIndent()
+
+  val summary = repository.sendMessage(
+  history = emptyList(),
+  userMessage = prompt,
+  imageBase64 = null,
+  memoryContext = "",
+  hasMemorySource = false,
+  agentPrompt = ""
+  ).trim()
+
+  if (summary.isBlank()) {
+  throw IllegalStateException(
+  "أُنشئ الفرع، لكن تعذر توليد ملخص السياق. يمكنك إعادة المحاولة."
+  )
+  }
+
+  return summary.take(2200)
+  }
+
+fun resetWebGlobalWorkspaceFully() {
+if (_isLoading.value) return
+
+viewModelScope.launch {          
+    runCatching {          
+        val ws = ensureWebWorkspace()          
+        conversationRepository.resetWorkspaceFully(ws.id)          
+      
+        _currentWebConversationId.value = null          
+        _lastWebUserText.value = null          
+      
+        _successMessage.value = "✅ تم تصفير Workspace الويب بالكامل (web:global)."          
+    }.onFailure { e ->          
+        _error.value = "فشل تصفير Workspace الويب: ${e.message ?: "خطأ غير معروف"}"          
+    }          
+}
+
+}
+
+private fun buildWebTitle(platformName: String?, seedText: String?): String {
+val p = platformName?.trim().orEmpty()
+val s = seedText?.trim().orEmpty()
+val suffix = if (s.isNotBlank()) " • ${s.take(40)}" else ""
+val base = if (p.isNotBlank()) "Web: $p" else webDefaultConversationTitle()
+return (base + suffix).trim().take(60)
+}
+
+private suspend fun ensureWebConversation(
+workspaceId: Long,
+suggestedTitleForNewConversation: String
+): Long {
+val existing = _currentWebConversationId.value
+if (existing != null) {
+val conv = conversationRepository.getConversationById(existing)
+if (conv != null) {
+if (conv.workspaceId == workspaceId) return existing
+if (conv.workspaceId == null) {
+conversationRepository.updateConversationWorkspace(
+conversationId = existing,
+workspaceId = workspaceId,
+parentConversationId = conv.parentConversationId
+)
+return existing
+}
+}
+}
+
+val newId = conversationRepository.insertConversation(          
+    Conversation(          
+        title = suggestedTitleForNewConversation.ifBlank { webDefaultConversationTitle() },          
+        memoryAccessEnabled = true,          
+        agentId = aiSettings.webAgentIdOrNull,          
+        workspaceId = workspaceId,          
+        parentConversationId = null          
+    )          
+)          
+_currentWebConversationId.value = newId          
+return newId
+
+}
+
+fun onWebUserMessageSent(userText: String, platformName: String? = null) {
+val clean = userText.trim()
+if (clean.isBlank()) return
+
+_lastWebUserText.value = clean          
+      
+viewModelScope.launch {          
+    runCatching {          
+        val ws = ensureWebWorkspace()          
+        val convId = ensureWebConversation(          
+            workspaceId = ws.id,          
+            suggestedTitleForNewConversation = buildWebTitle(platformName, clean)          
+        )          
+      
+        conversationRepository.insertMessage(          
+            Message(          
+                conversationId = convId,          
+                role = "user",          
+                content = clean,          
+                messageType = "text"          
+            )          
+        )          
+      
+        val now = System.currentTimeMillis()          
+        val conv = conversationRepository.getConversationById(convId)          
+        val currentTitle = conv?.title.orEmpty().trim()          
+        val computedTitle =          
+            if (currentTitle.isBlank() || currentTitle == webDefaultConversationTitle()) {          
+                buildWebTitle(platformName, clean)          
+            } else currentTitle          
+      
+        conversationRepository.updateTitleAndTimestamp(          
+            id = convId,          
+            title = computedTitle.take(60).ifBlank { webDefaultConversationTitle() },          
+            updatedAt = now          
+        )          
+    }          
+}
+
+}
+
+/**
+ * يشغّل تسجيل سؤال الويب ضمن عمر ChatViewModel،
+ * فلا يُلغى التسجيل لمجرد مغادرة الشاشة للتركيب.
+ */
+fun onWebUserMessageSentAndTrackInViewModelScope(
+    userText: String,
+    platformId: String,
+    platformName: String? = null
+): Deferred<Boolean> = viewModelScope.async {
+    registerWebUserMessageAndTrack(
+        userText = userText,
+        platformId = platformId,
+        platformName = platformName
     )
 }
 
 /**
- * يحاول استخراج ConversationRepository من ChatViewModel بدون تغيير الـ API لهذه الشاشة.
- * يعتمد على وجود field داخل ChatViewModel نوعه ConversationRepository (حتى لو private).
+ * للتوافق مع أي استدعاءات حالية تستخدم الدالة suspend.
  */
-private fun resolveConversationRepositoryFromViewModel(vm: ChatViewModel?): ConversationRepository? {
-    if (vm == null) return null
-    return runCatching {
-        val wanted = ConversationRepository::class.java
-        var c: Class<*>? = vm.javaClass
-        while (c != null) {
-            val f = c.declaredFields.firstOrNull { wanted.isAssignableFrom(it.type) }
-            if (f != null) {
-                f.isAccessible = true
-                return@runCatching (f.get(vm) as? ConversationRepository)
+suspend fun onWebUserMessageSentAndTrack(
+    userText: String,
+    platformId: String,
+    platformName: String? = null
+): Boolean {
+    return registerWebUserMessageAndTrack(
+        userText = userText,
+        platformId = platformId,
+        platformName = platformName
+    )
+}
+
+private suspend fun registerWebUserMessageAndTrack(
+    userText: String,
+    platformId: String,
+    platformName: String? = null
+): Boolean {
+    val clean = userText.trim()
+    val platformKey = platformId.trim().lowercase(Locale.ROOT)
+
+    if (clean.isBlank() || platformKey.isBlank()) return false
+
+    return try {
+        val ws = ensureWebWorkspace()
+
+        val convId = ensureWebConversation(
+            workspaceId = ws.id,
+            suggestedTitleForNewConversation =
+                buildWebTitle(platformName, clean)
+        )
+
+        conversationRepository.insertMessage(
+            Message(
+                conversationId = convId,
+                role = "user",
+                content = clean,
+                messageType = "text"
+            )
+        )
+
+        val conv = conversationRepository.getConversationById(convId)
+        val currentTitle = conv?.title.orEmpty().trim()
+
+        val computedTitle =
+            if (
+                currentTitle.isBlank() ||
+                currentTitle == webDefaultConversationTitle()
+            ) {
+                buildWebTitle(platformName, clean)
+            } else {
+                currentTitle
             }
-            c = c.superclass
+
+        conversationRepository.updateTitleAndTimestamp(
+            id = convId,
+            title = computedTitle.take(60)
+                .ifBlank { webDefaultConversationTitle() },
+            updatedAt = System.currentTimeMillis()
+        )
+
+        synchronized(pendingWebRequests) {
+            val queue = pendingWebRequests.getOrPut(platformKey) {
+                ArrayDeque()
+            }
+
+            queue.addLast(
+                PendingWebRequest(
+                    conversationId = convId,
+                    workspaceId = ws.id,
+                    userText = clean
+                )
+            )
         }
-        null
-    }.getOrNull()
+
+        _lastWebUserText.value = clean
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        _error.value =
+            "فشل تسجيل سؤال الويب: ${e.message ?: "خطأ غير معروف"}"
+        false
+    }
+}
+
+fun onWebAiResponse(
+platformId: String,
+platformName: String,
+text: String,
+forceSaveToMemory: Boolean = false
+) {
+val clean = text.trim()
+val platformKey = platformId.trim().lowercase(Locale.ROOT)
+
+if (clean.isBlank()) return          
+      
+viewModelScope.launch {          
+    try {          
+        val pending = synchronized(pendingWebRequests) {          
+            val queue = pendingWebRequests[platformKey]          
+      
+            if (queue.isNullOrEmpty()) {          
+                null          
+            } else {          
+                val request = queue.removeFirst()          
+      
+                if (queue.isEmpty()) {          
+                    pendingWebRequests.remove(platformKey)          
+                }          
+      
+                request          
+            }          
+        }          
+      
+        val target = if (pending != null) {          
+            pending          
+        } else {          
+            // توافق مع الالتقاط اليدوي أو الردود التي لا يقابلها طلب مسجل.          
+            val ws = ensureWebWorkspace()          
+            val convId = ensureWebConversation(          
+                workspaceId = ws.id,          
+                suggestedTitleForNewConversation =          
+                    buildWebTitle(platformName, null)          
+            )          
+      
+            PendingWebRequest(          
+                conversationId = convId,          
+                workspaceId = ws.id,          
+                userText = _lastWebUserText.value.orEmpty()          
+            )          
+        }          
+      
+        val messageId = conversationRepository.insertMessage(          
+            Message(          
+                conversationId = target.conversationId,          
+                role = "assistant",          
+                content = clean,          
+                messageType = "text"          
+            )          
+        )          
+      
+        val conv = conversationRepository.getConversationById(          
+            target.conversationId          
+        )          
+      
+        val title = conv?.title?.trim()          
+            .orEmpty()          
+            .ifBlank { buildWebTitle(platformName, null) }          
+      
+        conversationRepository.updateTitleAndTimestamp(          
+            id = target.conversationId,          
+            title = title.take(60),          
+            updatedAt = System.currentTimeMillis()          
+        )          
+      
+        if (forceSaveToMemory || aiSettings.autoSave) {          
+            memoryRepository.addMemory(          
+                content = clean,          
+                sourceConversationId = null,          
+                sourceMessageId = messageId,          
+                category = "KNOWLEDGE",          
+                isShared = true          
+            )          
+        }          
+      
+        updateWorkspaceSummaryAsyncForWorkspace(          
+            workspaceId = target.workspaceId,          
+            userText = target.userText,          
+            assistantText = clean          
+        )          
+      
+        if (_lastWebUserText.value == target.userText) {          
+            _lastWebUserText.value = null          
+        }          
+    } catch (e: Exception) {          
+        (getApplication<Application>() as? AichatApp)          
+            ?.logDebug(          
+                "WEB_RESPONSE_SAVE_ERROR: ${e.message}"          
+            )          
+    }          
+}
+
+}
+
+// =========================
+// Images + File/Web saving
+// =========================
+
+fun selectImage(uri: Uri) {
+viewModelScope.launch {
+try {
+_selectedImageBase64.value = imageProcessor.uriToBase64(uri)
+?: run {
+_error.value = "تعذر قراءة الصورة"
+null
+}
+} catch (e: Exception) {
+_error.value = "فشل تحميل الصورة: ${e.message}"
+}
+}
+}
+
+fun selectBitmap(bitmap: Bitmap) {
+viewModelScope.launch {
+try {
+_selectedImageBase64.value = imageProcessor.bitmapToBase64(bitmap)
+} catch (e: Exception) {
+_error.value = "فشل تحميل الصورة: ${e.message}"
+}
+}
+}
+
+fun processAndSaveFile(uri: Uri) {
+viewModelScope.launch {
+_isLoading.value = true
+_error.value = null
+_successMessage.value = null
+
+try {          
+        val content = fileProcessor.readFile(uri)          
+        if (content.isBlank()) {          
+            _error.value = "⚠️ الملف فارغ أو لا يحتوي على نص قابل للقراءة"          
+            return@launch          
+        }          
+      
+        val chunks =          
+            if (content.length > 1000) {          
+                fileProcessor.chunkText(content, maxChunkSize = 800, overlap = 100)          
+            } else {          
+                listOf(content)          
+            }          
+      
+        val limitedChunks = chunks.take(20)          
+      
+        val newChunks = mutableListOf<String>()          
+        var skipped = 0          
+        for (chunk in limitedChunks) {          
+            if (memoryRepository.existsByHash(calculateHash(chunk))) skipped++ else newChunks.add(chunk)          
+        }          
+      
+        var saved = 0          
+        if (newChunks.isNotEmpty()) {          
+            val embeddings = try {          
+                embeddingService.getBatchEmbeddings(newChunks)          
+            } catch (_: Exception) {          
+                newChunks.map { emptyList() }          
+            }          
+      
+            newChunks.forEachIndexed { i, chunk ->          
+                val emb = embeddings.getOrElse(i) { emptyList() }          
+                val id = memoryRepository.addMemoryWithEmbedding(          
+                    content = chunk,          
+                    embedding = emb,          
+                    category = "KNOWLEDGE",          
+                    isShared = true          
+                )          
+                if (id > 0) saved++          
+            }          
+        }          
+      
+        _successMessage.value = buildString {          
+            append("✅ تم حفظ $saved جزء في الذاكرة")          
+            if (skipped > 0) append("\n⚠️ تم تخطي $skipped (موجودة مسبقاً)")          
+            if (chunks.size > 20) append("\n📌 من أصل ${chunks.size} (الحد الأقصى 20)")          
+            if (newChunks.isNotEmpty()) append("\n🚀 Batch: طلب API واحد")          
+        }          
+      
+    } catch (e: Exception) {          
+        _error.value = "❌ ${e.message}"          
+    } finally {          
+        _isLoading.value = false          
+    }          
+}
+
+}
+
+fun saveWebPage(url: String) {
+viewModelScope.launch {
+_isLoading.value = true
+_error.value = null
+_successMessage.value = null
+
+try {          
+        val result = webPageFetcher.fetchAndClean(url)          
+      
+        val fullText = buildString {          
+            append(result.title)          
+            append("\n\n")          
+            append(result.content)          
+        }          
+      
+        val chunks = fileProcessor.chunkText(fullText, maxChunkSize = 800, overlap = 100)          
+        val limited = chunks.take(20)          
+      
+        val newChunks = mutableListOf<String>()          
+        var skipped = 0          
+        for (chunk in limited) {          
+            if (memoryRepository.existsByHash(calculateHash(chunk))) skipped++ else newChunks.add(chunk)          
+        }          
+      
+        var saved = 0          
+        if (newChunks.isNotEmpty()) {          
+            val embeddings = try {          
+                embeddingService.getBatchEmbeddings(newChunks)          
+            } catch (_: Exception) {          
+                newChunks.map { emptyList() }          
+            }          
+      
+            newChunks.forEachIndexed { i, chunk ->          
+                val emb = embeddings.getOrElse(i) { emptyList() }          
+                val id = memoryRepository.addMemoryWithEmbedding(          
+                    content = chunk,          
+                    embedding = emb,          
+                    category = "WEB",          
+                    isShared = true          
+                )          
+                if (id > 0) saved++          
+            }          
+        }          
+      
+        _successMessage.value = buildString {          
+            append("✅ تم حفظ $saved جزء من:\n📄 ${result.title}")          
+            if (skipped > 0) append("\n⚠️ تم تخطي $skipped (موجودة مسبقاً)")          
+            if (chunks.size > 20) append("\n📌 من أصل ${chunks.size} (الحد الأقصى 20)")          
+            append("\n📊 ${result.wordCount} كلمة")          
+            if (newChunks.isNotEmpty()) append("\n🚀 Batch: طلب API واحد")          
+        }          
+      
+    } catch (e: Exception) {          
+        _error.value = when {          
+            e.message?.contains("Unable to resolve host") == true -> "❌ لا يوجد اتصال بالإنترنت"          
+            e.message?.contains("timeout", ignoreCase = true) == true -> "❌ انتهت مهلة الاتصال"          
+            e.message?.contains("URL") == true -> "❌ رابط غير صالح"          
+            else -> "❌ فشل جلب الصفحة: ${e.message}"          
+        }          
+    } finally {          
+        _isLoading.value = false          
+    }          
+}
+
+}
+
+fun clearSelectedImage() {
+_selectedImageBase64.value = null
+}
+
+fun clearError() {
+_error.value = null
+}
+
+fun clearSuccessMessage() {
+_successMessage.value = null
+}
+
+private fun calculateHash(content: String): String {
+return try {
+MessageDigest.getInstance("SHA-256")
+.digest(content.toByteArray(Charsets.UTF_8))
+.joinToString("") { "%02x".format(it) }
+} catch (_: Exception) {
+"nohash-${content.hashCode().toString(16)}-${content.length}"
+}
+}
+
+private fun getDisplayName(uri: Uri): String {
+return try {
+val resolver = getApplication().contentResolver
+resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+?.use { cursor ->
+if (cursor.moveToFirst()) {
+val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+if (idx >= 0) cursor.getString(idx) else null
+} else null
+}
+?: (uri.lastPathSegment ?: "ملف")
+} catch (_: Exception) {
+uri.lastPathSegment ?: "ملف"
+}
+}
+
+fun deleteConversation(conversation: Conversation) {
+viewModelScope.launch {
+conversationRepository.deleteMessages(conversation.id)
+conversationRepository.deleteConversation(conversation)
+
+if (_currentConversationId.value == conversation.id) newConversation()          
+    if (_currentWebConversationId.value == conversation.id) clearWebConversationSelection()          
+}
+
+}
+
 }
