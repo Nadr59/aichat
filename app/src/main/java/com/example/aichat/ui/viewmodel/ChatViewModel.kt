@@ -1089,6 +1089,55 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return newId
     }
 
+    /**
+     * ✅ خطوة 1.أ — توحيد "المحادثة النشطة" بين مسار API ومسار الويب.
+     *
+     * إن كانت هناك محادثة مفتوحة حاليًا في الشاشة الرئيسية (ChatScreen) عبر
+     * _currentConversationId، تُستخدم هي نفسها كهدف لرسائل الويب القادمة،
+     * مع ربط workspace الخاص بها عبر ensureWorkspaceForConversation بدل
+     * إجبار استخدام "web:global" المنفصل.
+     *
+     * إن لم توجد محادثة نشطة حاليًا، يُحافظ على السلوك القديم تمامًا
+     * (إنشاء/استخدام محادثة ويب ضمن workspace الويب العام عبر
+     * ensureWebWorkspace + ensureWebConversation)، لكن يتم تعيين الناتج
+     * كمحادثة نشطة جديدة (_currentConversationId) وبدء مراقبتها
+     * (startCollecting) حتى تظهر تلقائيًا إن فُتحت ChatScreen لاحقًا.
+     *
+     * لا تغيير في: pendingWebRequests، مطابقة platformId، أو أي منطق في
+     * GeckoTestScreen.kt.
+     */
+    private suspend fun resolveActiveConversationForWeb(
+        suggestedTitleForNewConversation: String
+    ): Pair<Long, Long> {
+        val activeId = _currentConversationId.value
+        if (activeId != null) {
+            val activeConv = conversationRepository.getConversationById(activeId)
+            if (activeConv != null) {
+                val ws = ensureWorkspaceForConversation(activeId)
+                _currentWebConversationId.value = activeId
+                return activeId to ws.id
+            }
+        }
+
+        val ws = ensureWebWorkspace()
+        val convId = ensureWebConversation(
+            workspaceId = ws.id,
+            suggestedTitleForNewConversation = suggestedTitleForNewConversation
+        )
+
+        if (_currentConversationId.value != convId) {
+            setCurrentWorkspaceById(ws.id)
+            _currentConversationId.value = convId
+            _currentParentConversationId.value = null
+            _currentAgentId.value = aiSettings.webAgentIdOrNull
+            _memoryAccessEnabled.value = true
+            _enhancedQuery.value = null
+            startCollecting(convId)
+        }
+
+        return convId to ws.id
+    }
+
     fun onWebUserMessageSent(userText: String, platformName: String? = null) {
         val clean = userText.trim()
         if (clean.isBlank()) return
@@ -1171,10 +1220,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (clean.isBlank() || platformKey.isBlank()) return false
 
         return try {
-            val ws = ensureWebWorkspace()
-
-            val convId = ensureWebConversation(
-                workspaceId = ws.id,
+            val (convId, workspaceId) = resolveActiveConversationForWeb(
                 suggestedTitleForNewConversation =
                     buildWebTitle(platformName, clean)
             )
@@ -1216,7 +1262,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 queue.addLast(
                     PendingWebRequest(
                         conversationId = convId,
-                        workspaceId = ws.id,
+                        workspaceId = workspaceId,
                         userText = clean
                     )
                 )
@@ -1266,16 +1312,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     pending
                 } else {
                     // توافق مع الالتقاط اليدوي أو الردود التي لا يقابلها طلب مسجل.
-                    val ws = ensureWebWorkspace()
-                    val convId = ensureWebConversation(
-                        workspaceId = ws.id,
+                    val (convId, workspaceId) = resolveActiveConversationForWeb(
                         suggestedTitleForNewConversation =
                             buildWebTitle(platformName, null)
                     )
 
                     PendingWebRequest(
                         conversationId = convId,
-                        workspaceId = ws.id,
+                        workspaceId = workspaceId,
                         userText = _lastWebUserText.value.orEmpty()
                     )
                 }
