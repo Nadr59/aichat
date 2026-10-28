@@ -32,11 +32,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
+import com.example.aichat.AichatApp
+import com.example.aichat.GeckoSessionManager
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.repository.WebSendCoordinator
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.ChatViewModel
@@ -44,6 +48,11 @@ import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.WebRequestError
 import java.io.File
 import java.util.Locale
 
@@ -80,7 +89,7 @@ fun ChatScreen(
         }
     }
 
-    // ── Provider selector (1.ب.2): API أو منصة ويب (placeholder فقط) ──
+    // ── Provider selector (1.ب.2 / 1.ب.3) ──
     val webPlatforms by webPlatformsViewModel.platforms.collectAsState()
     val enabledWebPlatforms = remember(webPlatforms) {
         webPlatforms.filter { it.isEnabled }
@@ -225,6 +234,28 @@ fun ChatScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    // ── 1.ب.3: محرك الويب المخفي ──
+    val app = remember(context) { context.applicationContext as AichatApp }
+
+    val selectedPlatform = remember(selectedWebPlatformId, enabledWebPlatforms) {
+        enabledWebPlatforms.firstOrNull { it.id == selectedWebPlatformId }
+    }
+
+    val isChatGptPlatform = remember(selectedPlatform?.id, selectedPlatform?.url) {
+        selectedPlatform?.let {
+            WebSendCoordinator.classifyHost(hostOf(it.url)) == WebSendCoordinator.WebKind.CHATGPT
+        } ?: false
+    }
+
+    var webPageLoading by remember(selectedWebPlatformId) { mutableStateOf(true) }
+    var webLoadError by remember(selectedWebPlatformId) { mutableStateOf<String?>(null) }
+    var webSendInFlight by remember(selectedWebPlatformId) { mutableStateOf(false) }
+    var webRuntimeMissing by remember(selectedWebPlatformId) { mutableStateOf(false) }
+
+    val sendDisabledExternally = selectedWebPlatformId != null && (
+        !isChatGptPlatform || webPageLoading || webSendInFlight || webRuntimeMissing
+    )
+
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
 
@@ -247,6 +278,28 @@ fun ChatScreen(
             TextFieldValue(enhancedQuery!!)
         } else {
             TextFieldValue("")
+        }
+    }
+
+    // ── 1.ب.3: تسجيل التقاط ردود منصة الويب الحالية ──
+    DisposableEffect(selectedWebPlatformId, isChatGptPlatform) {
+        val platform = selectedPlatform
+
+        if (platform != null && isChatGptPlatform && platform.memoryEnabled) {
+            app.onAiResponseCaptured = { source, text ->
+                webSendInFlight = false
+                viewModel.onWebAiResponse(
+                    platformId = source.ifBlank { platform.id },
+                    platformName = platform.name,
+                    text = text
+                )
+            }
+        }
+
+        onDispose {
+            app.onAiResponseCaptured = null
+            app.onManualCaptureResult = null
+            app.onContextWritten = null
         }
     }
 
@@ -314,6 +367,48 @@ fun ChatScreen(
             viewModel.sendChatMessage(textToSend)
             userInput = TextFieldValue("")
             viewModel.clearEnhancedQuery()
+        }
+    }
+
+    // ── 1.ب.3: إرسال فعلي إلى منصة الويب المختارة (ChatGPT فقط في هذه الخطوة) ──
+    fun sendWebMessage() {
+        val platform = selectedPlatform ?: return
+        if (!isChatGptPlatform) return
+        if (webPageLoading || webSendInFlight || webRuntimeMissing) return
+
+        val textToSend = (
+            if (isEnhanced) enhancedInput.text else userInput.text
+        ).trim()
+
+        if (textToSend.isBlank()) return
+
+        scope.launch {
+            keyboardController?.hide()
+            focusManager.clearFocus(force = true)
+            delay(80)
+
+            webSendInFlight = true
+            userInput = TextFieldValue("")
+            viewModel.clearEnhancedQuery()
+
+            val tracked = viewModel.onWebUserMessageSentAndTrackInViewModelScope(
+                userText = textToSend,
+                platformId = platform.id,
+                platformName = platform.name
+            ).await()
+
+            if (!tracked) {
+                webSendInFlight = false
+                return@launch
+            }
+
+            app.setContextPending(
+                text = textToSend,
+                targetDomain = hostOf(platform.url),
+                inputSelector = platform.inputSelector,
+                sendSelector = platform.sendSelector,
+                sendWithEnter = platform.sendWithEnter
+            )
         }
     }
 
@@ -426,57 +521,80 @@ fun ChatScreen(
                 modifier = Modifier.weight(1f)
             ) {
                 if (selectedWebPlatformId != null) {
-                    WebPlaceholderView(
-                        platformName = selectedWebPlatformName ?: "منصة ويب",
+                    val statusLabel = when {
+                        !isChatGptPlatform -> "هذه المنصة قيد التطوير — قريبًا"
+                        webRuntimeMissing -> "⚠️ تعذر تهيئة محرك الويب"
+                        webLoadError != null -> "⚠️ ${webLoadError}"
+                        webPageLoading -> "جاري تجهيز الصفحة..."
+                        webSendInFlight -> "بانتظار الرد..."
+                        else -> "جاهز"
+                    }
+
+                    Text(
+                        text = "${selectedPlatform?.iconEmoji ?: "🌐"} ${selectedPlatform?.name.orEmpty()} — $statusLabel",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+
+                    if (isChatGptPlatform && selectedPlatform != null) {
+                        HiddenWebEngineHost(
+                            platform = selectedPlatform,
+                            app = app,
+                            onLoadingChange = { webPageLoading = it },
+                            onError = { webLoadError = it },
+                            onRuntimeMissing = { webRuntimeMissing = true }
+                        )
+                    }
+                }
+
+                if (branchContextMessageCount > 0) {
+                    BranchContextCard(
+                        sourceTitle = branchSourceTitle ?: "المحادثة الأصلية",
+                        contextCount = branchContextMessageCount
+                    )
+                }
+
+                if (visibleMessages.isEmpty() && !isLoading) {
+                    EmptyChatView(
                         modifier = Modifier.weight(1f)
                     )
                 } else {
-                    if (branchContextMessageCount > 0) {
-                        BranchContextCard(
-                            sourceTitle = branchSourceTitle ?: "المحادثة الأصلية",
-                            contextCount = branchContextMessageCount
-                        )
-                    }
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(
+                            12.dp,
+                            16.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(
+                            visibleMessages,
+                            key = { it.id }
+                        ) { msg ->
+                            MessageBubble(
+                                message = msg,
+                                onCopy = {
+                                    copyToClipboard(msg.content)
+                                },
+                                onSaveMemory = {
+                                    memoryMessage = msg
+                                },
+                                onBranch = {
+                                    viewModel.branchFromMessage(msg.id)
+                                },
+                                branchEnabled = !isLoading
+                            )
+                        }
 
-                    if (visibleMessages.isEmpty() && !isLoading) {
-                        EmptyChatView(
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                            contentPadding = PaddingValues(
-                                12.dp,
-                                16.dp
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(
-                                visibleMessages,
-                                key = { it.id }
-                            ) { msg ->
-                                MessageBubble(
-                                    message = msg,
-                                    onCopy = {
-                                        copyToClipboard(msg.content)
-                                    },
-                                    onSaveMemory = {
-                                        memoryMessage = msg
-                                    },
-                                    onBranch = {
-                                        viewModel.branchFromMessage(msg.id)
-                                    },
-                                    branchEnabled = !isLoading
-                                )
-                            }
-
-                            if (isLoading) {
-                                item("thinking") {
-                                    ThinkingBubble()
-                                }
+                        if (isLoading) {
+                            item("thinking") {
+                                ThinkingBubble()
                             }
                         }
                     }
@@ -506,7 +624,7 @@ fun ChatScreen(
                 isEnhanced = isEnhanced,
                 isEnhancing = isEnhancing,
                 hasIdentity = hasIdentity,
-                sendDisabledExternally = selectedWebPlatformId != null,
+                sendDisabledExternally = sendDisabledExternally,
                 onValueChange = { tfv ->
                     if (isEnhanced) {
                         enhancedInput = tfv
@@ -527,7 +645,9 @@ fun ChatScreen(
                     showWebImportDialog = true
                 },
                 onRemoveImage = viewModel::clearSelectedImage,
-                onSend = ::send,
+                onSend = {
+                    if (selectedWebPlatformId != null) sendWebMessage() else send()
+                },
                 onEnhance = {
                     viewModel.enhanceUserQuery(userInput.text)
                 },
@@ -1081,7 +1201,111 @@ fun ChatScreen(
     }
 }
 
-/* ----------------------------- Provider selector (1.ب.2) ----------------------------- */
+/* ----------------------------- 1.ب.3: محرك الويب المخفي ----------------------------- */
+
+@Composable
+private fun HiddenWebEngineHost(
+    platform: WebPlatform,
+    app: AichatApp,
+    onLoadingChange: (Boolean) -> Unit,
+    onError: (String?) -> Unit,
+    onRuntimeMissing: () -> Unit
+) {
+    val runtime = remember { app.getOrCreateGeckoRuntime() }
+
+    if (runtime == null) {
+        LaunchedEffect(Unit) { onRuntimeMissing() }
+        return
+    }
+
+    val sessionKey = platform.id
+    val session = remember(sessionKey) { GeckoSessionManager.getOrCreate(sessionKey) }
+
+    DisposableEffect(session, sessionKey) {
+        onLoadingChange(!session.isOpen)
+
+        session.progressDelegate = object : GeckoSession.ProgressDelegate {
+            override fun onPageStart(session: GeckoSession, url: String) {
+                onLoadingChange(true)
+                onError(null)
+            }
+
+            override fun onProgressChange(session: GeckoSession, progress: Int) {}
+
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
+                onLoadingChange(false)
+            }
+        }
+
+        session.navigationDelegate = object : GeckoSession.NavigationDelegate {
+            override fun onLoadRequest(
+                session: GeckoSession,
+                request: GeckoSession.NavigationDelegate.LoadRequest
+            ): GeckoResult<AllowOrDeny>? {
+                val uri = Uri.parse(request.uri)
+                val scheme = uri.scheme?.lowercase(Locale.ROOT)
+
+                if (scheme == "https" || scheme == "http") {
+                    if ((uri.fragment ?: "").startsWith("aichat-capture-")) {
+                        return GeckoResult.deny()
+                    }
+                }
+
+                return if (scheme in listOf("http", "https", "about", "blob", "data")) {
+                    GeckoResult.allow()
+                } else {
+                    GeckoResult.deny()
+                }
+            }
+
+            override fun onLoadError(
+                session: GeckoSession,
+                uri: String?,
+                error: WebRequestError
+            ): GeckoResult<String>? {
+                onLoadingChange(false)
+                onError("تعذر تحميل صفحة المنصة")
+                return null
+            }
+        }
+
+        onDispose {
+            runCatching { session.setActive(false) }
+            runCatching { session.progressDelegate = null }
+            runCatching { session.navigationDelegate = null }
+        }
+    }
+
+    Box(modifier = Modifier.size(1.dp)) {
+        key(sessionKey) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    GeckoView(ctx).apply {
+                        setSession(session)
+
+                        if (!session.isOpen) {
+                            session.open(runtime)
+                            session.setActive(true)
+                            session.loadUri(platform.url)
+                        } else {
+                            session.setActive(true)
+                        }
+                    }
+                },
+                update = { view ->
+                    runCatching { view.setSession(session) }
+                    runCatching { if (session.isOpen) session.setActive(true) }
+                }
+            )
+        }
+    }
+}
+
+private fun hostOf(url: String): String =
+    runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")
+
+/* ----------------------------- Provider selector (1.ب.2 / 1.ب.3) ----------------------------- */
 
 @Composable
 private fun ProviderSelectorRow(
@@ -1113,49 +1337,21 @@ private fun ProviderSelectorRow(
         )
 
         enabledWebPlatforms.forEach { platform ->
+            val kind = WebSendCoordinator.classifyHost(hostOf(platform.url))
+            val usable = kind == WebSendCoordinator.WebKind.CHATGPT
+
             FilterChip(
                 selected = selectedWebPlatformId == platform.id,
                 onClick = {
-                    onSelectWebPlatform(platform.id)
+                    if (usable) onSelectWebPlatform(platform.id)
                 },
+                enabled = usable,
                 label = {
-                    Text("${platform.iconEmoji} ${platform.name}")
+                    Text(
+                        "${platform.iconEmoji} ${platform.name}" +
+                            if (!usable) " · قريبًا" else ""
+                    )
                 }
-            )
-        }
-    }
-}
-
-@Composable
-private fun WebPlaceholderView(
-    platformName: String,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                "🌐",
-                style = MaterialTheme.typography.displaySmall
-            )
-
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                "وضع الويب: $platformName",
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Spacer(Modifier.height(6.dp))
-
-            Text(
-                "قريبًا سيتم تنفيذ الإرسال الفعلي هنا",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
