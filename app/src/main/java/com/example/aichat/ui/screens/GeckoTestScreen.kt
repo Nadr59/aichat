@@ -106,6 +106,7 @@ import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
 import com.example.aichat.repository.WebPlatformRepository
+import com.example.aichat.repository.WebSendCoordinator
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
@@ -117,7 +118,6 @@ import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
-import java.util.Locale
 
 /**
  * GeckoTestScreen (Tabs + GeckoView + SendBar) +:
@@ -133,6 +133,10 @@ import java.util.Locale
  * - التنقل بين المحادثات واختيارها يتم الآن عبر واجهة عامة في ChatViewModel
  *   (currentWebConversationId / openWebConversation / clearWebConversationSelection)
  *   بدل الكتابة المباشرة إلى MutableStateFlow عبر Reflection.
+ *
+ * ✅ خطوة 1.ب.1: منطق بناء contextBlock و classifyHost/buildFinalTextForPlatform
+ *   استُخرج إلى WebSendCoordinator (repository) دون أي تغيير سلوكي، تمهيدًا
+ *   لإعادة استخدامه من مكوّن GeckoView مخفي مستقبلاً داخل ChatScreen.
  */
 @Composable
 fun GeckoTestScreen(
@@ -289,7 +293,7 @@ fun GeckoTestScreen(
     fun targetDomainStable(): String =
         if (platform.url.isNotBlank()) hostOrEmptyFrom(platform.url) else hostOrEmptyFrom(currentUrl)
 
-    fun webKind(): WebKind = classifyHost(targetDomainStable())
+    fun webKind(): WebSendCoordinator.WebKind = WebSendCoordinator.classifyHost(targetDomainStable())
 
     // ✅ مساحة عمل مستقلة لكل منصة على حدة:
     fun webWorkspaceScopeKey(): String = "web:global"
@@ -471,32 +475,14 @@ fun GeckoTestScreen(
                 return@LaunchedEffect
             }
 
-            val contextBlock = buildString {
-                if (webAgentPrompt.isNotBlank()) {
-                    appendLine("AGENT_PERSONA:")
-                    appendLine(webAgentPrompt.trim())
-                    appendLine()
-                }
+            val contextBlock = WebSendCoordinator.buildContextBlock(
+                agentPrompt = webAgentPrompt,
+                handoffSummary = handoff.summary,
+                accuracyPrompt = if (accuracyEnabled) SystemPrompt.DEFAULT_ACCURACY_PROMPT else null,
+                extraNotes = aiSettings.customSystemInstruction
+            )
 
-                appendLine("WEB_HANDOFF_SUMMARY:")
-                appendLine(handoff.summary.trim())
-                appendLine()
-
-                if (accuracyEnabled) {
-                    appendLine("ACCURACY_POLICY:")
-                    appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-                    appendLine()
-                }
-
-                val notes = aiSettings.customSystemInstruction.trim()
-                if (notes.isNotBlank()) {
-                    appendLine("EXTRA_NOTES:")
-                    appendLine(notes)
-                    appendLine()
-                }
-            }.trim()
-
-            val finalText = buildFinalTextForPlatform(
+            val finalText = WebSendCoordinator.buildFinalTextForPlatform(
                 kind = webKind(),
                 contextBlock = contextBlock,
                 question = continuationQuestion
@@ -508,8 +494,8 @@ fun GeckoTestScreen(
                 text = finalText,
                 targetDomain = targetDomainStable(),
                 inputSelector = platform.inputSelector,
-                sendSelector = if (kind == WebKind.ARENA) "" else platform.sendSelector,
-                sendWithEnter = if (kind == WebKind.ARENA) false else platform.sendWithEnter
+                sendSelector = if (kind == WebSendCoordinator.WebKind.ARENA) "" else platform.sendSelector,
+                sendWithEnter = if (kind == WebSendCoordinator.WebKind.ARENA) false else platform.sendWithEnter
             )
 
             Toast.makeText(
@@ -963,40 +949,22 @@ fun GeckoTestScreen(
                             val includeAccuracy = accuracyEnabled
                             val kind = webKind()
 
-                            val contextBlock = buildString {
-                                if (webAgentPrompt.isNotBlank()) {
-                                    appendLine("AGENT_PERSONA:")
-                                    appendLine(webAgentPrompt.trim())
-                                    appendLine()
-                                }
+                            val contextBlock = WebSendCoordinator.buildContextBlock(
+                                agentPrompt = webAgentPrompt,
+                                workspaceSummary = workspaceSummary,
+                                accuracyPrompt = if (includeAccuracy) SystemPrompt.DEFAULT_ACCURACY_PROMPT else null,
+                                extraNotes = extraNotes,
+                                memoryXml = memoryXml
+                            )
 
-                                if (workspaceSummary.isNotBlank()) {
-                                    appendLine("WORKSPACE_SUMMARY:")
-                                    appendLine(workspaceSummary)
-                                    appendLine()
-                                }
+                            val finalText = WebSendCoordinator.buildFinalTextForPlatform(
+                                kind = kind,
+                                contextBlock = contextBlock,
+                                question = question
+                            )
 
-                                if (includeAccuracy) {
-                                    appendLine("ACCURACY_POLICY:")
-                                    appendLine(SystemPrompt.DEFAULT_ACCURACY_PROMPT.trim())
-                                    appendLine()
-                                }
-                                if (extraNotes.isNotBlank()) {
-                                    appendLine("EXTRA_NOTES:")
-                                    appendLine(extraNotes)
-                                    appendLine()
-                                }
-                                if (memoryXml.isNotBlank()) {
-                                    appendLine("SHARED_MEMORIES_XML:")
-                                    appendLine(memoryXml)
-                                    appendLine()
-                                }
-                            }.trim()
-
-                            val finalText = buildFinalTextForPlatform(kind = kind, contextBlock = contextBlock, question = question)
-
-                            val sendWithEnterFinal = if (kind == WebKind.ARENA) false else platform.sendWithEnter
-                            val sendSelectorFinal = if (kind == WebKind.ARENA) "" else platform.sendSelector
+                            val sendWithEnterFinal = if (kind == WebSendCoordinator.WebKind.ARENA) false else platform.sendWithEnter
+                            val sendSelectorFinal = if (kind == WebSendCoordinator.WebKind.ARENA) "" else platform.sendSelector
 
                             app.setContextPending(
                                 text = finalText,
@@ -1817,40 +1785,6 @@ private fun WebSendBar(
                     }
                 }
             }
-        }
-    }
-}
-
-/* ============================ Context formatting ============================ */
-
-private enum class WebKind { CHATGPT, VENICE, ARENA, OTHER }
-
-private const val AICHAT_CTX_BEGIN = "<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>"
-private const val AICHAT_CTX_END = "<<<AICHAT_HIDDEN_CONTEXT_END>>>"
-
-private fun classifyHost(host: String): WebKind {
-    val h = host.lowercase(Locale.ROOT)
-    return when {
-        h.contains("chatgpt.com") || h.contains("openai.com") -> WebKind.CHATGPT
-        h.contains("venice.ai") -> WebKind.VENICE
-        h.contains("lmsys") || h.contains("arena") -> WebKind.ARENA
-        else -> WebKind.OTHER
-    }
-}
-
-private fun buildFinalTextForPlatform(kind: WebKind, contextBlock: String, question: String): String {
-    val ctx = contextBlock.trim()
-    if (ctx.isBlank()) return question
-
-    return when (kind) {
-        WebKind.ARENA -> {
-            "### Context (visible)\n$ctx\n### End Context\n\n$question"
-        }
-        WebKind.CHATGPT, WebKind.VENICE -> {
-            "$AICHAT_CTX_BEGIN\n$ctx\n$AICHAT_CTX_END\n\n$question"
-        }
-        WebKind.OTHER -> {
-            "$ctx\n\n$question"
         }
     }
 }
