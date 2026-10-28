@@ -117,6 +117,7 @@ fun MainNavigation(app: AichatApp) {
                     ChatScreen(
                         viewModel = chatViewModel,
                         agentsViewModel = agentsViewModel,
+                        webPlatformsViewModel = webPlatformsViewModel,
                         settings = settings,
                         onBack = { navController.popBackStack() },
                         onOpenAgents = { navController.navigate("agents") }
