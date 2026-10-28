@@ -36,9 +36,11 @@ import androidx.core.content.FileProvider
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.QueryStyle
+import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.ChatViewModel
+import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -50,6 +52,7 @@ import java.util.Locale
 fun ChatScreen(
     viewModel: ChatViewModel,
     agentsViewModel: AgentsViewModel,
+    webPlatformsViewModel: WebPlatformsViewModel,
     settings: AiSettings,
     onBack: () -> Unit,
     onOpenAgents: () -> Unit
@@ -74,6 +77,20 @@ fun ChatScreen(
     val currentAgentName = remember(currentAgentId, agents) {
         currentAgentId?.let { id ->
             agents.firstOrNull { it.id == id }?.name
+        }
+    }
+
+    // ── Provider selector (1.ب.2): API أو منصة ويب (placeholder فقط) ──
+    val webPlatforms by webPlatformsViewModel.platforms.collectAsState()
+    val enabledWebPlatforms = remember(webPlatforms) {
+        webPlatforms.filter { it.isEnabled }
+    }
+
+    var selectedWebPlatformId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val selectedWebPlatformName = remember(selectedWebPlatformId, enabledWebPlatforms) {
+        selectedWebPlatformId?.let { id ->
+            enabledWebPlatforms.firstOrNull { it.id == id }?.name
         }
     }
 
@@ -398,54 +415,68 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            ProviderSelectorRow(
+                enabledWebPlatforms = enabledWebPlatforms,
+                selectedWebPlatformId = selectedWebPlatformId,
+                onSelectApi = { selectedWebPlatformId = null },
+                onSelectWebPlatform = { id -> selectedWebPlatformId = id }
+            )
+
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                if (branchContextMessageCount > 0) {
-                    BranchContextCard(
-                        sourceTitle = branchSourceTitle ?: "المحادثة الأصلية",
-                        contextCount = branchContextMessageCount
-                    )
-                }
-
-                if (visibleMessages.isEmpty() && !isLoading) {
-                    EmptyChatView(
+                if (selectedWebPlatformId != null) {
+                    WebPlaceholderView(
+                        platformName = selectedWebPlatformName ?: "منصة ويب",
                         modifier = Modifier.weight(1f)
                     )
                 } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentPadding = PaddingValues(
-                            12.dp,
-                            16.dp
-                        ),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        items(
-                            visibleMessages,
-                            key = { it.id }
-                        ) { msg ->
-                            MessageBubble(
-                                message = msg,
-                                onCopy = {
-                                    copyToClipboard(msg.content)
-                                },
-                                onSaveMemory = {
-                                    memoryMessage = msg
-                                },
-                                onBranch = {
-                                    viewModel.branchFromMessage(msg.id)
-                                },
-                                branchEnabled = !isLoading
-                            )
-                        }
+                    if (branchContextMessageCount > 0) {
+                        BranchContextCard(
+                            sourceTitle = branchSourceTitle ?: "المحادثة الأصلية",
+                            contextCount = branchContextMessageCount
+                        )
+                    }
 
-                        if (isLoading) {
-                            item("thinking") {
-                                ThinkingBubble()
+                    if (visibleMessages.isEmpty() && !isLoading) {
+                        EmptyChatView(
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentPadding = PaddingValues(
+                                12.dp,
+                                16.dp
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(
+                                visibleMessages,
+                                key = { it.id }
+                            ) { msg ->
+                                MessageBubble(
+                                    message = msg,
+                                    onCopy = {
+                                        copyToClipboard(msg.content)
+                                    },
+                                    onSaveMemory = {
+                                        memoryMessage = msg
+                                    },
+                                    onBranch = {
+                                        viewModel.branchFromMessage(msg.id)
+                                    },
+                                    branchEnabled = !isLoading
+                                )
+                            }
+
+                            if (isLoading) {
+                                item("thinking") {
+                                    ThinkingBubble()
+                                }
                             }
                         }
                     }
@@ -475,6 +506,7 @@ fun ChatScreen(
                 isEnhanced = isEnhanced,
                 isEnhancing = isEnhancing,
                 hasIdentity = hasIdentity,
+                sendDisabledExternally = selectedWebPlatformId != null,
                 onValueChange = { tfv ->
                     if (isEnhanced) {
                         enhancedInput = tfv
@@ -1049,6 +1081,86 @@ fun ChatScreen(
     }
 }
 
+/* ----------------------------- Provider selector (1.ب.2) ----------------------------- */
+
+@Composable
+private fun ProviderSelectorRow(
+    enabledWebPlatforms: List<WebPlatform>,
+    selectedWebPlatformId: String?,
+    onSelectApi: () -> Unit,
+    onSelectWebPlatform: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FilterChip(
+            selected = selectedWebPlatformId == null,
+            onClick = onSelectApi,
+            label = {
+                Text("API")
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.SmartToy,
+                    contentDescription = null
+                )
+            }
+        )
+
+        enabledWebPlatforms.forEach { platform ->
+            FilterChip(
+                selected = selectedWebPlatformId == platform.id,
+                onClick = {
+                    onSelectWebPlatform(platform.id)
+                },
+                label = {
+                    Text("${platform.iconEmoji} ${platform.name}")
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun WebPlaceholderView(
+    platformName: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "🌐",
+                style = MaterialTheme.typography.displaySmall
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                "وضع الويب: $platformName",
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                "قريبًا سيتم تنفيذ الإرسال الفعلي هنا",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
 /* ----------------------------- Tree UI helpers ----------------------------- */
 
 @Composable
@@ -1374,6 +1486,7 @@ private fun InputBar(
     isEnhanced: Boolean,
     isEnhancing: Boolean,
     hasIdentity: Boolean,
+    sendDisabledExternally: Boolean,
     onValueChange: (TextFieldValue) -> Unit,
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
@@ -1443,14 +1556,16 @@ private fun InputBar(
                 ),
                 keyboardActions = KeyboardActions(
                     onSend = {
-                        onSend()
+                        if (!sendDisabledExternally) {
+                            onSend()
+                        }
                     }
                 )
             )
 
             IconButton(
                 onClick = onSend,
-                enabled = !isLoading && displayedText.isNotBlank()
+                enabled = !isLoading && displayedText.isNotBlank() && !sendDisabledExternally
             ) {
                 Icon(
                     Icons.Filled.Send,
