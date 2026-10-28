@@ -241,9 +241,11 @@ fun ChatScreen(
         enabledWebPlatforms.firstOrNull { it.id == selectedWebPlatformId }
     }
 
-    val isChatGptPlatform = remember(selectedPlatform?.id, selectedPlatform?.url) {
+    // ── 1.ب.3-ext: توسيع المنصات القابلة للإرسال التلقائي إلى ChatGPT + Venice ──
+    val isAutoSendPlatform = remember(selectedPlatform?.id, selectedPlatform?.url) {
         selectedPlatform?.let {
-            WebSendCoordinator.classifyHost(hostOf(it.url)) == WebSendCoordinator.WebKind.CHATGPT
+            val kind = WebSendCoordinator.classifyHost(hostOf(it.url))
+            kind == WebSendCoordinator.WebKind.CHATGPT || kind == WebSendCoordinator.WebKind.VENICE
         } ?: false
     }
 
@@ -253,7 +255,7 @@ fun ChatScreen(
     var webRuntimeMissing by remember(selectedWebPlatformId) { mutableStateOf(false) }
 
     val sendDisabledExternally = selectedWebPlatformId != null && (
-        !isChatGptPlatform || webPageLoading || webSendInFlight || webRuntimeMissing
+        !isAutoSendPlatform || webPageLoading || webSendInFlight || webRuntimeMissing
     )
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -282,10 +284,10 @@ fun ChatScreen(
     }
 
     // ── 1.ب.3: تسجيل التقاط ردود منصة الويب الحالية ──
-    DisposableEffect(selectedWebPlatformId, isChatGptPlatform) {
+    DisposableEffect(selectedWebPlatformId, isAutoSendPlatform) {
         val platform = selectedPlatform
 
-        if (platform != null && isChatGptPlatform && platform.memoryEnabled) {
+        if (platform != null && isAutoSendPlatform && platform.memoryEnabled) {
             app.onAiResponseCaptured = { source, text ->
                 webSendInFlight = false
                 viewModel.onWebAiResponse(
@@ -370,10 +372,10 @@ fun ChatScreen(
         }
     }
 
-    // ── 1.ب.3: إرسال فعلي إلى منصة الويب المختارة (ChatGPT فقط في هذه الخطوة) ──
+    // ── 1.ب.3-ext: إرسال فعلي إلى منصة الويب المختارة (ChatGPT + Venice) ──
     fun sendWebMessage() {
         val platform = selectedPlatform ?: return
-        if (!isChatGptPlatform) return
+        if (!isAutoSendPlatform) return
         if (webPageLoading || webSendInFlight || webRuntimeMissing) return
 
         val textToSend = (
@@ -522,7 +524,7 @@ fun ChatScreen(
             ) {
                 if (selectedWebPlatformId != null) {
                     val statusLabel = when {
-                        !isChatGptPlatform -> "هذه المنصة قيد التطوير — قريبًا"
+                        !isAutoSendPlatform -> "هذه المنصة قيد التطوير — قريبًا"
                         webRuntimeMissing -> "⚠️ تعذر تهيئة محرك الويب"
                         webLoadError != null -> "⚠️ ${webLoadError}"
                         webPageLoading -> "جاري تجهيز الصفحة..."
@@ -539,7 +541,7 @@ fun ChatScreen(
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                     )
 
-                    if (isChatGptPlatform && selectedPlatform != null) {
+                    if (isAutoSendPlatform && selectedPlatform != null) {
                         HiddenWebEngineHost(
                             platform = selectedPlatform,
                             app = app,
@@ -1338,7 +1340,8 @@ private fun ProviderSelectorRow(
 
         enabledWebPlatforms.forEach { platform ->
             val kind = WebSendCoordinator.classifyHost(hostOf(platform.url))
-            val usable = kind == WebSendCoordinator.WebKind.CHATGPT
+            val usable = kind == WebSendCoordinator.WebKind.CHATGPT ||
+                kind == WebSendCoordinator.WebKind.VENICE
 
             FilterChip(
                 selected = selectedWebPlatformId == platform.id,
