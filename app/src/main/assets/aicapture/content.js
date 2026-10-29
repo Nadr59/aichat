@@ -1,7 +1,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.47";
+var VERSION = "1.0.48";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -189,6 +189,36 @@ function uniquePush(arr, el) {
   if (el && arr.indexOf(el) === -1) arr.push(el);
 }
 
+// --- [DIAG جديد] وصف مختصر وآمن لعنصر DOM، مقيّد بالاستخدام التشخيصي فقط.
+function describeElementForDiag(el) {
+  if (!el) return "null";
+  try {
+    var tag = String(el.tagName || "").toLowerCase();
+    var id = el.id ? "#" + el.id : "";
+    var cls = el.className && typeof el.className === "string"
+      ? "." + el.className.trim().replace(/\s+/g, ".")
+      : "";
+    var aria = el.getAttribute ? (el.getAttribute("aria-label") || "") : "";
+    var type = el.getAttribute ? (el.getAttribute("type") || "") : "";
+    var ph = el.getAttribute ? (el.getAttribute("placeholder") || "") : "";
+    var rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    var rectStr = rect
+      ? ("w=" + Math.round(rect.width) + " h=" + Math.round(rect.height) +
+         " top=" + Math.round(rect.top))
+      : "no-rect";
+    var outer = "";
+    try {
+      outer = String(el.outerHTML || "").substring(0, 200);
+    } catch (_) {}
+
+    return tag + id + cls +
+      " type=" + type + " aria=" + aria + " placeholder=" + ph +
+      " rect(" + rectStr + ") outerHTML~=" + outer;
+  } catch (e) {
+    return "describe_failed: " + e;
+  }
+}
+
 // ============================================================
 // Input finders
 // ============================================================
@@ -302,6 +332,24 @@ function findInput(preferSelector) {
     }
   }
 
+  // --- [DIAG جديد] مقيّد بـ Venice فقط: اطبع كل المرشحين ونتيجة كل منهم.
+  if (CURRENT_PLATFORM.id === "venice") {
+    try {
+      log(
+        "🔬 DIAG findInput: candidates=" + candidates.length +
+        " bestScore=" + bestScore
+      );
+      for (var k = 0; k < candidates.length; k++) {
+        log(
+          "🔬 DIAG input candidate[" + k + "] score=" + scoreInput(candidates[k]) +
+          " => " + describeElementForDiag(candidates[k])
+        );
+      }
+    } catch (eDiagInput) {
+      log("🔬 DIAG findInput failed: " + eDiagInput);
+    }
+  }
+
   return best || candidates[0] || null;
 }
 
@@ -393,6 +441,29 @@ function findSendButton(preferSelector) {
   }
 
   selectors = selectors.concat(DEFAULT_SEND_SELECTORS);
+
+  // --- [DIAG جديد] مقيّد بـ Venice: اطبع كل المطابقين لكل selector منفصلين.
+  if (CURRENT_PLATFORM.id === "venice") {
+    try {
+      for (var s = 0; s < selectors.length; s++) {
+        var allMatches = document.querySelectorAll(selectors[s]);
+        if (allMatches.length > 0) {
+          log(
+            "🔬 DIAG send selector '" + selectors[s] + "' matches=" +
+            allMatches.length
+          );
+          for (var m = 0; m < Math.min(allMatches.length, 5); m++) {
+            log(
+              "🔬 DIAG   match[" + m + "] => " +
+              describeElementForDiag(allMatches[m])
+            );
+          }
+        }
+      }
+    } catch (eDiagSend) {
+      log("🔬 DIAG findSendButton scan failed: " + eDiagSend);
+    }
+  }
 
   for (var i = 0; i < selectors.length; i++) {
     try {
@@ -806,9 +877,6 @@ var captureFinished = false;
 var lastCandidate = "";
 var stableSince = 0;
 var captureStartedAt = 0;
-
-// --- [DIAG جديد] عداد دورات الاستطلاع الفارغة، يُستخدم فقط لتسجيل
-// سجل تشخيصي دوري بدل الصمت التام أثناء الانتظار. لا يغيّر أي سلوك.
 var diagEmptyPollCount = 0;
 
 var lastSentResponseSignature = "";
@@ -820,7 +888,7 @@ function startResponseCapture(reason) {
   lastCandidate = "";
   stableSince = 0;
   captureStartedAt = Date.now();
-  diagEmptyPollCount = 0; // [DIAG جديد]
+  diagEmptyPollCount = 0;
   baselineAssistant = getCurrentAssistantText();
 
   log(
@@ -917,8 +985,6 @@ function watchForResponse() {
   }
 
   if (!current) {
-    // --- [DIAG جديد] بدل الصمت التام: سجل كل 5 دورات فقط لتفادي الإغراق.
-    // مقيّد بمنصة Venice فقط، لا يغيّر أي توقيت أو منطق فعلي.
     if (CURRENT_PLATFORM.id === "venice") {
       diagEmptyPollCount++;
       if (diagEmptyPollCount === 1 || diagEmptyPollCount % 5 === 0) {
@@ -1666,14 +1732,21 @@ function sendWithRetry(input, opts, contextId, injectedText) {
     var btn = findSendButton(String(opts.sendSelector || "").trim());
 
     if (btn && canClick(btn)) {
+      // --- [DIAG جديد] مقيّد بـ Venice: صف الزر فعليًا قبل النقر عليه.
+      if (CURRENT_PLATFORM.id === "venice") {
+        try {
+          log("🔬 DIAG about to click button => " + describeElementForDiag(btn));
+        } catch (eDiagBtn) {
+          log("🔬 DIAG describe button failed: " + eDiagBtn);
+        }
+      }
+
       try {
         btn.click();
         sendContextWritten(true, contextId, "button_clicked", "ok");
         sendContextConsumed(contextId);
         scheduleSanitizeAfterSend(injectedText);
 
-        // --- [DIAG جديد] فحص بعد 3 ثوانٍ: هل تفرّغ حقل الإدخال فعليًا؟
-        // مقيّد بـ Venice فقط، لا يغيّر أي سلوك إرسال/التقاط حالي.
         if (CURRENT_PLATFORM.id === "venice") {
           setTimeout(function () {
             try {
@@ -1768,6 +1841,15 @@ function injectAndSend(opts) {
     delayMs,
     function (input) {
       try {
+        // --- [DIAG جديد] مقيّد بـ Venice: صف عنصر الإدخال فعليًا بعد إيجاده.
+        if (CURRENT_PLATFORM.id === "venice") {
+          try {
+            log("🔬 DIAG chosen input => " + describeElementForDiag(input));
+          } catch (eDiagChosen) {
+            log("🔬 DIAG describe chosen input failed: " + eDiagChosen);
+          }
+        }
+
         if (!injectText(input, text)) {
           return sendContextWritten(
             false,
