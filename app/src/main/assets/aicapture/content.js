@@ -1,7 +1,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.48";
+var VERSION = "1.0.49";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -189,7 +189,6 @@ function uniquePush(arr, el) {
   if (el && arr.indexOf(el) === -1) arr.push(el);
 }
 
-// --- [DIAG جديد] وصف مختصر وآمن لعنصر DOM، مقيّد بالاستخدام التشخيصي فقط.
 function describeElementForDiag(el) {
   if (!el) return "null";
   try {
@@ -332,7 +331,6 @@ function findInput(preferSelector) {
     }
   }
 
-  // --- [DIAG جديد] مقيّد بـ Venice فقط: اطبع كل المرشحين ونتيجة كل منهم.
   if (CURRENT_PLATFORM.id === "venice") {
     try {
       log(
@@ -433,7 +431,8 @@ var DEFAULT_SEND_SELECTORS = [
   "button[data-testid*='send' i]"
 ];
 
-function findSendButton(preferSelector) {
+// الدالة القديمة (بحث عام في كامل الصفحة) — أُبقيت كحل احتياطي أخير فقط.
+function findSendButtonGlobal(preferSelector) {
   var selectors = [];
 
   if (preferSelector && preferSelector.trim()) {
@@ -441,29 +440,6 @@ function findSendButton(preferSelector) {
   }
 
   selectors = selectors.concat(DEFAULT_SEND_SELECTORS);
-
-  // --- [DIAG جديد] مقيّد بـ Venice: اطبع كل المطابقين لكل selector منفصلين.
-  if (CURRENT_PLATFORM.id === "venice") {
-    try {
-      for (var s = 0; s < selectors.length; s++) {
-        var allMatches = document.querySelectorAll(selectors[s]);
-        if (allMatches.length > 0) {
-          log(
-            "🔬 DIAG send selector '" + selectors[s] + "' matches=" +
-            allMatches.length
-          );
-          for (var m = 0; m < Math.min(allMatches.length, 5); m++) {
-            log(
-              "🔬 DIAG   match[" + m + "] => " +
-              describeElementForDiag(allMatches[m])
-            );
-          }
-        }
-      }
-    } catch (eDiagSend) {
-      log("🔬 DIAG findSendButton scan failed: " + eDiagSend);
-    }
-  }
 
   for (var i = 0; i < selectors.length; i++) {
     try {
@@ -473,6 +449,89 @@ function findSendButton(preferSelector) {
   }
 
   return null;
+}
+
+// --- [إصلاح جذري] بحث محصور بأقرب حاوية مشتركة مع حقل الإدخال الفعلي،
+// لتفادي اختيار زر غير مرتبط فعليًا بصندوق المحادثة الذي حُقن فيه النص
+// (مشكلة مؤكدة على Venice: عدة صناديق محادثة/أزرار إرسال موجودة بالصفحة
+// في آن واحد، والبحث العام كان يختار أول زر في ترتيب DOM بلا علاقة بالمدخل).
+function findSendButtonNear(input, preferSelector) {
+  var selectors = [];
+
+  if (preferSelector && preferSelector.trim()) {
+    selectors.push(preferSelector);
+  }
+
+  selectors = selectors.concat(DEFAULT_SEND_SELECTORS);
+
+  var scope = null;
+
+  try {
+    scope = input && input.closest ? input.closest("form") : null;
+  } catch (_) {}
+
+  if (!scope && input) {
+    var node = input;
+    var hops = 0;
+
+    while (node && node.parentElement && hops < 8) {
+      node = node.parentElement;
+      hops++;
+
+      var foundHere = false;
+
+      for (var s = 0; s < selectors.length; s++) {
+        try {
+          if (node.querySelector(selectors[s])) {
+            foundHere = true;
+            break;
+          }
+        } catch (_) {}
+      }
+
+      if (foundHere) {
+        scope = node;
+        break;
+      }
+    }
+  }
+
+  if (scope) {
+    if (CURRENT_PLATFORM.id === "venice") {
+      try {
+        log("🔬 DIAG findSendButtonNear: scope found => " +
+          describeElementForDiag(scope));
+      } catch (_) {}
+    }
+
+    // تفضيل صريح لزر type=submit داخل النطاق المحلي أولاً.
+    try {
+      var submitBtn = scope.querySelector("button[type='submit']");
+      if (submitBtn) {
+        if (CURRENT_PLATFORM.id === "venice") {
+          log("🔬 DIAG findSendButtonNear: picked local submit button");
+        }
+        return submitBtn;
+      }
+    } catch (_) {}
+
+    for (var i = 0; i < selectors.length; i++) {
+      try {
+        var localBtn = scope.querySelector(selectors[i]);
+        if (localBtn) {
+          if (CURRENT_PLATFORM.id === "venice") {
+            log("🔬 DIAG findSendButtonNear: picked local match via '" +
+              selectors[i] + "'");
+          }
+          return localBtn;
+        }
+      } catch (_) {}
+    }
+  } else if (CURRENT_PLATFORM.id === "venice") {
+    log("🔬 DIAG findSendButtonNear: no local scope found, falling back to global");
+  }
+
+  return findSendButtonGlobal(preferSelector);
 }
 
 function canClick(btn) {
@@ -1729,10 +1788,10 @@ function sendWithRetry(input, opts, contextId, injectedText) {
   function attempt() {
     tries++;
 
-    var btn = findSendButton(String(opts.sendSelector || "").trim());
+    // --- [إصلاح جذري] استخدام البحث المحصور بدل العام.
+    var btn = findSendButtonNear(input, String(opts.sendSelector || "").trim());
 
     if (btn && canClick(btn)) {
-      // --- [DIAG جديد] مقيّد بـ Venice: صف الزر فعليًا قبل النقر عليه.
       if (CURRENT_PLATFORM.id === "venice") {
         try {
           log("🔬 DIAG about to click button => " + describeElementForDiag(btn));
@@ -1841,7 +1900,6 @@ function injectAndSend(opts) {
     delayMs,
     function (input) {
       try {
-        // --- [DIAG جديد] مقيّد بـ Venice: صف عنصر الإدخال فعليًا بعد إيجاده.
         if (CURRENT_PLATFORM.id === "venice") {
           try {
             log("🔬 DIAG chosen input => " + describeElementForDiag(input));
