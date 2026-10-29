@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -18,6 +19,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -105,6 +108,9 @@ fun ChatScreen(
 
     var showAgentDialog by remember { mutableStateOf(false) }
     var showWebImportDialog by remember { mutableStateOf(false) }
+
+    // ✅ عارض سجلات التشخيص المؤقت
+    var showDebugLogs by remember { mutableStateOf(false) }
 
     // BottomSheet Tree
     var showTreeSheet by remember { mutableStateOf(false) }
@@ -466,6 +472,15 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { showDebugLogs = true }
+                    ) {
+                        Icon(
+                            Icons.Filled.BugReport,
+                            contentDescription = "سجلات التشخيص"
+                        )
+                    }
+
                     IconButton(
                         onClick = { showAgentDialog = true }
                     ) {
@@ -1198,6 +1213,118 @@ fun ChatScreen(
             onConfirm = { url ->
                 viewModel.saveWebPage(url)
                 showWebImportDialog = false
+            }
+        )
+    }
+
+    // ✅ عارض سجلات التشخيص المؤقت
+    if (showDebugLogs) {
+        AlertDialog(
+            onDismissRequest = { showDebugLogs = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.BugReport,
+                        contentDescription = null
+                    )
+
+                    Spacer(Modifier.width(8.dp))
+
+                    Text(
+                        text = "سجلات التشخيص",
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    IconButton(
+                        onClick = { showDebugLogs = false }
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "إغلاق"
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val logs = app.debugLog
+
+                    if (logs.isEmpty()) {
+                        Text(
+                            "لا توجد سجلات حتى الآن.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        SelectionContainer {
+                            Text(
+                                text = logs.joinToString("\n"),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(
+                            Context.CLIPBOARD_SERVICE
+                        ) as ClipboardManager
+
+                        val text = app.debugLog.joinToString("\n")
+
+                        clipboard.setPrimaryClip(
+                            ClipData.newPlainText("AiChat Debug Logs", text)
+                        )
+
+                        Toast.makeText(
+                            context,
+                            if (text.isBlank())
+                                "لا توجد سجلات لنسخها"
+                            else
+                                "تم نسخ السجلات",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                ) {
+                    Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = null
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("نسخ الكل")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            app.debugLog.clear()
+                        }
+                    ) {
+                        Icon(
+                            Icons.Filled.DeleteOutline,
+                            contentDescription = null
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("مسح")
+                    }
+
+                    TextButton(
+                        onClick = { showDebugLogs = false }
+                    ) {
+                        Text("إغلاق")
+                    }
+                }
             }
         )
     }
