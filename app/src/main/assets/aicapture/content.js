@@ -1,7 +1,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.50";
+var VERSION = "1.0.51";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -601,7 +601,7 @@ function sendContextConsumed(contextId) {
 }
 
 // ============================================================
-// [جديد v1.0.50] Venice reload-resume capture state
+// Venice reload-resume capture state
 // ------------------------------------------------------------
 // Venice تُعيد تحميل الصفحة بالكامل بعد إرسال أول رسالة في محادثة جديدة
 // (تنقّل فعلي يهدم أي حلقة انتظار JS قائمة). نخزّن علمًا في sessionStorage
@@ -833,7 +833,17 @@ function extractLatestPlatformResponse() {
 
     t = cleanAssistantResponse(t);
 
-    if (CURRENT_PLATFORM.id === "arena" && isArenaRejectedCandidate(t)) {
+    // --- [إصلاح جذري v1.0.51] تعميم الحارس من Arena-only إلى أي منصة
+    // عدا chatgpt (التي لها فلترة منفصلة). يحمي من التقاط صدى رسالة
+    // المستخدم نفسها كأنه رد (مؤكد حدوثه على Venice حيث تستخدم .prose
+    // لفقاعة المستخدم أيضًا وليس فقط رد المساعد).
+    if (CURRENT_PLATFORM.id !== "chatgpt" && isArenaRejectedCandidate(t)) {
+      if (CURRENT_PLATFORM.id === "venice") {
+        log(
+          "🔬 DIAG extractLatestPlatformResponse: candidate rejected as echo len=" +
+          (t ? t.length : 0)
+        );
+      }
       continue;
     }
 
@@ -916,7 +926,7 @@ function getCurrentAssistantText() {
 }
 
 // ============================================================
-// Injected-prompt / Arena rejection guard
+// Injected-prompt / echo rejection guard
 // ============================================================
 
 var lastInjectedSignature = "";
@@ -950,14 +960,28 @@ function looksLikeInjectedPrompt(text) {
     (Date.now() - lastInjectedAt) < 60000;
 }
 
+// ملاحظة [v1.0.51]: رغم الاسم التاريخي (كانت مخصصة لـ Arena فقط)، هذا
+// الفحص الآن عام ويُستدعى لأي منصة عدا chatgpt. تم أيضًا تحسين دقة
+// المطابقة: الرفض يحدث فقط عند تطابق تام، أو عندما يكون طول النص
+// المُرشَّح قريبًا جدًا من طول النص المحقون (echo حقيقي على الأرجح)،
+// وليس لمجرد احتواء النص الطويل على جزء قصير من النص المحقون بالصدفة
+// (كان هذا يسبب خطر رفض ردود حقيقية طويلة بسبب نصوص محقونة قصيرة جدًا).
 function isArenaRejectedCandidate(text) {
-  if (CURRENT_PLATFORM.id !== "arena") return false;
+  if (CURRENT_PLATFORM.id === "chatgpt") return false;
   if (!text) return false;
   if (looksLikeInjectedPrompt(text)) return true;
 
   if (lastInjectedSignature) {
     var norm = normalizeForMatch(text);
-    if (norm.indexOf(lastInjectedSignature) !== -1) return true;
+
+    if (norm === lastInjectedSignature) return true;
+
+    if (
+      norm.indexOf(lastInjectedSignature) !== -1 &&
+      norm.length <= lastInjectedSignature.length + 15
+    ) {
+      return true;
+    }
   }
 
   return false;
@@ -1012,7 +1036,7 @@ function startArenaCaptureFromWebsite(reason) {
   startResponseCapture("arena_" + reason);
 }
 
-// [جديد v1.0.50] محاولة استئناف الالتقاط لـ Venice بعد إعادة تحميل الصفحة.
+// محاولة استئناف الالتقاط لـ Venice بعد إعادة تحميل الصفحة.
 function tryResumeVeniceCapture() {
   var state = getVeniceCaptureState();
 
@@ -1043,11 +1067,16 @@ function tryResumeVeniceCapture() {
 function finishCapture(answer) {
   if (captureFinished) return;
 
+  // --- [إصلاح جذري v1.0.51] تعميم الحارس من Arena-only إلى أي منصة
+  // عدا chatgpt.
   if (
-    CURRENT_PLATFORM.id === "arena" &&
+    CURRENT_PLATFORM.id !== "chatgpt" &&
     isArenaRejectedCandidate(answer)
   ) {
-    log("⚠️ FinishCapture blocked (Arena rejected candidate)");
+    log(
+      "⚠️ FinishCapture blocked (echo of injected text detected) platform=" +
+      CURRENT_PLATFORM.id
+    );
     lastCandidate = "";
     stableSince = 0;
     setTimeout(watchForResponse, 900);
@@ -1108,11 +1137,19 @@ function watchForResponse() {
 
   var current = getCurrentAssistantText();
 
+  // --- [إصلاح جذري v1.0.51] تعميم الحارس من Arena-only إلى أي منصة
+  // عدا chatgpt.
   if (
-    CURRENT_PLATFORM.id === "arena" &&
+    CURRENT_PLATFORM.id !== "chatgpt" &&
     current &&
     isArenaRejectedCandidate(current)
   ) {
+    if (CURRENT_PLATFORM.id === "venice") {
+      log(
+        "🔬 DIAG watchForResponse: current candidate rejected as echo len=" +
+        current.length
+      );
+    }
     setTimeout(watchForResponse, 900);
     return;
   }
@@ -1862,7 +1899,6 @@ function sendWithRetry(input, opts, contextId, injectedText) {
   function attempt() {
     tries++;
 
-    // --- [إصلاح جذري] استخدام البحث المحصور بدل العام.
     var btn = findSendButtonNear(input, String(opts.sendSelector || "").trim());
 
     if (btn && canClick(btn)) {
