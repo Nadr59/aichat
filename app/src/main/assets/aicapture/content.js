@@ -1,7 +1,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.49";
+var VERSION = "1.0.50";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -601,6 +601,43 @@ function sendContextConsumed(contextId) {
 }
 
 // ============================================================
+// [جديد v1.0.50] Venice reload-resume capture state
+// ------------------------------------------------------------
+// Venice تُعيد تحميل الصفحة بالكامل بعد إرسال أول رسالة في محادثة جديدة
+// (تنقّل فعلي يهدم أي حلقة انتظار JS قائمة). نخزّن علمًا في sessionStorage
+// عند بدء الالتقاط فعليًا، ونحاول استئناف المراقبة تلقائيًا إذا وجدنا هذا
+// العلم عند تحميل content.js من جديد على نفس التبويب/الأصل.
+// محصور بـ Venice فقط، لا يمسّ أي منصة أخرى.
+// ============================================================
+
+var VENICE_CAPTURE_STORAGE_KEY = "aichat_venice_capture_state_v1";
+var VENICE_CAPTURE_MAX_AGE_MS = 90000;
+
+function setVeniceCaptureState(data) {
+  try {
+    sessionStorage.setItem(VENICE_CAPTURE_STORAGE_KEY, JSON.stringify(data));
+  } catch (_) {}
+}
+
+function getVeniceCaptureState() {
+  try {
+    var raw = sessionStorage.getItem(VENICE_CAPTURE_STORAGE_KEY);
+    if (!raw) return null;
+    var parsed = JSON.parse(raw);
+    if (!parsed || !parsed.startedAt) return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearVeniceCaptureState() {
+  try {
+    sessionStorage.removeItem(VENICE_CAPTURE_STORAGE_KEY);
+  } catch (_) {}
+}
+
+// ============================================================
 // Assistant response extraction
 // ============================================================
 
@@ -975,6 +1012,34 @@ function startArenaCaptureFromWebsite(reason) {
   startResponseCapture("arena_" + reason);
 }
 
+// [جديد v1.0.50] محاولة استئناف الالتقاط لـ Venice بعد إعادة تحميل الصفحة.
+function tryResumeVeniceCapture() {
+  var state = getVeniceCaptureState();
+
+  if (!state) {
+    log("🔬 DIAG Venice resume: no stored capture state found on load");
+    return;
+  }
+
+  var age = Date.now() - (state.startedAt || 0);
+
+  if (age > VENICE_CAPTURE_MAX_AGE_MS) {
+    log(
+      "🔬 DIAG Venice resume: stored capture state expired (age=" +
+      age + "ms), clearing"
+    );
+    clearVeniceCaptureState();
+    return;
+  }
+
+  log(
+    "🔬 DIAG Venice resume: resuming capture from sessionStorage after reload (age=" +
+    age + "ms)"
+  );
+
+  startResponseCapture("resumed_after_reload");
+}
+
 function finishCapture(answer) {
   if (captureFinished) return;
 
@@ -1008,6 +1073,11 @@ function finishCapture(answer) {
   ) {
     captureFinished = true;
     captureActive = false;
+
+    if (CURRENT_PLATFORM.id === "venice") {
+      clearVeniceCaptureState();
+    }
+
     log("ℹ️ Duplicate automatic response suppressed");
     return;
   }
@@ -1016,6 +1086,10 @@ function finishCapture(answer) {
   captureActive = false;
   lastSentResponseSignature = signature;
   lastSentResponseAt = now;
+
+  if (CURRENT_PLATFORM.id === "venice") {
+    clearVeniceCaptureState();
+  }
 
   sendToBackground({
     type: "ASSISTANT_RESPONSE",
@@ -1932,6 +2006,14 @@ function injectAndSend(opts) {
 
         startResponseCapture("app_injected_prompt");
 
+        if (CURRENT_PLATFORM.id === "venice") {
+          setVeniceCaptureState({
+            startedAt: Date.now(),
+            contextId: contextId
+          });
+          log("🔬 DIAG Venice resume: capture state stored to sessionStorage");
+        }
+
         sendWithRetry(input, opts, contextId, text);
       } catch (e) {
         sendContextWritten(
@@ -2035,6 +2117,10 @@ browser.runtime.onMessage.addListener(function (message) {
 
 startAutoResponseObserver();
 startArenaSendObserver();
+
+if (CURRENT_PLATFORM.id === "venice") {
+  tryResumeVeniceCapture();
+}
 
 // ============================================================
 // READY
