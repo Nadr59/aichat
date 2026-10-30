@@ -2,7 +2,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.52";
+var VERSION = "1.0.53";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -610,12 +610,8 @@ function sendContextConsumed(contextId) {
 // العلم عند تحميل content.js من جديد على نفس التبويب/الأصل.
 // محصور بـ Venice فقط، لا يمسّ أي منصة أخرى.
 //
-// [إصلاح جذري v1.0.52] الحالة المخزَّنة تتضمن الآن أيضًا توقيع النص
-// المحقون (injectedSignature) ووقته (injectedAt)، لأن lastInjectedSignature
-// متغيّر في الذاكرة يُصفَّر بإعادة تحميل الصفحة. بدون استعادته، حارس رفض
-// الصدى (isArenaRejectedCandidate) يفشل في اكتشاف أن أول "رد" مُلتقط بعد
-// الاستئناف هو في الواقع صدى لنص المستخدم نفسه — مؤكد بدليل سجل فعلي
-// (تطابق حرفي تام بين النص المرسل والرد الملتقط بعد إعادة تحميل الصفحة).
+// [v1.0.52] الحالة المخزَّنة تتضمن أيضًا توقيع النص المحقون (injectedSignature)
+// ووقته (injectedAt) ليصمد الحارس عبر إعادة تحميل الصفحة.
 // ============================================================
 
 var VENICE_CAPTURE_STORAGE_KEY = "aichat_venice_capture_state_v1";
@@ -841,10 +837,6 @@ function extractLatestPlatformResponse() {
 
     t = cleanAssistantResponse(t);
 
-    // --- [إصلاح جذري v1.0.51] تعميم الحارس من Arena-only إلى أي منصة
-    // عدا chatgpt (التي لها فلترة منفصلة). يحمي من التقاط صدى رسالة
-    // المستخدم نفسها كأنه رد (مؤكد حدوثه على Venice حيث تستخدم .prose
-    // لفقاعة المستخدم أيضًا وليس فقط رد المساعد).
     if (CURRENT_PLATFORM.id !== "chatgpt" && isArenaRejectedCandidate(t)) {
       if (CURRENT_PLATFORM.id === "venice") {
         log(
@@ -940,11 +932,23 @@ function getCurrentAssistantText() {
 var lastInjectedSignature = "";
 var lastInjectedAt = 0;
 
+// --- [إصلاح جذري v1.0.53] ---
+// الكود القديم كان: /[:：#*_-\u2013\u2014\(\)\(\)<>]/g
+// المقطع "_-\u2013" داخل صنف الأحرف [...] كان يُفسَّر كـ "نطاق" (range)
+// من U+005F إلى U+2013 (وليس ثلاثة رموز منفصلة)! هذا النطاق الهائل يغطي
+// ضمنيًا كامل الكتلة العربية Unicode (U+0600–U+06FF)، فكانت كل الحروف
+// العربية تُستبدل بمسافات وتُحذف فعليًا من أي نص يمر عبر normalizeForMatch.
+// النتيجة المؤكدة بدليل سجل فعلي: lastInjectedSignature = "" دائمًا لأي
+// نص عربي (signatureLen=0 في كل محاولة إرسال، وليس فقط بعد إعادة التحميل)،
+// مما عطّل حارس رفض الصدى (isArenaRejectedCandidate) بالكامل لكل نص عربي
+// منذ البداية - وهو السبب الجذري الحقيقي وراء كل حالات التقاط الصدى على
+// Venice التي ظهرت عبر الاختبارات السابقة.
+// الإصلاح: نقل الشرطة "-" إلى نهاية صنف الأحرف حيث تُفسَّر حرفيًا لا كنطاق.
 function normalizeForMatch(s) {
   return String(s || "")
     .replace(/\u00a0/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/[:：#*_-\u2013\u2014\(\)\(\)<>]/g, " ")
+    .replace(/[:：#*_\u2013\u2014()()<>-]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
@@ -971,9 +975,7 @@ function looksLikeInjectedPrompt(text) {
 // ملاحظة [v1.0.51]: رغم الاسم التاريخي (كانت مخصصة لـ Arena فقط)، هذا
 // الفحص الآن عام ويُستدعى لأي منصة عدا chatgpt. تم أيضًا تحسين دقة
 // المطابقة: الرفض يحدث فقط عند تطابق تام، أو عندما يكون طول النص
-// المُرشَّح قريبًا جدًا من طول النص المحقون (echo حقيقي على الأرجح)،
-// وليس لمجرد احتواء النص الطويل على جزء قصير من النص المحقون بالصدفة
-// (كان هذا يسبب خطر رفض ردود حقيقية طويلة بسبب نصوص محقونة قصيرة جدًا).
+// المُرشَّح قريبًا جدًا من طول النص المحقون (echo حقيقي على الأرجح).
 function isArenaRejectedCandidate(text) {
   if (CURRENT_PLATFORM.id === "chatgpt") return false;
   if (!text) return false;
@@ -1064,11 +1066,6 @@ function tryResumeVeniceCapture() {
     return;
   }
 
-  // --- [إصلاح جذري v1.0.52] استعادة توقيع النص المحقون قبل الصدى (echo)
-  // من sessionStorage. بدون هذا، lastInjectedSignature يبقى فارغًا بعد
-  // إعادة تحميل الصفحة (متغيّر في الذاكرة فقط يُصفَّر بإعادة تحميل
-  // السكربت)، فيفشل isArenaRejectedCandidate في رفض صدى رسالة المستخدم
-  // في أول محاولة التقاط بعد الاستئناف — مؤكد بدليل سجل فعلي.
   if (state.injectedSignature) {
     lastInjectedSignature = state.injectedSignature;
     lastInjectedAt = state.injectedAt || Date.now();
@@ -1091,8 +1088,6 @@ function tryResumeVeniceCapture() {
 function finishCapture(answer) {
   if (captureFinished) return;
 
-  // --- [إصلاح جذري v1.0.51] تعميم الحارس من Arena-only إلى أي منصة
-  // عدا chatgpt.
   if (
     CURRENT_PLATFORM.id !== "chatgpt" &&
     isArenaRejectedCandidate(answer)
@@ -1161,8 +1156,6 @@ function watchForResponse() {
 
   var current = getCurrentAssistantText();
 
-  // --- [إصلاح جذري v1.0.51] تعميم الحارس من Arena-only إلى أي منصة
-  // عدا chatgpt.
   if (
     CURRENT_PLATFORM.id !== "chatgpt" &&
     current &&
@@ -2067,9 +2060,6 @@ function injectAndSend(opts) {
         startResponseCapture("app_injected_prompt");
 
         if (CURRENT_PLATFORM.id === "venice") {
-          // --- [إصلاح جذري v1.0.52] تخزين توقيع النص المحقون ووقته
-          // أيضًا، وليس فقط وقت بدء الالتقاط، ليصمد الحارس عبر إعادة
-          // تحميل الصفحة المحتملة.
           setVeniceCaptureState({
             startedAt: Date.now(),
             contextId: contextId,
@@ -2206,4 +2196,5 @@ if (shouldSendDiagnostics()) {
   } catch (_) {}
 }
 })();
+
 
