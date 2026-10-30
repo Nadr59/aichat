@@ -2242,5 +2242,3 @@ private fun guessIsUser(message: Message): Boolean {
 }
 
 
-
-## ملخص التغييرات الفعلية (للمراجعة 🐛) قبل أي خطوة تالية.
