@@ -1,7 +1,8 @@
+
 (function () {
 "use strict";
 
-var VERSION = "1.0.51";
+var VERSION = "1.0.52";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -608,6 +609,13 @@ function sendContextConsumed(contextId) {
 // عند بدء الالتقاط فعليًا، ونحاول استئناف المراقبة تلقائيًا إذا وجدنا هذا
 // العلم عند تحميل content.js من جديد على نفس التبويب/الأصل.
 // محصور بـ Venice فقط، لا يمسّ أي منصة أخرى.
+//
+// [إصلاح جذري v1.0.52] الحالة المخزَّنة تتضمن الآن أيضًا توقيع النص
+// المحقون (injectedSignature) ووقته (injectedAt)، لأن lastInjectedSignature
+// متغيّر في الذاكرة يُصفَّر بإعادة تحميل الصفحة. بدون استعادته، حارس رفض
+// الصدى (isArenaRejectedCandidate) يفشل في اكتشاف أن أول "رد" مُلتقط بعد
+// الاستئناف هو في الواقع صدى لنص المستخدم نفسه — مؤكد بدليل سجل فعلي
+// (تطابق حرفي تام بين النص المرسل والرد الملتقط بعد إعادة تحميل الصفحة).
 // ============================================================
 
 var VENICE_CAPTURE_STORAGE_KEY = "aichat_venice_capture_state_v1";
@@ -1054,6 +1062,22 @@ function tryResumeVeniceCapture() {
     );
     clearVeniceCaptureState();
     return;
+  }
+
+  // --- [إصلاح جذري v1.0.52] استعادة توقيع النص المحقون قبل الصدى (echo)
+  // من sessionStorage. بدون هذا، lastInjectedSignature يبقى فارغًا بعد
+  // إعادة تحميل الصفحة (متغيّر في الذاكرة فقط يُصفَّر بإعادة تحميل
+  // السكربت)، فيفشل isArenaRejectedCandidate في رفض صدى رسالة المستخدم
+  // في أول محاولة التقاط بعد الاستئناف — مؤكد بدليل سجل فعلي.
+  if (state.injectedSignature) {
+    lastInjectedSignature = state.injectedSignature;
+    lastInjectedAt = state.injectedAt || Date.now();
+    log(
+      "🔬 DIAG Venice resume: restored injected signature len=" +
+      lastInjectedSignature.length
+    );
+  } else {
+    log("🔬 DIAG Venice resume: stored state had no injectedSignature");
   }
 
   log(
@@ -2043,11 +2067,19 @@ function injectAndSend(opts) {
         startResponseCapture("app_injected_prompt");
 
         if (CURRENT_PLATFORM.id === "venice") {
+          // --- [إصلاح جذري v1.0.52] تخزين توقيع النص المحقون ووقته
+          // أيضًا، وليس فقط وقت بدء الالتقاط، ليصمد الحارس عبر إعادة
+          // تحميل الصفحة المحتملة.
           setVeniceCaptureState({
             startedAt: Date.now(),
-            contextId: contextId
+            contextId: contextId,
+            injectedSignature: lastInjectedSignature,
+            injectedAt: lastInjectedAt
           });
-          log("🔬 DIAG Venice resume: capture state stored to sessionStorage");
+          log(
+            "🔬 DIAG Venice resume: capture state stored to sessionStorage (signatureLen=" +
+            lastInjectedSignature.length + ")"
+          );
         }
 
         sendWithRetry(input, opts, contextId, text);
@@ -2174,3 +2206,4 @@ if (shouldSendDiagnostics()) {
   } catch (_) {}
 }
 })();
+
