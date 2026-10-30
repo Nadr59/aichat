@@ -1,3 +1,4 @@
+ف 
 
 package com.example.aichat.ui.screens
 
@@ -281,6 +282,15 @@ fun ChatScreen(
         !isWebSendCapable || webPageLoading || webSendInFlight || webRuntimeMissing
     )
 
+    // ── 1.ج.1: طي/فرد مربع الإدخال لتحرير مساحة للرسائل/محرك Arena المرئي ──
+    var inputBarExpanded by rememberSaveable { mutableStateOf(true) }
+
+    LaunchedEffect(isArenaPlatform) {
+        if (isArenaPlatform) {
+            inputBarExpanded = false
+        }
+    }
+
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var memoryMessage by remember { mutableStateOf<Message?>(null) }
 
@@ -543,6 +553,7 @@ fun ChatScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding() // ← 1.ج.1: يدفع المحتوى فوق الكيبورد بدل أن يُغطّى به
         ) {
             ProviderSelectorRow(
                 enabledWebPlatforms = enabledWebPlatforms,
@@ -675,6 +686,8 @@ fun ChatScreen(
                 isEnhancing = isEnhancing,
                 hasIdentity = hasIdentity,
                 sendDisabledExternally = sendDisabledExternally,
+                expanded = inputBarExpanded,
+                onToggleExpanded = { inputBarExpanded = !inputBarExpanded },
                 onValueChange = { tfv ->
                     if (isEnhanced) {
                         enhancedInput = tfv
@@ -1747,6 +1760,7 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = align
     ) {
+        // ── 1.ج.2: الفقاعة الآن تحتوي النص فقط، بلا أزرار كبيرة داخلها ──
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = bg,
@@ -1760,60 +1774,57 @@ private fun MessageBubble(
                     }
                 )
         ) {
-            Column(
+            Text(
+                message.content,
+                color = fg,
                 modifier = Modifier.padding(12.dp)
+            )
+        }
+
+        // ── صف أيقونات صغيرة أسفل الفقاعة بدل الأزرار الكبيرة الداخلية ──
+        Row(
+            modifier = Modifier.padding(
+                top = 2.dp,
+                start = 4.dp,
+                end = 4.dp
+            ),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onCopy,
+                modifier = Modifier.size(26.dp)
             ) {
-                Text(
-                    message.content,
-                    color = fg
+                Icon(
+                    Icons.Filled.ContentCopy,
+                    contentDescription = "نسخ",
+                    modifier = Modifier.size(14.dp),
+                    tint = fg.copy(alpha = 0.55f)
                 )
+            }
 
-                Spacer(Modifier.height(10.dp))
+            IconButton(
+                onClick = onSaveMemory,
+                modifier = Modifier.size(26.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Memory,
+                    contentDescription = "حفظ كذاكرة",
+                    modifier = Modifier.size(14.dp),
+                    tint = fg.copy(alpha = 0.55f)
+                )
+            }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    AssistChip(
-                        onClick = onCopy,
-                        label = {
-                            Text("نسخ")
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Filled.ContentCopy,
-                                contentDescription = null
-                            )
-                        }
-                    )
-
-                    AssistChip(
-                        onClick = onSaveMemory,
-                        label = {
-                            Text("حفظ كذاكرة")
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Filled.Memory,
-                                contentDescription = null
-                            )
-                        }
-                    )
-                }
-
-                Spacer(Modifier.height(6.dp))
-
-                AssistChip(
-                    onClick = onBranch,
-                    enabled = branchEnabled,
-                    label = {
-                        Text("محادثة جديدة من هنا")
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Filled.AccountTree,
-                            contentDescription = null
-                        )
-                    }
+            IconButton(
+                onClick = onBranch,
+                enabled = branchEnabled,
+                modifier = Modifier.size(26.dp)
+            ) {
+                Icon(
+                    Icons.Filled.AccountTree,
+                    contentDescription = "محادثة جديدة من هنا",
+                    modifier = Modifier.size(14.dp),
+                    tint = fg.copy(alpha = if (branchEnabled) 0.55f else 0.25f)
                 )
             }
         }
@@ -1887,6 +1898,8 @@ private fun InputBar(
     isEnhancing: Boolean,
     hasIdentity: Boolean,
     sendDisabledExternally: Boolean,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
     onValueChange: (TextFieldValue) -> Unit,
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
@@ -1903,9 +1916,35 @@ private fun InputBar(
     val displayedText = value.text
 
     Column(
-        modifier = modifier.padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        // ── 1.ج.1: مقبض طي/فرد مربع الإدخال ──
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            IconButton(
+                onClick = onToggleExpanded,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = if (expanded) {
+                        Icons.Filled.KeyboardArrowDown
+                    } else {
+                        Icons.Filled.KeyboardArrowUp
+                    },
+                    contentDescription = if (expanded) {
+                        "طي مربع الإدخال"
+                    } else {
+                        "إظهار خيارات الإدخال"
+                    },
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
         if (hasSelectedImage) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1933,23 +1972,25 @@ private fun InputBar(
                 value = value,
                 onValueChange = onValueChange,
                 modifier = Modifier.weight(1f),
-                minLines = 2,
-                maxLines = 6,
+                minLines = if (expanded) 2 else 1,
+                maxLines = if (expanded) 6 else 2,
                 label = {
                     Text(
                         if (isEnhanced) "النص المُحسَّن" else "اكتب رسالتك"
                     )
                 },
-                supportingText = {
-                    val bits = buildList {
-                        if (hasIdentity) add("Identity")
-                        if (isEnhanced) add("Enhanced")
-                    }
+                supportingText = if (expanded) {
+                    {
+                        val bits = buildList {
+                            if (hasIdentity) add("Identity")
+                            if (isEnhanced) add("Enhanced")
+                        }
 
-                    if (bits.isNotEmpty()) {
-                        Text(bits.joinToString(" • "))
+                        if (bits.isNotEmpty()) {
+                            Text(bits.joinToString(" • "))
+                        }
                     }
-                },
+                } else null,
                 keyboardOptions = KeyboardOptions(
                     imeAction = ImeAction.Send,
                     autoCorrect = false
@@ -1974,103 +2015,105 @@ private fun InputBar(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onOpenGallery,
-                enabled = !isLoading
+        if (expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Filled.Image,
-                    contentDescription = "Gallery"
-                )
-            }
-
-            IconButton(
-                onClick = onOpenCamera,
-                enabled = !isLoading
-            ) {
-                Icon(
-                    Icons.Filled.CameraAlt,
-                    contentDescription = "Camera"
-                )
-            }
-
-            IconButton(
-                onClick = onOpenFile,
-                enabled = !isLoading
-            ) {
-                Icon(
-                    Icons.Filled.AttachFile,
-                    contentDescription = "File"
-                )
-            }
-
-            IconButton(
-                onClick = onOpenWebImport,
-                enabled = !isLoading
-            ) {
-                Icon(
-                    Icons.Filled.Language,
-                    contentDescription = "Web"
-                )
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            Box {
                 IconButton(
-                    onClick = {
-                        styleMenu = true
-                    },
+                    onClick = onOpenGallery,
                     enabled = !isLoading
                 ) {
                     Icon(
-                        Icons.Filled.Tune,
-                        contentDescription = "Refine style"
+                        Icons.Filled.Image,
+                        contentDescription = "Gallery"
                     )
                 }
 
-                DropdownMenu(
-                    expanded = styleMenu,
-                    onDismissRequest = {
-                        styleMenu = false
-                    }
-                ) {
-                    enumValues<QueryStyle>().forEach { style ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(style.name)
-                            },
-                            onClick = {
-                                styleMenu = false
-                                onRefineStyle(style)
-                            }
-                        )
-                    }
-                }
-            }
-
-            if (isEnhanced) {
-                TextButton(
-                    onClick = onClearEnhanced,
+                IconButton(
+                    onClick = onOpenCamera,
                     enabled = !isLoading
                 ) {
-                    Text("إلغاء التحسين")
-                }
-            } else {
-                TextButton(
-                    onClick = onEnhance,
-                    enabled = !isLoading &&
-                        !isEnhancing &&
-                        displayedText.isNotBlank()
-                ) {
-                    Text(
-                        if (isEnhancing) "جارٍ التحسين…" else "تحسين السؤال"
+                    Icon(
+                        Icons.Filled.CameraAlt,
+                        contentDescription = "Camera"
                     )
+                }
+
+                IconButton(
+                    onClick = onOpenFile,
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Filled.AttachFile,
+                        contentDescription = "File"
+                    )
+                }
+
+                IconButton(
+                    onClick = onOpenWebImport,
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Filled.Language,
+                        contentDescription = "Web"
+                    )
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                Box {
+                    IconButton(
+                        onClick = {
+                            styleMenu = true
+                        },
+                        enabled = !isLoading
+                    ) {
+                        Icon(
+                            Icons.Filled.Tune,
+                            contentDescription = "Refine style"
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = styleMenu,
+                        onDismissRequest = {
+                            styleMenu = false
+                        }
+                    ) {
+                        enumValues<QueryStyle>().forEach { style ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(style.name)
+                                },
+                                onClick = {
+                                    styleMenu = false
+                                    onRefineStyle(style)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (isEnhanced) {
+                    TextButton(
+                        onClick = onClearEnhanced,
+                        enabled = !isLoading
+                    ) {
+                        Text("إلغاء التحسين")
+                    }
+                } else {
+                    TextButton(
+                        onClick = onEnhance,
+                        enabled = !isLoading &&
+                            !isEnhancing &&
+                            displayedText.isNotBlank()
+                    ) {
+                        Text(
+                            if (isEnhancing) "جارٍ التحسين…" else "تحسين السؤال"
+                        )
+                    }
                 }
             }
         }
