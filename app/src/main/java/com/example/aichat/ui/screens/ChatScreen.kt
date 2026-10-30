@@ -1,5 +1,4 @@
 
-
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -2283,5 +2282,3 @@ private fun guessIsUser(message: Message): Boolean {
 
     return false
 }
-
-
