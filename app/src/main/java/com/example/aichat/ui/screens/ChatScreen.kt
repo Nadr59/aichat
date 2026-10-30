@@ -1,3 +1,4 @@
+
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -92,7 +93,7 @@ fun ChatScreen(
         }
     }
 
-    // ── Provider selector (1.ب.2 / 1.ب.3) ──
+    // ── Provider selector (1.ب.2 / 1.ب.3 / 1.ب.4) ──
     val webPlatforms by webPlatformsViewModel.platforms.collectAsState()
     val enabledWebPlatforms = remember(webPlatforms) {
         webPlatforms.filter { it.isEnabled }
@@ -247,13 +248,29 @@ fun ChatScreen(
         enabledWebPlatforms.firstOrNull { it.id == selectedWebPlatformId }
     }
 
-    // ── 1.ب.3-ext: توسيع المنصات القابلة للإرسال التلقائي إلى ChatGPT + Venice ──
-    val isAutoSendPlatform = remember(selectedPlatform?.id, selectedPlatform?.url) {
-        selectedPlatform?.let {
-            val kind = WebSendCoordinator.classifyHost(hostOf(it.url))
-            kind == WebSendCoordinator.WebKind.CHATGPT || kind == WebSendCoordinator.WebKind.VENICE
-        } ?: false
+    // ── تصنيف نوع المنصة المختارة ──
+    val webKind = remember(selectedPlatform?.id, selectedPlatform?.url) {
+        selectedPlatform?.let { WebSendCoordinator.classifyHost(hostOf(it.url)) }
+            ?: WebSendCoordinator.WebKind.OTHER
     }
+
+    // ChatGPT + Venice: محرك مخفي 1dp، إرسال آلي كامل (ضغط الزر برمجيًا).
+    val isHiddenAutoSendPlatform = remember(webKind) {
+        webKind == WebSendCoordinator.WebKind.CHATGPT ||
+            webKind == WebSendCoordinator.WebKind.VENICE
+    }
+
+    // ── 1.ب.4: Arena — محرك مرئي يستبدل منطقة الرسائل، الحقن تلقائي
+    // لكن الإرسال الفعلي يدوي من المستخدم داخل صفحة Arena نفسها.
+    // content.js (injectAndSend) يتوقف عمدًا عند "arena_text_only" ولا
+    // يضغط زر الإرسال لهذه المنصة؛ startArenaSendObserver يرصد ضغط
+    // المستخدم اليدوي (Enter/زر/submit) ليبدأ الالتقاط تلقائيًا.
+    val isArenaPlatform = remember(webKind) {
+        webKind == WebSendCoordinator.WebKind.ARENA
+    }
+
+    // أي منصة يمكن فعليًا حقن نص فيها عبر setContextPending (مخفية أو مرئية)
+    val isWebSendCapable = isHiddenAutoSendPlatform || isArenaPlatform
 
     var webPageLoading by remember(selectedWebPlatformId) { mutableStateOf(true) }
     var webLoadError by remember(selectedWebPlatformId) { mutableStateOf<String?>(null) }
@@ -261,7 +278,7 @@ fun ChatScreen(
     var webRuntimeMissing by remember(selectedWebPlatformId) { mutableStateOf(false) }
 
     val sendDisabledExternally = selectedWebPlatformId != null && (
-        !isAutoSendPlatform || webPageLoading || webSendInFlight || webRuntimeMissing
+        !isWebSendCapable || webPageLoading || webSendInFlight || webRuntimeMissing
     )
 
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -289,11 +306,11 @@ fun ChatScreen(
         }
     }
 
-    // ── 1.ب.3: تسجيل التقاط ردود منصة الويب الحالية ──
-    DisposableEffect(selectedWebPlatformId, isAutoSendPlatform) {
+    // ── تسجيل التقاط ردود منصة الويب الحالية (مخفية أو مرئية) ──
+    DisposableEffect(selectedWebPlatformId, isWebSendCapable) {
         val platform = selectedPlatform
 
-        if (platform != null && isAutoSendPlatform && platform.memoryEnabled) {
+        if (platform != null && isWebSendCapable && platform.memoryEnabled) {
             app.onAiResponseCaptured = { source, text ->
                 webSendInFlight = false
                 viewModel.onWebAiResponse(
@@ -378,10 +395,10 @@ fun ChatScreen(
         }
     }
 
-    // ── 1.ب.3-ext: إرسال فعلي إلى منصة الويب المختارة (ChatGPT + Venice) ──
+    // ── إرسال فعلي إلى منصة الويب المختارة (ChatGPT + Venice + Arena) ──
     fun sendWebMessage() {
         val platform = selectedPlatform ?: return
-        if (!isAutoSendPlatform) return
+        if (!isWebSendCapable) return
         if (webPageLoading || webSendInFlight || webRuntimeMissing) return
 
         val textToSend = (
@@ -539,7 +556,7 @@ fun ChatScreen(
             ) {
                 if (selectedWebPlatformId != null) {
                     val statusLabel = when {
-                        !isAutoSendPlatform -> "هذه المنصة قيد التطوير — قريبًا"
+                        !isWebSendCapable -> "هذه المنصة قيد التطوير — قريبًا"
                         webRuntimeMissing -> "⚠️ تعذر تهيئة محرك الويب"
                         webLoadError != null -> "⚠️ ${webLoadError}"
                         webPageLoading -> "جاري تجهيز الصفحة..."
@@ -556,7 +573,7 @@ fun ChatScreen(
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                     )
 
-                    if (isAutoSendPlatform && selectedPlatform != null) {
+                    if (isHiddenAutoSendPlatform && selectedPlatform != null) {
                         HiddenWebEngineHost(
                             platform = selectedPlatform,
                             app = app,
@@ -567,51 +584,67 @@ fun ChatScreen(
                     }
                 }
 
-                if (branchContextMessageCount > 0) {
-                    BranchContextCard(
-                        sourceTitle = branchSourceTitle ?: "المحادثة الأصلية",
-                        contextCount = branchContextMessageCount
-                    )
-                }
-
-                if (visibleMessages.isEmpty() && !isLoading) {
-                    EmptyChatView(
-                        modifier = Modifier.weight(1f)
+                if (isArenaPlatform && selectedPlatform != null) {
+                    // ── 1.ب.4: استبدال منطقة الرسائل بمحرك ويب مرئي ──
+                    // المستخدم يكتب في InputBar كالمعتاد؛ النص يُحقن تلقائيًا
+                    // في صفحة Arena الظاهرة هنا، ويضغط المستخدم الإرسال يدويًا
+                    // داخل الصفحة نفسها. بمجرد التقاط الرد تلقائيًا، يمكن
+                    // التبديل لـ API لرؤية الفقاعات المحدثة.
+                    VisibleWebEngineHost(
+                        platform = selectedPlatform,
+                        app = app,
+                        modifier = Modifier.weight(1f),
+                        onLoadingChange = { webPageLoading = it },
+                        onError = { webLoadError = it },
+                        onRuntimeMissing = { webRuntimeMissing = true }
                     )
                 } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentPadding = PaddingValues(
-                            12.dp,
-                            16.dp
-                        ),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        items(
-                            visibleMessages,
-                            key = { it.id }
-                        ) { msg ->
-                            MessageBubble(
-                                message = msg,
-                                onCopy = {
-                                    copyToClipboard(msg.content)
-                                },
-                                onSaveMemory = {
-                                    memoryMessage = msg
-                                },
-                                onBranch = {
-                                    viewModel.branchFromMessage(msg.id)
-                                },
-                                branchEnabled = !isLoading
-                            )
-                        }
+                    if (branchContextMessageCount > 0) {
+                        BranchContextCard(
+                            sourceTitle = branchSourceTitle ?: "المحادثة الأصلية",
+                            contextCount = branchContextMessageCount
+                        )
+                    }
 
-                        if (isLoading) {
-                            item("thinking") {
-                                ThinkingBubble()
+                    if (visibleMessages.isEmpty() && !isLoading) {
+                        EmptyChatView(
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentPadding = PaddingValues(
+                                12.dp,
+                                16.dp
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(
+                                visibleMessages,
+                                key = { it.id }
+                            ) { msg ->
+                                MessageBubble(
+                                    message = msg,
+                                    onCopy = {
+                                        copyToClipboard(msg.content)
+                                    },
+                                    onSaveMemory = {
+                                        memoryMessage = msg
+                                    },
+                                    onBranch = {
+                                        viewModel.branchFromMessage(msg.id)
+                                    },
+                                    branchEnabled = !isLoading
+                                )
+                            }
+
+                            if (isLoading) {
+                                item("thinking") {
+                                    ThinkingBubble()
+                                }
                             }
                         }
                     }
@@ -1330,12 +1363,13 @@ fun ChatScreen(
     }
 }
 
-/* ----------------------------- 1.ب.3: محرك الويب المخفي ----------------------------- */
+/* ----------------------------- محرك الويب (مشترك: مخفي/مرئي) ----------------------------- */
 
 @Composable
-private fun HiddenWebEngineHost(
+private fun WebEngineHostCore(
     platform: WebPlatform,
     app: AichatApp,
+    boxModifier: Modifier,
     onLoadingChange: (Boolean) -> Unit,
     onError: (String?) -> Unit,
     onRuntimeMissing: () -> Unit
@@ -1405,7 +1439,7 @@ private fun HiddenWebEngineHost(
         }
     }
 
-    Box(modifier = Modifier.size(1.dp)) {
+    Box(modifier = boxModifier) {
         key(sessionKey) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -1431,10 +1465,49 @@ private fun HiddenWebEngineHost(
     }
 }
 
+/** ChatGPT / Venice — محرك مخفي 1dp×1dp (بلا تغيير سلوكي عن 1.ب.3) */
+@Composable
+private fun HiddenWebEngineHost(
+    platform: WebPlatform,
+    app: AichatApp,
+    onLoadingChange: (Boolean) -> Unit,
+    onError: (String?) -> Unit,
+    onRuntimeMissing: () -> Unit
+) {
+    WebEngineHostCore(
+        platform = platform,
+        app = app,
+        boxModifier = Modifier.size(1.dp),
+        onLoadingChange = onLoadingChange,
+        onError = onError,
+        onRuntimeMissing = onRuntimeMissing
+    )
+}
+
+/** Arena (1.ب.4) — محرك مرئي يملأ المساحة المخصصة له بدلاً من منطقة الرسائل */
+@Composable
+private fun VisibleWebEngineHost(
+    platform: WebPlatform,
+    app: AichatApp,
+    modifier: Modifier,
+    onLoadingChange: (Boolean) -> Unit,
+    onError: (String?) -> Unit,
+    onRuntimeMissing: () -> Unit
+) {
+    WebEngineHostCore(
+        platform = platform,
+        app = app,
+        boxModifier = modifier.fillMaxWidth(),
+        onLoadingChange = onLoadingChange,
+        onError = onError,
+        onRuntimeMissing = onRuntimeMissing
+    )
+}
+
 private fun hostOf(url: String): String =
     runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")
 
-/* ----------------------------- Provider selector (1.ب.2 / 1.ب.3) ----------------------------- */
+/* ----------------------------- Provider selector (1.ب.2 / 1.ب.3 / 1.ب.4) ----------------------------- */
 
 @Composable
 private fun ProviderSelectorRow(
@@ -1468,7 +1541,8 @@ private fun ProviderSelectorRow(
         enabledWebPlatforms.forEach { platform ->
             val kind = WebSendCoordinator.classifyHost(hostOf(platform.url))
             val usable = kind == WebSendCoordinator.WebKind.CHATGPT ||
-                kind == WebSendCoordinator.WebKind.VENICE
+                kind == WebSendCoordinator.WebKind.VENICE ||
+                kind == WebSendCoordinator.WebKind.ARENA
 
             FilterChip(
                 selected = selectedWebPlatformId == platform.id,
@@ -2166,3 +2240,7 @@ private fun guessIsUser(message: Message): Boolean {
 
     return false
 }
+
+
+
+## ملخص التغييرات الفعلية (للمراجعة 🐛) قبل أي خطوة تالية.
