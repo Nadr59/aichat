@@ -81,6 +81,16 @@ fun ChatScreen(
     val conversationId by viewModel.currentConversationId.collectAsState()
     val currentAgentId by viewModel.currentAgentId.collectAsState()
 
+    // ═══════════════════════════════════════════════════════════════
+    // ✅ تعديل جديد (إصلاح استمرارية السياق بين API ومنصات الويب):
+    // نقرأ ملخص الـ Workspace الحالي لاستخدامه كسياق يُحقن في صفحات
+    // الويب قبل كل سؤال. هذا الملخص مُحدَّث تلقائيًا من ChatViewModel
+    // بعد كل تبادل سواء جاء عبر API أو عبر الويب (نفس workspaceId
+    // بفضل التوحيد في خطوة 1.أ)، لذلك هو المصدر الصحيح لضمان السياق
+    // في الاتجاهات الثلاثة: API→ويب، ويب→ويب (نفس/مختلف المنصة).
+    // ═══════════════════════════════════════════════════════════════
+    val workspaceSummary by viewModel.workspaceSummary.collectAsState()
+
     // Tree data
     val parentConversationId by viewModel.currentParentConversationId.collectAsState()
     val allConversations by viewModel.conversations.collectAsState()
@@ -404,17 +414,32 @@ fun ChatScreen(
         }
     }
 
-    // ── إرسال فعلي إلى منصة الويب المختارة (ChatGPT + Venice + Arena) ──
+    // ═══════════════════════════════════════════════════════════════════════
+    // ✅ التعديل الوحيد المقصود في هذه الجلسة: sendWebMessage()
+    //
+    // قبل التعديل: كانت الدالة تُرسل textToSend الخام فقط عبر
+    // app.setContextPending(...)، متجاوزةً WebSendCoordinator.buildContextBlock
+    // وbuildFinalTextForPlatform الموجودتين أصلاً وجاهزتين.
+    //
+    // بعد التعديل: نبني contextBlock من workspaceSummary الحالي (نفس القيمة
+    // التي يستخدمها sendChatMessage() عبر API)، وندمجه مع السؤال بالصيغة
+    // المناسبة لكل منصة (مخفية لـ ChatGPT/Venice، مرئية لـ Arena) عبر
+    // buildFinalTextForPlatform. النص المُسجَّل في قاعدة البيانات والعنوان
+    // يبقى rawText النظيف (بدون كتلة السياق) حفاظًا على نظافة السجل.
+    //
+    // لا تغيير على: onWebUserMessageSentAndTrackInViewModelScope، منطق
+    // Arena/ChatGPT/Venice الالتقاطي، أو أي شيء آخر في هذا الملف.
+    // ═══════════════════════════════════════════════════════════════════════
     fun sendWebMessage() {
         val platform = selectedPlatform ?: return
         if (!isWebSendCapable) return
         if (webPageLoading || webSendInFlight || webRuntimeMissing) return
 
-        val textToSend = (
+        val rawText = (
             if (isEnhanced) enhancedInput.text else userInput.text
         ).trim()
 
-        if (textToSend.isBlank()) return
+        if (rawText.isBlank()) return
 
         scope.launch {
             keyboardController?.hide()
@@ -426,7 +451,7 @@ fun ChatScreen(
             viewModel.clearEnhancedQuery()
 
             val tracked = viewModel.onWebUserMessageSentAndTrackInViewModelScope(
-                userText = textToSend,
+                userText = rawText,
                 platformId = platform.id,
                 platformName = platform.name
             ).await()
@@ -436,8 +461,21 @@ fun ChatScreen(
                 return@launch
             }
 
+            // بناء كتلة السياق من ملخص الـ Workspace الحالي (نفس المصدر
+            // المستخدم من جانب API)، وهذا يحل مشكلة فشل انتقال السياق في
+            // الاتجاهات: API→ويب، ويب→ويب (نفس/مختلف المنصة).
+            val contextBlock = WebSendCoordinator.buildContextBlock(
+                workspaceSummary = workspaceSummary
+            )
+
+            val finalText = WebSendCoordinator.buildFinalTextForPlatform(
+                kind = webKind,
+                contextBlock = contextBlock,
+                question = rawText
+            )
+
             app.setContextPending(
-                text = textToSend,
+                text = finalText,
                 targetDomain = hostOf(platform.url),
                 inputSelector = platform.inputSelector,
                 sendSelector = platform.sendSelector,
