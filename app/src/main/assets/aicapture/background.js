@@ -1,13 +1,28 @@
 "use strict";
 
 /**
- * AiChat WebExtension — background.js (FIXED)
+ * AiChat WebExtension — background.js
  *
- * الهدف:
+ * [v1.0.1-diag] إضافة تشخيصية بحتة فقط (بدون أي تغيير في منطق الاتصال):
+ * جميع سجلات logLocal() أصبحت تُوجَّه الآن أيضاً إلى Kotlin عبر نفس قناة
+ * DEBUG_INFO التي يستخدمها content.js بنجاح (وتظهر في عارض 🐛 داخل
+ * ChatScreen). الهدف: الحصول على دليل فعلي من اختبار Venice القادم حول
+ * التسلسل الزمني الكامل لأحداث background.js (استلام من Kotlin، تحديد
+ * التبويب، محاولات الإرسال، النتيجة)، بدل رؤية رسالة الفشل النهائية فقط.
+ *
+ * ملاحظة أمان مهمة: postToKotlin() كانت تستدعي logLocal() داخل مساري
+ * الفشل الخاصين بها. لو تُركت كما هي وأصبحت logLocal() تستدعي
+ * postToKotlin()، لنتج استدعاء دائري لا نهائي عند غياب nativePort (وهي
+ * بالضبط اللحظة التي نريد تشخيصها). لذلك عُدِّلت مساري الفشل في
+ * postToKotlin() لاستخدام console.log مباشرة بدل logLocal — هذا التعديل
+ * المصاحب ضروري لتفادي عطل جديد، وهو الوحيد غير المتعلق مباشرة بالإضافة
+ * التشخيصية نفسها.
+ *
+ * الهدف الأصلي للملف (دون تغيير):
  * - استقبال رسائل Kotlin عبر NativeMessaging Port
  * - توجيهها إلى content.js في تبويب المنصة الصحيح
  *
- * إصلاحات أساسية:
+ * إصلاحات أساسية (قديمة، دون تغيير):
  * 1) لا نعتمد على tabs.query({active:true}) (مشاكل GeckoView)
  * 2) لا نعتمد على "آخر تبويب" global لأن content.js محقون على <all_urls>
  *    وبالتالي أي صفحة يمكن أن تغيّر currentTab بالخطأ.
@@ -17,6 +32,7 @@
  */
 
 const NATIVE_APP = "browser";
+const BG_VERSION = "1.0.1-diag";
 
 let nativePort = null;
 
@@ -32,18 +48,47 @@ const readyTabs = new Set();
 
 function logLocal(message) {
   const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
-  console.log("[Background] " + ts + "  " + message);
+  const line = "[Background] " + ts + "  " + message;
+
+  try {
+    console.log(line);
+  } catch (_) {}
+
+  // [v1.0.1-diag] توجيه كل سجل محلي أيضاً إلى Kotlin عبر نفس قناة
+  // DEBUG_INFO التي يستخدمها content.js فعلياً (مُتحقَّق أنها تصل لعارض
+  // 🐛). لا يُستدعى logLocal من داخل postToKotlin (انظر الملاحظة أعلاه)
+  // لتفادي استدعاء دائري لا نهائي.
+  postToKotlin({
+    type: "DEBUG_INFO",
+    source: "background.js",
+    platform: "background",
+    host: "",
+    url: "",
+    version: BG_VERSION,
+    info: String(message || ""),
+    timestamp: Date.now()
+  });
 }
 
 function postToKotlin(obj) {
   if (!nativePort) {
-    logLocal("❌ postToKotlin: Native port unavailable");
+    // [v1.0.1-diag] console.log مباشرة (وليس logLocal) لتفادي الحلقة
+    // اللانهائية: logLocal -> postToKotlin -> (فشل) -> logLocal -> ...
+    try {
+      console.log("[Background] ❌ postToKotlin: Native port unavailable");
+    } catch (_) {}
     return;
   }
   try {
     nativePort.postMessage(obj);
   } catch (e) {
-    logLocal("❌ postToKotlin failed: " + (e && e.message ? e.message : String(e)));
+    // [v1.0.1-diag] نفس السبب: console.log مباشرة هنا أيضاً.
+    try {
+      console.log(
+        "[Background] ❌ postToKotlin failed: " +
+        (e && e.message ? e.message : String(e))
+      );
+    } catch (_) {}
   }
 }
 
@@ -371,5 +416,5 @@ browser.tabs.onRemoved.addListener((tabId) => {
 });
 
 // Startup
-logLocal("✅ Background script ready");
+logLocal("✅ Background script ready v=" + BG_VERSION);
 connectToNative();
