@@ -2,11 +2,34 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.55";
+var VERSION = "1.0.56";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
 var ALLOW_GENERIC_DIAGNOSTICS = false;
+
+// ============================================================
+// [v1.0.56] إصلاح عطل "الرد يتأخر/يندمج مع السؤال التالي" على ChatGPT
+// ------------------------------------------------------------
+// دليل فعلي من سجلات 🔬 DIAG أثبت أن role-selector matches=0 و
+// .agent-turn fallback matches=0 دائمًا على DOM الذي يصل إليه GeckoView
+// لـ chatgpt.com (حتى في محادثة طازجة تمامًا)، فيسقط الكود دائمًا إلى
+// getChatGPTConversationContainers() (حاوية المحادثة الكاملة بكل
+// الأسئلة/الأجوبة/التسميات مدمجة كنص واحد).
+//
+// الخلل: كانت الحلقة الأولى في getCurrentAssistantText() تستخرج النص من
+// هذه الحاوية الكاملة بطريقة ساذجة (querySelector(".markdown"...) ثم نص
+// العنصر بأكمله عند الفشل)، فتُعيد نص المحادثة بأكملها كـ"رد" (يتضمن
+// "أنت قلت:"، وأزرار النسخ، وكل الأسئلة/الأجوبة السابقة مُدمجة) — بينما
+// كانت توجد أصلاً دالة extractChatGPTAssistantText() مصممة خصيصًا لعزل
+// النص بعد آخر علامة "قال ChatGPT:" فقط، لكنها كانت في حلقة ثانية ميتة
+// عمليًا لا تُنفَّذ أبدًا لأن الحلقة الأولى تنجح دومًا (ولو بنص فاسد).
+//
+// الإصلاح: تتبُّع صريح (lastChatgptUsedLegacyFallback) لحالة "سقطنا إلى
+// حاوية كاملة"، واستخدام extractChatGPTAssistantText() في هذه الحالة
+// تحديدًا بدل الاستخراج الساذج. لا تغيير على Venice/Arena/generic، ولا
+// على مسار ChatGPT الطبيعي إن عادت المحددات الحديثة للعمل مستقبلاً.
+// ============================================================
 
 // ============================================================
 // Platforms
@@ -685,6 +708,11 @@ var lastChatgptDiagAgentCount = -1;
 var lastChatgptDiagContainerAnnounced = false;
 var lastChatgptDiagTarget = null;
 
+// [v1.0.56] يُحدَّث داخل getPlatformResponseElements() في كل استدعاء:
+// true إن كانت القيمة المُعادة هي حاوية/حاويات المحادثة الكاملة (الفشل
+// الكامل لمحددات role/agent-turn)، false إن كانت عناصر رد حقيقية مُفردة.
+var lastChatgptUsedLegacyFallback = false;
+
 function getChatGPTConversationContainers() {
   var out = [];
 
@@ -766,10 +794,16 @@ function getPlatformResponseElements() {
         );
       }
 
+      // [v1.0.56] نسجّل أننا في وضع "حاوية كاملة" ليستخدم
+      // getCurrentAssistantText() مسار الاستخراج الصحيح (المبني على
+      // علامات "قال ChatGPT:") بدل الاستخراج الساذج.
+      lastChatgptUsedLegacyFallback = true;
       return legacyContainers;
     }
 
     lastChatgptDiagContainerAnnounced = false;
+    // [v1.0.56] عناصر رد حقيقية مُفردة — المسار الطبيعي.
+    lastChatgptUsedLegacyFallback = false;
     return res;
   }
 
@@ -989,6 +1023,39 @@ function getCurrentAssistantText() {
 
   var elements = getPlatformResponseElements();
 
+  // [v1.0.56] مسار مخصص عندما تكون العناصر المُعادة هي حاوية/حاويات
+  // المحادثة الكاملة (فشل محددات role/agent-turn تمامًا — الحالة المؤكَّدة
+  // فعليًا بالسجلات). نستخدم هنا extractChatGPTAssistantText() لعزل النص
+  // بعد آخر علامة "قال ChatGPT:" فقط، بدل الاستخراج الساذج (الذي كان
+  // يُعيد نص المحادثة بأكملها: "أنت قلت:" + أسئلة/أجوبة سابقة مُدمجة).
+  if (lastChatgptUsedLegacyFallback) {
+    for (var ci = elements.length - 1; ci >= 0; ci--) {
+      var container = elements[ci];
+      if (!container) continue;
+
+      var legacyText = cleanAssistantResponse(
+        extractChatGPTAssistantText(getElementTextNoSrOnly(container))
+      );
+
+      if (!legacyText) continue;
+      if (isInvalidChatGPTResponse(legacyText)) continue;
+      if (looksLikeInjectedPrompt(legacyText)) continue;
+      if (isArenaRejectedCandidate(legacyText)) continue;
+
+      if (container !== lastChatgptDiagTarget) {
+        lastChatgptDiagTarget = container;
+        log(
+          "🔬 DIAG chatgpt chosen target (legacy-marker-extract) => " +
+          describeElementForDiag(container) + " textLen=" + legacyText.length
+        );
+      }
+
+      return stripChatGPTBoilerplate(legacyText) || legacyText;
+    }
+
+    return "";
+  }
+
   for (var i = elements.length - 1; i >= 0; i--) {
     var el = elements[i];
     if (!el) continue;
@@ -1037,16 +1104,16 @@ function getCurrentAssistantText() {
   var containers = getChatGPTConversationContainers();
 
   for (var j = containers.length - 1; j >= 0; j--) {
-    var legacyText = cleanAssistantResponse(
+    var legacyText2 = cleanAssistantResponse(
       extractChatGPTAssistantText(getElementTextNoSrOnly(containers[j]))
     );
 
-    if (!legacyText) continue;
-    if (isInvalidChatGPTResponse(legacyText)) continue;
-    if (looksLikeInjectedPrompt(legacyText)) continue;
-    if (isArenaRejectedCandidate(legacyText)) continue;
+    if (!legacyText2) continue;
+    if (isInvalidChatGPTResponse(legacyText2)) continue;
+    if (looksLikeInjectedPrompt(legacyText2)) continue;
+    if (isArenaRejectedCandidate(legacyText2)) continue;
 
-    return stripChatGPTBoilerplate(legacyText) || legacyText;
+    return stripChatGPTBoilerplate(legacyText2) || legacyText2;
   }
 
   return "";
