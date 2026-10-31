@@ -2,7 +2,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.53";
+var VERSION = "1.0.54";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -603,15 +603,6 @@ function sendContextConsumed(contextId) {
 
 // ============================================================
 // Venice reload-resume capture state
-// ------------------------------------------------------------
-// Venice تُعيد تحميل الصفحة بالكامل بعد إرسال أول رسالة في محادثة جديدة
-// (تنقّل فعلي يهدم أي حلقة انتظار JS قائمة). نخزّن علمًا في sessionStorage
-// عند بدء الالتقاط فعليًا، ونحاول استئناف المراقبة تلقائيًا إذا وجدنا هذا
-// العلم عند تحميل content.js من جديد على نفس التبويب/الأصل.
-// محصور بـ Venice فقط، لا يمسّ أي منصة أخرى.
-//
-// [v1.0.52] الحالة المخزَّنة تتضمن أيضًا توقيع النص المحقون (injectedSignature)
-// ووقته (injectedAt) ليصمد الحارس عبر إعادة تحميل الصفحة.
 // ============================================================
 
 var VENICE_CAPTURE_STORAGE_KEY = "aichat_venice_capture_state_v1";
@@ -772,6 +763,51 @@ function cleanAssistantResponse(text) {
   return s.trim();
 }
 
+// ============================================================
+// [v1.0.54] عبارات disclaimer / تسميات أدوار فارغة شائعة في واجهة
+// ChatGPT، وآلية تجريد عامة منها. تُستخدم لتعميم isInvalidChatGPTResponse
+// بدل الاعتماد على مطابقة تامة فقط لعبارات محدودة سابقًا، وهو ما كان
+// يسمح بقبول "رد منقوص" (تسمية دور فارغة + disclaimer فقط) كرد صالح.
+// ============================================================
+
+var CHATGPT_DISCLAIMER_SNIPPETS = [
+  "chatgpt هو نظام ذكاء اصطناعي وقد يخطئ",
+  "chatgpt is an ai system and can make mistakes",
+  "chatgpt can make mistakes. check important info",
+  "chatgpt can make mistakes",
+  "الذكاء الاصطناعي يمكن أن يخطئ",
+  "قد يخطئ الذكاء الاصطناعي",
+  "check important info"
+];
+
+function escapeRegExp(s) {
+  return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripChatGPTBoilerplate(text) {
+  var out = String(text || "");
+
+  for (var i = 0; i < CHATGPT_DISCLAIMER_SNIPPETS.length; i++) {
+    try {
+      var re = new RegExp(escapeRegExp(CHATGPT_DISCLAIMER_SNIPPETS[i]), "ig");
+      out = out.replace(re, " ");
+    } catch (_) {}
+  }
+
+  out = out
+    .split("\n")
+    .filter(function (line) {
+      var l = line.trim();
+      if (!l) return false;
+      if (/^(chatgpt|you|أنت)\s*[:：]?\s*$/i.test(l)) return false;
+      if (/^(قال\s+chatgpt|chatgpt\s+قال)\s*[:：]?\s*$/i.test(l)) return false;
+      return true;
+    })
+    .join("\n");
+
+  return out.replace(/\s+/g, " ").trim();
+}
+
 function isInvalidChatGPTResponse(text) {
   var normalized = String(text || "")
     .replace(/\u00a0/g, " ")
@@ -784,12 +820,19 @@ function isInvalidChatGPTResponse(text) {
   var invalidPhrases = [
     "chatgpt هو نظام ذكاء اصطناعي وقد يخطئ",
     "chatgpt is an ai system and can make mistakes",
-    "chatgpt can make mistakes. check important info"
+    "chatgpt can make mistakes. check important info",
+    "الذكاء الاصطناعي يمكن أن يخطئ"
   ];
 
   for (var i = 0; i < invalidPhrases.length; i++) {
     if (normalized === invalidPhrases[i]) return true;
   }
+
+  // [v1.0.54] فحص عام: بعد حذف الـdisclaimers وتسميات الأدوار الفارغة
+  // الشائعة، إن لم يتبقَّ محتوى حقيقي => النص غير صالح (رد منقوص).
+  var afterStrip = stripChatGPTBoilerplate(text).toLowerCase();
+
+  if (!afterStrip || afterStrip.length < 2) return true;
 
   return false;
 }
@@ -905,7 +948,9 @@ function getCurrentAssistantText() {
     if (isInvalidChatGPTResponse(text)) continue;
     if (looksLikeInjectedPrompt(text)) continue;
 
-    return text;
+    // [v1.0.54] إرجاع النص بعد تجريد أي disclaimer/تسميات أدوار فارغة
+    // متبقية عالقة ضمن نص صالح (حماية إضافية، لا تؤثر على رد سليم).
+    return stripChatGPTBoilerplate(text) || text;
   }
 
   var containers = getChatGPTConversationContainers();
@@ -919,7 +964,7 @@ function getCurrentAssistantText() {
     if (isInvalidChatGPTResponse(legacyText)) continue;
     if (looksLikeInjectedPrompt(legacyText)) continue;
 
-    return legacyText;
+    return stripChatGPTBoilerplate(legacyText) || legacyText;
   }
 
   return "";
@@ -931,6 +976,17 @@ function getCurrentAssistantText() {
 
 var lastInjectedSignature = "";
 var lastInjectedAt = 0;
+
+// [v1.0.54] العلامات الفعلية الحالية التي ينتجها WebSendCoordinator.kt
+// (كانت content.js تبحث فقط عن علامات قديمة لم تعد مستخدمة إطلاقًا:
+// <shared_memories> بلا غلاف SHARED_MEMORIES_XML:، ## السؤال، تعليمات
+// مهمة، ملاحظات إضافية — لا شيء منها يظهر في الصيغة الحالية، لذلك كانت
+// looksLikeInjectedPrompt تُرجع false دائمًا للسياق الجديد، معطِّلة كل
+// حماية ضد التقاط النص المحقون كرد أو كرسالة مستخدم عادية).
+var HIDDEN_CONTEXT_BEGIN_MARKER = "<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>";
+var HIDDEN_CONTEXT_END_MARKER = "<<<AICHAT_HIDDEN_CONTEXT_END>>>";
+var ARENA_CONTEXT_BEGIN_MARKER = "### Context (visible)";
+var ARENA_CONTEXT_END_MARKER = "### End Context";
 
 // --- [إصلاح جذري v1.0.53] ---
 // الكود القديم كان: /[:：#*_-\u2013\u2014\(\)\(\)<>]/g
@@ -961,6 +1017,17 @@ function makeSignature(s) {
 function looksLikeInjectedPrompt(text) {
   if (!text) return false;
 
+  // [v1.0.54] العلامات الفعلية الحالية أولاً.
+  if (text.indexOf(HIDDEN_CONTEXT_BEGIN_MARKER) !== -1) return true;
+  if (text.indexOf(ARENA_CONTEXT_BEGIN_MARKER) !== -1) return true;
+  if (text.indexOf("WORKSPACE_SUMMARY:") !== -1) return true;
+  if (text.indexOf("AGENT_PERSONA:") !== -1) return true;
+  if (text.indexOf("WEB_HANDOFF_SUMMARY:") !== -1) return true;
+  if (text.indexOf("SHARED_MEMORIES_XML:") !== -1) return true;
+  if (text.indexOf("ACCURACY_POLICY:") !== -1) return true;
+  if (text.indexOf("EXTRA_NOTES:") !== -1) return true;
+
+  // علامات قديمة (أُبقيت للتوافق مع أي صيغة سابقة محتملة).
   if (text.indexOf("<shared_memories>") !== -1) return true;
   if (text.indexOf("## السؤال") !== -1) return true;
   if (text.indexOf("تعليمات مهمة") !== -1) return true;
@@ -972,10 +1039,6 @@ function looksLikeInjectedPrompt(text) {
     (Date.now() - lastInjectedAt) < 60000;
 }
 
-// ملاحظة [v1.0.51]: رغم الاسم التاريخي (كانت مخصصة لـ Arena فقط)، هذا
-// الفحص الآن عام ويُستدعى لأي منصة عدا chatgpt. تم أيضًا تحسين دقة
-// المطابقة: الرفض يحدث فقط عند تطابق تام، أو عندما يكون طول النص
-// المُرشَّح قريبًا جدًا من طول النص المحقون (echo حقيقي على الأرجح).
 function isArenaRejectedCandidate(text) {
   if (CURRENT_PLATFORM.id === "chatgpt") return false;
   if (!text) return false;
@@ -1046,7 +1109,6 @@ function startArenaCaptureFromWebsite(reason) {
   startResponseCapture("arena_" + reason);
 }
 
-// محاولة استئناف الالتقاط لـ Venice بعد إعادة تحميل الصفحة.
 function tryResumeVeniceCapture() {
   var state = getVeniceCaptureState();
 
@@ -1478,18 +1540,33 @@ var sanitizeThrottleTimer = 0;
 var sanitizeAggressiveTimer = 0;
 var sanitizeAggressiveUntil = 0;
 
+// [v1.0.54] أُضيف فحص العلامة الفعلية الحالية (أحرف كبيرة) بالإضافة
+// للعلامة القديمة (أحرف صغيرة) ولعلامات WebSendCoordinator الأخرى.
+// indexOf حسّاس لحالة الأحرف، لذا HIDDEN_MARKER وحدها لم تكن تطابق أبدًا
+// النص الفعلي المحقون <<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>، ما كان يعطّل
+// الـsanitizer بالكامل لأي رسالة تحتوي السياق الجديد.
 function looksLikeHasHiddenContext(t) {
   if (!t) return false;
 
   return (
+    t.indexOf(HIDDEN_CONTEXT_BEGIN_MARKER) !== -1 ||
     t.indexOf(HIDDEN_MARKER) !== -1 ||
     t.indexOf("<shared_memories>") !== -1 ||
-    t.indexOf("SHARED_MEMORIES_XML:") !== -1
+    t.indexOf("SHARED_MEMORIES_XML:") !== -1 ||
+    t.indexOf("WORKSPACE_SUMMARY:") !== -1 ||
+    t.indexOf("AGENT_PERSONA:") !== -1 ||
+    t.indexOf("WEB_HANDOFF_SUMMARY:") !== -1
   );
 }
 
 function stripHiddenContextFromText(s) {
   var out = String(s || "");
+
+  // [v1.0.54] إزالة كتلة السياق الفعلية بين العلامتين الحاليتين.
+  out = out.replace(
+    /<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>[\s\S]*?<<<AICHAT_HIDDEN_CONTEXT_END>>>\s*/g,
+    ""
+  );
 
   out = out.replace(
     /<!--\s*aichat_hidden_context[\s\S]*?-->\s*/ig,
@@ -1892,7 +1969,7 @@ function scheduleSanitizeAfterSend(injectedText) {
     try {
       log(
         "🧼 scheduleSanitizeAfterSend: changedNow=0 marker=" +
-        (String(injectedText || "").indexOf(HIDDEN_MARKER) !== -1
+        (String(injectedText || "").indexOf(HIDDEN_CONTEXT_BEGIN_MARKER) !== -1
           ? "yes"
           : "no")
       );
@@ -2196,5 +2273,3 @@ if (shouldSendDiagnostics()) {
   } catch (_) {}
 }
 })();
-
-
