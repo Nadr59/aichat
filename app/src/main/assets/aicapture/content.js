@@ -2,7 +2,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.54";
+var VERSION = "1.0.55";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -35,7 +35,9 @@ var PLATFORMS = {
       if (!el) return "";
       var md = null;
       try { md = el.querySelector(".markdown"); } catch (e) {}
-      return getElementText(md || el);
+      // [v1.0.55] استخدام getElementTextNoSrOnly بدل getElementText لتفادي
+      // تسرب تسميات "أنت قلت:"/تسميات الأدوار المخفية (sr-only) إلى نص الرد.
+      return getElementTextNoSrOnly(md || el);
     },
     legacyContainerMode: true
   },
@@ -169,6 +171,52 @@ function getElementText(el) {
       .trim();
   } catch (e) {
     return "";
+  }
+}
+
+// ============================================================
+// [v1.0.55] Screen-reader-only label stripping (ChatGPT)
+// ------------------------------------------------------------
+// ChatGPT's production DOM يتضمّن تسميات إتاحة مخفية بصريًا (class
+// "sr-only") قبل كل رسالة، مثل "أنت قلت:" قبل رسالة المستخدم. دليل فعلي
+// من محادثة حقيقية أثبت أن هذا النص يتسرّب ضمن النص المُستخرَج (تم التقاط
+// "أنت قلت: مرحبا" كـ"رد" فعلي). نزيل هذه العناصر من نسخة منفصلة (clone)
+// قبل قراءة النص، بصرف النظر عن السبب الدقيق لعدم إخفائها في GeckoView.
+// محصور بالاستخدام داخل مسار ChatGPT فقط، لا يُستبدل getElementText العام.
+// ============================================================
+
+function stripScreenReaderOnlyClone(el) {
+  if (!el) return el;
+
+  try {
+    var clone = el.cloneNode(true);
+    var hidden = clone.querySelectorAll(".sr-only, [class*='sr-only']");
+
+    for (var i = 0; i < hidden.length; i++) {
+      try {
+        if (hidden[i].parentNode) hidden[i].parentNode.removeChild(hidden[i]);
+      } catch (_) {}
+    }
+
+    return clone;
+  } catch (e) {
+    return el;
+  }
+}
+
+function getElementTextNoSrOnly(el) {
+  if (!el) return "";
+
+  try {
+    var cleaned = stripScreenReaderOnlyClone(el);
+    var raw = (cleaned && cleaned.textContent) ? cleaned.textContent : "";
+
+    return raw
+      .replace(/\u00a0/g, " ")
+      .replace(/\r/g, "")
+      .trim();
+  } catch (e2) {
+    return getElementText(el);
   }
 }
 
@@ -432,7 +480,6 @@ var DEFAULT_SEND_SELECTORS = [
   "button[data-testid*='send' i]"
 ];
 
-// الدالة القديمة (بحث عام في كامل الصفحة) — أُبقيت كحل احتياطي أخير فقط.
 function findSendButtonGlobal(preferSelector) {
   var selectors = [];
 
@@ -452,10 +499,6 @@ function findSendButtonGlobal(preferSelector) {
   return null;
 }
 
-// --- [إصلاح جذري] بحث محصور بأقرب حاوية مشتركة مع حقل الإدخال الفعلي،
-// لتفادي اختيار زر غير مرتبط فعليًا بصندوق المحادثة الذي حُقن فيه النص
-// (مشكلة مؤكدة على Venice: عدة صناديق محادثة/أزرار إرسال موجودة بالصفحة
-// في آن واحد، والبحث العام كان يختار أول زر في ترتيب DOM بلا علاقة بالمدخل).
 function findSendButtonNear(input, preferSelector) {
   var selectors = [];
 
@@ -505,7 +548,6 @@ function findSendButtonNear(input, preferSelector) {
       } catch (_) {}
     }
 
-    // تفضيل صريح لزر type=submit داخل النطاق المحلي أولاً.
     try {
       var submitBtn = scope.querySelector("button[type='submit']");
       if (submitBtn) {
@@ -636,6 +678,13 @@ function clearVeniceCaptureState() {
 // Assistant response extraction
 // ============================================================
 
+// [v1.0.55] متغيرات تتبّع لتضييق سجلات DIAG الخاصة بـ ChatGPT بحيث تُسجَّل
+// فقط عند حدوث تغيّر فعلي (لا تُسجَّل في كل استطلاع متكرر أثناء الانتظار).
+var lastChatgptDiagRoleCount = -1;
+var lastChatgptDiagAgentCount = -1;
+var lastChatgptDiagContainerAnnounced = false;
+var lastChatgptDiagTarget = null;
+
 function getChatGPTConversationContainers() {
   var out = [];
 
@@ -681,6 +730,14 @@ function getPlatformResponseElements() {
       } catch (_) {}
     }
 
+    // [v1.0.55] DIAG: دليل مباشر على عدد عناصر دور assistant الموجودة
+    // فعليًا، لتأكيد/نفي فرضية فشل المحددات مبكرًا بعد الإرسال مباشرة.
+    // يُسجَّل فقط عند تغيّر العدد لتفادي إغراق السجل.
+    if (res.length !== lastChatgptDiagRoleCount) {
+      lastChatgptDiagRoleCount = res.length;
+      log("🔬 DIAG chatgpt role-selector matches=" + res.length);
+    }
+
     if (!res.length) {
       try {
         var agentTurns = document.querySelectorAll(".agent-turn");
@@ -691,12 +748,28 @@ function getPlatformResponseElements() {
           }
         }
       } catch (_) {}
+
+      if (res.length !== lastChatgptDiagAgentCount) {
+        lastChatgptDiagAgentCount = res.length;
+        log("🔬 DIAG chatgpt .agent-turn fallback matches=" + res.length);
+      }
     }
 
     if (!res.length) {
-      return getChatGPTConversationContainers();
+      var legacyContainers = getChatGPTConversationContainers();
+
+      if (!lastChatgptDiagContainerAnnounced) {
+        lastChatgptDiagContainerAnnounced = true;
+        log(
+          "🔬 DIAG chatgpt FALLING BACK to full conversation containers count=" +
+          legacyContainers.length
+        );
+      }
+
+      return legacyContainers;
     }
 
+    lastChatgptDiagContainerAnnounced = false;
     return res;
   }
 
@@ -765,9 +838,7 @@ function cleanAssistantResponse(text) {
 
 // ============================================================
 // [v1.0.54] عبارات disclaimer / تسميات أدوار فارغة شائعة في واجهة
-// ChatGPT، وآلية تجريد عامة منها. تُستخدم لتعميم isInvalidChatGPTResponse
-// بدل الاعتماد على مطابقة تامة فقط لعبارات محدودة سابقًا، وهو ما كان
-// يسمح بقبول "رد منقوص" (تسمية دور فارغة + disclaimer فقط) كرد صالح.
+// ChatGPT، وآلية تجريد عامة منها.
 // ============================================================
 
 var CHATGPT_DISCLAIMER_SNIPPETS = [
@@ -828,8 +899,6 @@ function isInvalidChatGPTResponse(text) {
     if (normalized === invalidPhrases[i]) return true;
   }
 
-  // [v1.0.54] فحص عام: بعد حذف الـdisclaimers وتسميات الأدوار الفارغة
-  // الشائعة، إن لم يتبقَّ محتوى حقيقي => النص غير صالح (رد منقوص).
   var afterStrip = stripChatGPTBoilerplate(text).toLowerCase();
 
   if (!afterStrip || afterStrip.length < 2) return true;
@@ -941,15 +1010,27 @@ function getCurrentAssistantText() {
         CURRENT_PLATFORM.extractResponse(target)
       );
     } catch (_) {
-      text = cleanAssistantResponse(getElementText(target));
+      text = cleanAssistantResponse(getElementTextNoSrOnly(target));
     }
 
     if (!text) continue;
     if (isInvalidChatGPTResponse(text)) continue;
     if (looksLikeInjectedPrompt(text)) continue;
+    // [v1.0.55] حارس الصدى مفعَّل الآن لـ ChatGPT أيضًا (راجع
+    // isArenaRejectedCandidate). هذا يلتقط حالات مثل التقاط "مرحبا" نفسها
+    // كرد على سؤال "مرحبا".
+    if (isArenaRejectedCandidate(text)) continue;
 
-    // [v1.0.54] إرجاع النص بعد تجريد أي disclaimer/تسميات أدوار فارغة
-    // متبقية عالقة ضمن نص صالح (حماية إضافية، لا تؤثر على رد سليم).
+    // [v1.0.55] DIAG: يُسجَّل فقط عند تغيّر العنصر الفعلي المُختار (ليس
+    // في كل استطلاع متكرر لنفس العنصر المستقر).
+    if (target !== lastChatgptDiagTarget) {
+      lastChatgptDiagTarget = target;
+      log(
+        "🔬 DIAG chatgpt chosen target => " + describeElementForDiag(target) +
+        " textLen=" + text.length
+      );
+    }
+
     return stripChatGPTBoilerplate(text) || text;
   }
 
@@ -957,12 +1038,13 @@ function getCurrentAssistantText() {
 
   for (var j = containers.length - 1; j >= 0; j--) {
     var legacyText = cleanAssistantResponse(
-      extractChatGPTAssistantText(getElementText(containers[j]))
+      extractChatGPTAssistantText(getElementTextNoSrOnly(containers[j]))
     );
 
     if (!legacyText) continue;
     if (isInvalidChatGPTResponse(legacyText)) continue;
     if (looksLikeInjectedPrompt(legacyText)) continue;
+    if (isArenaRejectedCandidate(legacyText)) continue;
 
     return stripChatGPTBoilerplate(legacyText) || legacyText;
   }
@@ -977,29 +1059,11 @@ function getCurrentAssistantText() {
 var lastInjectedSignature = "";
 var lastInjectedAt = 0;
 
-// [v1.0.54] العلامات الفعلية الحالية التي ينتجها WebSendCoordinator.kt
-// (كانت content.js تبحث فقط عن علامات قديمة لم تعد مستخدمة إطلاقًا:
-// <shared_memories> بلا غلاف SHARED_MEMORIES_XML:، ## السؤال، تعليمات
-// مهمة، ملاحظات إضافية — لا شيء منها يظهر في الصيغة الحالية، لذلك كانت
-// looksLikeInjectedPrompt تُرجع false دائمًا للسياق الجديد، معطِّلة كل
-// حماية ضد التقاط النص المحقون كرد أو كرسالة مستخدم عادية).
 var HIDDEN_CONTEXT_BEGIN_MARKER = "<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>";
 var HIDDEN_CONTEXT_END_MARKER = "<<<AICHAT_HIDDEN_CONTEXT_END>>>";
 var ARENA_CONTEXT_BEGIN_MARKER = "### Context (visible)";
 var ARENA_CONTEXT_END_MARKER = "### End Context";
 
-// --- [إصلاح جذري v1.0.53] ---
-// الكود القديم كان: /[:：#*_-\u2013\u2014\(\)\(\)<>]/g
-// المقطع "_-\u2013" داخل صنف الأحرف [...] كان يُفسَّر كـ "نطاق" (range)
-// من U+005F إلى U+2013 (وليس ثلاثة رموز منفصلة)! هذا النطاق الهائل يغطي
-// ضمنيًا كامل الكتلة العربية Unicode (U+0600–U+06FF)، فكانت كل الحروف
-// العربية تُستبدل بمسافات وتُحذف فعليًا من أي نص يمر عبر normalizeForMatch.
-// النتيجة المؤكدة بدليل سجل فعلي: lastInjectedSignature = "" دائمًا لأي
-// نص عربي (signatureLen=0 في كل محاولة إرسال، وليس فقط بعد إعادة التحميل)،
-// مما عطّل حارس رفض الصدى (isArenaRejectedCandidate) بالكامل لكل نص عربي
-// منذ البداية - وهو السبب الجذري الحقيقي وراء كل حالات التقاط الصدى على
-// Venice التي ظهرت عبر الاختبارات السابقة.
-// الإصلاح: نقل الشرطة "-" إلى نهاية صنف الأحرف حيث تُفسَّر حرفيًا لا كنطاق.
 function normalizeForMatch(s) {
   return String(s || "")
     .replace(/\u00a0/g, " ")
@@ -1017,7 +1081,6 @@ function makeSignature(s) {
 function looksLikeInjectedPrompt(text) {
   if (!text) return false;
 
-  // [v1.0.54] العلامات الفعلية الحالية أولاً.
   if (text.indexOf(HIDDEN_CONTEXT_BEGIN_MARKER) !== -1) return true;
   if (text.indexOf(ARENA_CONTEXT_BEGIN_MARKER) !== -1) return true;
   if (text.indexOf("WORKSPACE_SUMMARY:") !== -1) return true;
@@ -1027,7 +1090,6 @@ function looksLikeInjectedPrompt(text) {
   if (text.indexOf("ACCURACY_POLICY:") !== -1) return true;
   if (text.indexOf("EXTRA_NOTES:") !== -1) return true;
 
-  // علامات قديمة (أُبقيت للتوافق مع أي صيغة سابقة محتملة).
   if (text.indexOf("<shared_memories>") !== -1) return true;
   if (text.indexOf("## السؤال") !== -1) return true;
   if (text.indexOf("تعليمات مهمة") !== -1) return true;
@@ -1039,8 +1101,14 @@ function looksLikeInjectedPrompt(text) {
     (Date.now() - lastInjectedAt) < 60000;
 }
 
+// [v1.0.55] أُزيل الاستثناء الذي كان يُعطِّل هذا الحارس بالكامل لـ ChatGPT
+// (كان: `if (CURRENT_PLATFORM.id === "chatgpt") return false;`). دليل فعلي
+// من محادثة حقيقية أثبت أن محددات ChatGPT يمكن أن تفشل مؤقتًا مباشرة بعد
+// الإرسال (قبل ظهور عنصر الرد في DOM)، ما يؤدي لالتقاط نص المستخدم نفسه
+// (أو صداه) كـ"رد" دون أي حماية إطلاقًا. تفعيل نفس حارس الصدى المستخدم مع
+// Venice/Arena الآن لـ ChatGPT أيضًا. الاسم التاريخي "Arena" لم يعد دقيقًا
+// لكن لم تُغيَّر التسمية تفاديًا لتوسيع نطاق هذا التعديل.
 function isArenaRejectedCandidate(text) {
-  if (CURRENT_PLATFORM.id === "chatgpt") return false;
   if (!text) return false;
   if (looksLikeInjectedPrompt(text)) return true;
 
@@ -1150,10 +1218,8 @@ function tryResumeVeniceCapture() {
 function finishCapture(answer) {
   if (captureFinished) return;
 
-  if (
-    CURRENT_PLATFORM.id !== "chatgpt" &&
-    isArenaRejectedCandidate(answer)
-  ) {
+  // [v1.0.55] أُزيل استثناء ChatGPT من هذا الفحص (راجع isArenaRejectedCandidate).
+  if (isArenaRejectedCandidate(answer)) {
     log(
       "⚠️ FinishCapture blocked (echo of injected text detected) platform=" +
       CURRENT_PLATFORM.id
@@ -1218,15 +1284,12 @@ function watchForResponse() {
 
   var current = getCurrentAssistantText();
 
-  if (
-    CURRENT_PLATFORM.id !== "chatgpt" &&
-    current &&
-    isArenaRejectedCandidate(current)
-  ) {
-    if (CURRENT_PLATFORM.id === "venice") {
+  // [v1.0.55] أُزيل استثناء ChatGPT هنا أيضًا (راجع isArenaRejectedCandidate).
+  if (current && isArenaRejectedCandidate(current)) {
+    if (CURRENT_PLATFORM.id === "venice" || CURRENT_PLATFORM.id === "chatgpt") {
       log(
         "🔬 DIAG watchForResponse: current candidate rejected as echo len=" +
-        current.length
+        current.length + " platform=" + CURRENT_PLATFORM.id
       );
     }
     setTimeout(watchForResponse, 900);
@@ -1338,6 +1401,12 @@ function getUserMessageText(el) {
       if (textNode) target = textNode;
     }
   } catch (_) {}
+
+  // [v1.0.55] لـ ChatGPT تحديدًا: تجريد تسميات sr-only من نص رسالة
+  // المستخدم أيضًا، لمنع تلوّث توقيع المطابقة المستخدم لاكتشاف الصدى.
+  if (CURRENT_PLATFORM.id === "chatgpt") {
+    return cleanAssistantResponse(getElementTextNoSrOnly(target));
+  }
 
   return cleanAssistantResponse(getElementText(target));
 }
@@ -1540,11 +1609,6 @@ var sanitizeThrottleTimer = 0;
 var sanitizeAggressiveTimer = 0;
 var sanitizeAggressiveUntil = 0;
 
-// [v1.0.54] أُضيف فحص العلامة الفعلية الحالية (أحرف كبيرة) بالإضافة
-// للعلامة القديمة (أحرف صغيرة) ولعلامات WebSendCoordinator الأخرى.
-// indexOf حسّاس لحالة الأحرف، لذا HIDDEN_MARKER وحدها لم تكن تطابق أبدًا
-// النص الفعلي المحقون <<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>، ما كان يعطّل
-// الـsanitizer بالكامل لأي رسالة تحتوي السياق الجديد.
 function looksLikeHasHiddenContext(t) {
   if (!t) return false;
 
@@ -1562,7 +1626,6 @@ function looksLikeHasHiddenContext(t) {
 function stripHiddenContextFromText(s) {
   var out = String(s || "");
 
-  // [v1.0.54] إزالة كتلة السياق الفعلية بين العلامتين الحاليتين.
   out = out.replace(
     /<<<AICHAT_HIDDEN_CONTEXT_BEGIN>>>[\s\S]*?<<<AICHAT_HIDDEN_CONTEXT_END>>>\s*/g,
     ""
