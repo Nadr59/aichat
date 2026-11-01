@@ -1,9 +1,6 @@
-
 package com.example.aichat.ui.viewmodel
 
-import android.app.Application
-import android.graphics.Bitmap
-import android.net.Uri
+import android.app.Applicimport android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -216,6 +213,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun newUniqueApiScopeKey(): String =
         "api:conv:${System.currentTimeMillis()}-${(1000..999999).random()}"
+
+    /**
+     * ✅ مفتاح Workspace فريد لكل محادثة ويب جديدة.
+     * المنصة (ChatGPT/Venice/Arena) قناة توصيل فقط، وليست مفتاح عزل —
+     * نفس مبدأ newUniqueApiScopeKey تمامًا، وبادئة "web:" تسمح فقط
+     * بتمييز القوائم في أدوات التطوير (الشجرة) دون أي حقل جديد في DB.
+     */
+    private fun newUniqueWebScopeKey(): String =
+        "web:conv:${System.currentTimeMillis()}-${(1000..999999).random()}"
+
+    /**
+     * أرشيف قديم للقراءة فقط: محادثات أنشئت قبل فصل Workspace كانت
+     * تتشارك المفتاح "web:global". لا يُكتب فيه أي جديد — أي إرسال
+     * يستهدف محادثة أرشيفية يُحوَّل تلقائيًا إلى محادثة جديدة.
+     */
+    private val legacyWebGlobalScopeKey: String = "web:global"
 
     private suspend fun setCurrentWorkspaceById(workspaceId: Long?) {
         _currentWorkspaceId.value = workspaceId
@@ -781,11 +794,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // =========================
-    // Web — GLOBAL WORKSPACE
+    // Web — WORKSPACE لكل محادثة (نموذج موحَّد مع API)
     // =========================
+    //
+    // ✅ إعادة تصميم (خطوة الويب):
+    // - أُلغي Workspace المشترك "web:global" كوجهة كتابة نهائيًا.
+    //   ما وُجد منه سابقًا يبقى أرشيفًا للقراءة فقط (legacyWebGlobalScopeKey)،
+    //   وأي إرسال يستهدف محادثة أرشيفية يُحوَّل تلقائيًا لمحادثة جديدة.
+    // - المنصة (ChatGPT/Venice/Arena) قناة توصيل فقط. وحدة السياق هي
+    //   "المحادثة" نفسها — سواء كتب فيها المستخدم عبر API أم عبر منصة ويب.
+    // - المحادثة النشطة (_currentConversationId) هي الهدف الحتمي لرسائل
+    //   الويب، وملخصها هو ما يُحقَن (عبر vm.workspaceSummary في الشاشة)،
+    //   فيتطابق المُحقَن مع المُحدَّث دائمًا — إصلاح خلل "الملخص الذي
+    //   يُحدَّث ليس هو الذي يُحقَن".
+    // - Arena تمر بنفس هذا المسار تمامًا؛ خصوصيتها (إرسال يدوي عبر شاشة
+    //   ظاهرة) شأن طبقة UI فقط ولا استثناء لها في النموذج.
 
-    private fun webGlobalScopeKey(): String = "web:global"
-    private fun webGlobalWorkspaceTitle(): String = "WEB • Global"
     private fun webDefaultConversationTitle(): String = "Web"
 
     private data class PendingWebRequest(
@@ -801,39 +825,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentWebConversationId = MutableStateFlow<Long?>(null)
     val currentWebConversationId: StateFlow<Long?> = _currentWebConversationId.asStateFlow()
 
-    private val _webWorkspaceId = MutableStateFlow<Long?>(null)
-    val webWorkspaceId: StateFlow<Long?> = _webWorkspaceId.asStateFlow()
-
+    /**
+     * قائمة محادثات الويب لأدوات التطوير (شجرة الويب).
+     * تُستنتج من scopeKey الخاص بالـWorkspace (بادئة "web:") بدل الاعتماد
+     * على workspace جامع واحد — وتشمل أرشيف web:global القديم للقراءة.
+     */
     val webConversations: StateFlow<List<Conversation>> =
-        combine(conversations, webWorkspaceId) { all, wsId ->
-            if (wsId == null) emptyList()
-            else all.filter { it.workspaceId == wsId }
+        combine(conversations, conversationRepository.observeAllWorkspaces()) { all, workspaces ->
+            val webWorkspaceIds = workspaces
+                .filter { it.scopeKey.startsWith("web:") }
+                .map { it.id }
+                .toSet()
+            all.filter { it.workspaceId != null && it.workspaceId in webWorkspaceIds }
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    init {
-        viewModelScope.launch {
-            runCatching {
-                val ws = conversationRepository.getOrCreateWorkspace(
-                    scopeKey = webGlobalScopeKey(),
-                    title = webGlobalWorkspaceTitle()
-                )
-                _webWorkspaceId.value = ws.id
-            }
-        }
-    }
-
-    private suspend fun ensureWebWorkspace(): Workspace {
-        val ws = conversationRepository.getOrCreateWorkspace(
-            scopeKey = webGlobalScopeKey(),
-            title = webGlobalWorkspaceTitle()
-        )
-        _webWorkspaceId.value = ws.id
-        return ws
-    }
-
+    /**
+     * فتح محادثة ويب = فتحها فعليًا كمحادثة نشطة (توحيد المسارين):
+     * تُحمَّل رسائلها وWorkspace الخاص بها، وتصبح هدف أي إرسال لاحق
+     * من أي منصة ويب حتى يختار المستخدم غيرها.
+     */
     fun openWebConversation(conversationId: Long) {
         _currentWebConversationId.value = conversationId
         _lastWebUserText.value = null
+        openConversation(conversationId)
     }
 
     fun clearWebConversationSelection() {
@@ -844,10 +858,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun newWebConversation(title: String? = null) {
         viewModelScope.launch {
             runCatching {
-                val ws = ensureWebWorkspace()
-                val now = System.currentTimeMillis()
-
                 val finalTitle = title?.trim().orEmpty().ifBlank { webDefaultConversationTitle() }.take(60)
+
+                // ✅ Workspace فريد لكل محادثة ويب جديدة — لا يوجد web:global.
+                val ws = conversationRepository.getOrCreateWorkspace(
+                    scopeKey = newUniqueWebScopeKey(),
+                    title = finalTitle
+                )
+
                 val newId = conversationRepository.insertConversation(
                     Conversation(
                         title = finalTitle,
@@ -861,10 +879,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 conversationRepository.updateTitleAndTimestamp(
                     id = newId,
                     title = finalTitle,
-                    updatedAt = now
+                    updatedAt = System.currentTimeMillis()
                 )
 
                 _currentWebConversationId.value = newId
+                openConversation(newId)
                 _successMessage.value = "✅ تم إنشاء محادثة ويب جديدة."
             }.onFailure { e ->
                 _error.value = "فشل إنشاء محادثة ويب: ${e.message ?: "خطأ غير معروف"}"
@@ -872,6 +891,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * فرع ويب من المحادثة الحالية — قرار (ب) نفسه المعتمد في مسار API:
+     * Workspace جديد للفرع + لقطة ملخص الأصل + نسخ كامل رسائل الأصل،
+     * ثم انعزال تام بينهما.
+     */
     fun branchFromCurrentWebConversation() {
         val parentId = _currentWebConversationId.value
         if (parentId == null) {
@@ -882,23 +906,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             runCatching {
-                val ws = ensureWebWorkspace()
                 val parent = conversationRepository.getConversationById(parentId)
                     ?: throw IllegalStateException("محادثة الويب الأصل غير موجودة")
 
-                val branchTitle = buildString {
-                    val base = parent.title.trim().ifBlank { webDefaultConversationTitle() }.take(45)
-                    append("فرع: ")
-                    append(base)
-                }.take(60)
+                val parentWs = ensureWorkspaceForConversation(parentId)
+
+                val baseTitle = parent.title.trim().ifBlank { webDefaultConversationTitle() }.take(45)
+                val branchTitle = "فرع: $baseTitle".take(60)
+
+                val branchWs = conversationRepository.getOrCreateWorkspace(
+                    scopeKey = newUniqueWebScopeKey(),
+                    title = "فرع • $baseTitle".take(80)
+                )
+
+                val parentMessages = conversationRepository.getMessagesOnce(parentId)
 
                 val newId = conversationRepository.insertConversation(
                     Conversation(
                         title = branchTitle.ifBlank { "فرع جديد" },
-                        memoryAccessEnabled = true,
-                        agentId = aiSettings.webAgentIdOrNull,
-                        workspaceId = ws.id,
-                        parentConversationId = parentId
+                        memoryAccessEnabled = parent.memoryAccessEnabled,
+                        agentId = parent.agentId,
+                        workspaceId = branchWs.id,
+                        parentConversationId = parentId,
+                        branchContextMessageCount = parentMessages.size
                     )
                 )
 
@@ -908,7 +938,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     updatedAt = System.currentTimeMillis()
                 )
 
+                parentMessages.forEach { message ->
+                    conversationRepository.insertMessage(
+                        message.copy(
+                            id = 0,
+                            conversationId = newId
+                        )
+                    )
+                }
+
+                if (parentWs.summary.isNotBlank()) {
+                    conversationRepository.updateWorkspaceSummary(branchWs.id, parentWs.summary)
+                }
+
                 _currentWebConversationId.value = newId
+                openConversation(newId)
                 _successMessage.value = "✅ تم إنشاء فرع ويب."
             }.onFailure { e ->
                 _error.value = "فشل إنشاء فرع ويب: ${e.message ?: "خطأ غير معروف"}"
@@ -917,7 +961,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * ينشئ فرع ويب من الرسالة المختارة، وينسخ سياق المحادثة حتى تلك الرسالة.
+     * ينشئ فرع ويب من الرسالة المختارة — قرار (ب):
+     * Workspace جديد + لقطة ملخص + نسخ الرسائل حتى نقطة التفريع.
      */
     fun branchFromWebMessage(messageId: Long) {
         val parentId = _currentWebConversationId.value
@@ -948,19 +993,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val messagesToCopy = originalMessages.take(selectedIndex + 1)
-                val workspace = ensureWebWorkspace()
-                val branchTitle = "فرع: ${
-                    parent.title.trim()
-                        .ifBlank { webDefaultConversationTitle() }
-                        .take(45)
-                }".take(60)
+
+                val parentWs = ensureWorkspaceForConversation(parentId)
+
+                val baseTitle = parent.title.trim()
+                    .ifBlank { webDefaultConversationTitle() }
+                    .take(45)
+                val branchTitle = "فرع: $baseTitle".take(60)
+
+                val branchWs = conversationRepository.getOrCreateWorkspace(
+                    scopeKey = newUniqueWebScopeKey(),
+                    title = "فرع • $baseTitle".take(80)
+                )
 
                 val newId = conversationRepository.insertConversation(
                     Conversation(
                         title = branchTitle,
                         memoryAccessEnabled = parent.memoryAccessEnabled,
                         agentId = parent.agentId,
-                        workspaceId = parent.workspaceId ?: workspace.id,
+                        workspaceId = branchWs.id,
                         parentConversationId = parent.id,
                         branchContextMessageCount = messagesToCopy.size
                     )
@@ -981,7 +1032,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
 
+                if (parentWs.summary.isNotBlank()) {
+                    conversationRepository.updateWorkspaceSummary(branchWs.id, parentWs.summary)
+                }
+
                 _currentWebConversationId.value = newId
+                openConversation(newId)
                 _lastWebUserText.value = null
                 _error.value = null
                 _successMessage.value = "تم إنشاء فرع ويب من الرسالة المختارة."
@@ -998,6 +1054,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * بالانتقال اعتمادًا على الرسائل حتى نقطة التفريع فقط.
      *
      * يعيد نص السياق الجاهز للحقن في المنصة الهدف.
+     *
+     * ✅ الفرع يصبح المحادثة النشطة فورًا (openConversation) حتى
+     * تستهدفه رسائل المتابعة على المنصة الجديدة حتميًا.
      */
     suspend fun createWebHandoffFromMessage(messageId: Long): String {
         val parentId = _currentWebConversationId.value
@@ -1018,19 +1077,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             throw IllegalStateException("لا توجد رسائل لإنشاء السياق.")
         }
 
-        val workspace = ensureWebWorkspace()
+        val parentWs = ensureWorkspaceForConversation(parentId)
+
         val branchTitle = "متابعة: ${
             parent.title.trim()
                 .ifBlank { webDefaultConversationTitle() }
                 .take(42)
         }".take(60)
 
+        val branchWs = conversationRepository.getOrCreateWorkspace(
+            scopeKey = newUniqueWebScopeKey(),
+            title = "متابعة • ${parent.title.trim().ifBlank { webDefaultConversationTitle() }.take(40)}".take(80)
+        )
+
         val branchId = conversationRepository.insertConversation(
             Conversation(
                 title = branchTitle,
                 memoryAccessEnabled = parent.memoryAccessEnabled,
                 agentId = parent.agentId,
-                workspaceId = parent.workspaceId ?: workspace.id,
+                workspaceId = branchWs.id,
                 parentConversationId = parent.id,
                 branchContextMessageCount = messagesToCopy.size
             )
@@ -1051,8 +1116,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        // تثبيت الفرع قبل العودة إلى الشاشة.
+        if (parentWs.summary.isNotBlank()) {
+            conversationRepository.updateWorkspaceSummary(branchWs.id, parentWs.summary)
+        }
+
+        // تثبيت الفرع كمحادثة نشطة قبل العودة إلى الشاشة، حتى يستهدفه
+        // resolveActiveConversationForWeb عند إرسال سؤال المتابعة.
         _currentWebConversationId.value = branchId
+        openConversation(branchId)
         _lastWebUserText.value = null
         _error.value = null
         _successMessage.value = "تم إنشاء فرع متابعة للانتقال إلى المنصة الأخرى."
@@ -1099,20 +1170,35 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return summary.take(2200)
     }
 
+    /**
+     * ⚠️ الاسم القديم محفوظ لتوافق مواقع الاستدعاء الحالية، لكن السلوك
+     * تغيّر مع إلغاء web:global: يصفّر الآن Workspace المحادثة الحالية
+     * (ويب أو API) بالكامل — محادثاتها ورسائلها وملخصها.
+     */
     fun resetWebGlobalWorkspaceFully() {
         if (_isLoading.value) return
 
         viewModelScope.launch {
             runCatching {
-                val ws = ensureWebWorkspace()
-                conversationRepository.resetWorkspaceFully(ws.id)
+                val convId = _currentWebConversationId.value
+                    ?: _currentConversationId.value
+                    ?: throw IllegalStateException("لا توجد محادثة محددة لتصفير Workspace الخاص بها.")
 
-                _currentWebConversationId.value = null
-                _lastWebUserText.value = null
+                val conv = conversationRepository.getConversationById(convId)
+                val wsId = conv?.workspaceId
+                    ?: throw IllegalStateException("المحادثة الحالية بلا Workspace.")
 
-                _successMessage.value = "✅ تم تصفير Workspace الويب بالكامل (web:global)."
+                messagesCollectJob?.cancel()
+                messagesCollectJob = null
+
+                conversationRepository.resetWorkspaceFully(wsId)
+
+                clearWebConversationSelection()
+                newConversation()
+
+                _successMessage.value = "✅ تم تصفير Workspace المحادثة الحالية بالكامل."
             }.onFailure { e ->
-                _error.value = "فشل تصفير Workspace الويب: ${e.message ?: "خطأ غير معروف"}"
+                _error.value = "فشل التصفير: ${e.message ?: "خطأ غير معروف"}"
             }
         }
     }
@@ -1125,59 +1211,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return (base + suffix).trim().take(60)
     }
 
-    private suspend fun ensureWebConversation(
-        workspaceId: Long,
-        suggestedTitleForNewConversation: String
-    ): Long {
-        val existing = _currentWebConversationId.value
-        if (existing != null) {
-            val conv = conversationRepository.getConversationById(existing)
-            if (conv != null) {
-                if (conv.workspaceId == workspaceId) return existing
-                if (conv.workspaceId == null) {
-                    conversationRepository.updateConversationWorkspace(
-                        conversationId = existing,
-                        workspaceId = workspaceId,
-                        parentConversationId = conv.parentConversationId
-                    )
-                    return existing
-                }
-            }
-        }
-
-        val newId = conversationRepository.insertConversation(
-            Conversation(
-                title = suggestedTitleForNewConversation.ifBlank { webDefaultConversationTitle() },
-                memoryAccessEnabled = true,
-                agentId = aiSettings.webAgentIdOrNull,
-                workspaceId = workspaceId,
-                parentConversationId = null
-            )
-        )
-        _currentWebConversationId.value = newId
-        return newId
-    }
-
     /**
-     * ✅ خطوة 1.أ — توحيد "المحادثة النشطة" بين مسار API ومسار الويب.
+     * ✅ توجيه رسائل الويب — نموذج موحَّد وحتمي:
      *
-     * إن كانت هناك محادثة مفتوحة حاليًا في الشاشة الرئيسية (ChatScreen) عبر
-     * _currentConversationId، تُستخدم هي نفسها كهدف لرسائل الويب القادمة،
-     * مع ربط workspace الخاص بها عبر ensureWorkspaceForConversation بدل
-     * إجبار استخدام "web:global" المنفصل.
+     * 1) إن وُجدت محادثة نشطة (_currentConversationId) — سواء فُتحت من
+     *    ChatScreen أم من شجرة الويب — تُستخدم هي مع Workspace الخاص بها.
+     *    هذا هو جوهر الهدف الاستراتيجي: المنصة قناة داخل نفس المحادثة.
      *
-     * إن لم توجد محادثة نشطة حاليًا، يُحافظ على السلوك القديم تمامًا
-     * (إنشاء/استخدام محادثة ويب ضمن workspace الويب العام عبر
-     * ensureWebWorkspace + ensureWebConversation)، لكن يتم تعيين الناتج
-     * كمحادثة نشطة جديدة (_currentConversationId) وبدء مراقبتها
-     * (startCollecting) حتى تظهر تلقائيًا إن فُتحت ChatScreen لاحقًا.
+     * 2) استثناء الأرشيف: إن كانت المحادثة النشطة تابعة لـ"web:global"
+     *    القديم، لا يُكتب فيها — تُنشأ محادثة جديدة بدلًا منها.
      *
-     * ⚠️ ملاحظة: هذا المسار (لا محادثة نشطة) لا يزال يستخدم "web:global"
-     * المشترك — سيُعالَج في خطوة لاحقة منفصلة بعد مراجعة GeckoTestScreen.kt،
-     * بنفس مبدأ newUniqueApiScopeKey أعلاه.
+     * 3) إن لم توجد محادثة نشطة إطلاقًا، تُنشأ محادثة ويب جديدة بـ
+     *    Workspace فريد (newUniqueWebScopeKey) وتُصبح هي النشطة.
      *
-     * لا تغيير في: pendingWebRequests، مطابقة platformId، أو أي منطق في
-     * GeckoTestScreen.kt.
+     * في كل الحالات: الملخص المُحقَن (vm.workspaceSummary في الشاشة)
+     * والملخص المُحدَّث (هنا) ينتميان لنفس الـWorkspace دائمًا.
      */
     private suspend fun resolveActiveConversationForWeb(
         suggestedTitleForNewConversation: String
@@ -1187,26 +1235,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val activeConv = conversationRepository.getConversationById(activeId)
             if (activeConv != null) {
                 val ws = ensureWorkspaceForConversation(activeId)
-                _currentWebConversationId.value = activeId
-                return activeId to ws.id
+                if (ws.scopeKey != legacyWebGlobalScopeKey) {
+                    _currentWebConversationId.value = activeId
+                    return activeId to ws.id
+                }
+                // محادثة أرشيفية (web:global) → نكمل لإنشاء محادثة جديدة.
             }
         }
 
-        val ws = ensureWebWorkspace()
-        val convId = ensureWebConversation(
-            workspaceId = ws.id,
-            suggestedTitleForNewConversation = suggestedTitleForNewConversation
+        val finalTitle = suggestedTitleForNewConversation.ifBlank { webDefaultConversationTitle() }
+        val ws = conversationRepository.getOrCreateWorkspace(
+            scopeKey = newUniqueWebScopeKey(),
+            title = finalTitle
         )
 
-        if (_currentConversationId.value != convId) {
-            setCurrentWorkspaceById(ws.id)
-            _currentConversationId.value = convId
-            _currentParentConversationId.value = null
-            _currentAgentId.value = aiSettings.webAgentIdOrNull
-            _memoryAccessEnabled.value = true
-            _enhancedQuery.value = null
-            startCollecting(convId)
-        }
+        val convId = conversationRepository.insertConversation(
+            Conversation(
+                title = finalTitle,
+                memoryAccessEnabled = true,
+                agentId = aiSettings.webAgentIdOrNull,
+                workspaceId = ws.id,
+                parentConversationId = null
+            )
+        )
+
+        _currentWebConversationId.value = convId
+        openConversation(convId)
 
         return convId to ws.id
     }
@@ -1219,9 +1273,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             runCatching {
-                val ws = ensureWebWorkspace()
-                val convId = ensureWebConversation(
-                    workspaceId = ws.id,
+                val (convId, _) = resolveActiveConversationForWeb(
                     suggestedTitleForNewConversation = buildWebTitle(platformName, clean)
                 )
 
@@ -1652,4 +1704,3 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
-
