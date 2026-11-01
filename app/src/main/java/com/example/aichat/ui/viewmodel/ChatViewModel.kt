@@ -1,3 +1,4 @@
+
 package com.example.aichat.ui.viewmodel
 
 import android.app.Application
@@ -205,6 +206,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val model = aiSettings.getActiveModel().trim()
         return "API • $provider • $model"
     }
+
+    /**
+     * ✅ مفتاح Workspace فريد لكل محادثة جذر جديدة (وليس مشتركًا حسب
+     * provider+model). يضمن أن كل محادثة منطقية جديدة تبدأ بسياق خاص
+     * بها فقط، بصرف النظر عن المزوّد/النموذج المستخدم وقت إنشائها.
+     * المزوّد/النموذج يبقى "حقلاً" في المحادثة (aiSettings الحالية وقت
+     * الإرسال)، لا "مفتاح عزل" لسياقها.
+     */
+    private fun newUniqueApiScopeKey(): String =
+        "api:conv:${System.currentTimeMillis()}-${(1000..999999).random()}"
 
     private suspend fun setCurrentWorkspaceById(workspaceId: Long?) {
         _currentWorkspaceId.value = workspaceId
@@ -483,7 +494,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _currentWorkspaceId.value != null -> _currentWorkspaceId.value!!
                     else -> {
                         conversationRepository.getOrCreateWorkspace(
-                            scopeKey = apiScopeKey(),
+                            scopeKey = newUniqueApiScopeKey(),
                             title = apiWorkspaceTitle()
                         ).id
                     }
@@ -603,13 +614,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val imageBase64 = _selectedImageBase64.value
 
-                val ws = conversationRepository.getOrCreateWorkspace(
-                    scopeKey = apiScopeKey(),
-                    title = apiWorkspaceTitle()
-                )
-                setCurrentWorkspaceById(ws.id)
+                // ═══════════════════════════════════════════════════════════
+                // ✅ إصلاح: Workspace واحد لكل "محادثة منطقية" يختارها المستخدم،
+                // بدل مشاركة Workspace واحد بين كل المحادثات بنفس provider+model.
+                //
+                // - محادثة موجودة مسبقًا: نعتمد كليًا على ensureWorkspaceForConversation
+                //   التي تقرأ workspaceId المخزَّن فعليًا على المحادثة نفسها (أو فرعها)،
+                //   دون أي Workspace وسيط مشترك يُنشأ أو يُقرأ هنا أولاً.
+                // - محادثة جذر جديدة: Workspace جديد بمفتاح فريد (newUniqueApiScopeKey)
+                //   مخصص لها وحدها، فلا تنضم تلقائيًا لأي محادثة أخرى بمجرد تطابق
+                //   المزوّد/النموذج الحاليين.
+                // ═══════════════════════════════════════════════════════════
+                val existingConvId = _currentConversationId.value
 
-                val convId = _currentConversationId.value ?: run {
+                val convId: Long = if (existingConvId != null) {
+                    runCatching { ensureWorkspaceForConversation(existingConvId) }
+                    existingConvId
+                } else {
+                    val ws = conversationRepository.getOrCreateWorkspace(
+                        scopeKey = newUniqueApiScopeKey(),
+                        title = apiWorkspaceTitle()
+                    )
+                    setCurrentWorkspaceById(ws.id)
+
                     val id = conversationRepository.insertConversation(
                         Conversation(
                             title = text.take(50).ifBlank { "محادثة جديدة" },
@@ -623,8 +650,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     startCollecting(id)
                     id
                 }
-
-                runCatching { ensureWorkspaceForConversation(convId) }
 
                 val historySnapshot = conversationRepository.getMessagesOnce(convId)
 
@@ -1102,6 +1127,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * ensureWebWorkspace + ensureWebConversation)، لكن يتم تعيين الناتج
      * كمحادثة نشطة جديدة (_currentConversationId) وبدء مراقبتها
      * (startCollecting) حتى تظهر تلقائيًا إن فُتحت ChatScreen لاحقًا.
+     *
+     * ⚠️ ملاحظة: هذا المسار (لا محادثة نشطة) لا يزال يستخدم "web:global"
+     * المشترك — سيُعالَج في خطوة لاحقة منفصلة بعد مراجعة GeckoTestScreen.kt،
+     * بنفس مبدأ newUniqueApiScopeKey أعلاه.
      *
      * لا تغيير في: pendingWebRequests، مطابقة platformId، أو أي منطق في
      * GeckoTestScreen.kt.
