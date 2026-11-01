@@ -1559,7 +1559,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 val newChunks = mutableListOf<String>()
                 var skipped = 0
-                for (chunk in limitedChunks) {
+                for (chunk in limited) {
                     if (memoryRepository.existsByHash(calculateHash(chunk))) skipped++ else newChunks.add(chunk)
                 }
 
