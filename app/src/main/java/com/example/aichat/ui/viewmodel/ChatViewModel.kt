@@ -1,6 +1,8 @@
 package com.example.aichat.ui.viewmodel
 
-import android.app.Applicimport android.net.Uri
+import android.app.Application
+import android.graphics.Bitmap
+import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
