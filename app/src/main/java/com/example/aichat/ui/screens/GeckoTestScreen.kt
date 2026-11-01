@@ -1,3 +1,5 @@
+
+
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package com.example.aichat.ui.screens
@@ -67,7 +69,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -96,12 +97,9 @@ import com.example.aichat.data.local.SystemPrompt
 import com.example.aichat.data.model.AgentProfile
 import com.example.aichat.data.model.Conversation
 import com.example.aichat.data.model.MemoryItem
-import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.WebPlatform
-import com.example.aichat.data.model.Workspace
 import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.AgentRepository
-import com.example.aichat.repository.ConversationRepository
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.MemoryCuratorService
 import com.example.aichat.repository.MemoryWindowBuilder
@@ -111,7 +109,6 @@ import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
@@ -120,23 +117,18 @@ import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
 
 /**
- * GeckoTestScreen (Tabs + GeckoView + SendBar) +:
- * ✅ Web Agent injection
- * ✅ Workspace Summary injection (scopeKey = web:<platformId>)
- * ✅ زر "الشجرة" + BottomSheet لشجرة كل منصة بشكل مستقل
+ * GeckoTestScreen (Tabs + GeckoView + SendBar) — سقالة تطوير للويب.
  *
- * ملاحظة:
- * - BottomSheet الآن لا يعتمد على reflection لمعرفة "محادثات Workspace".
- * - يستخدم مباشرة:
- *   - repo.observeAllWorkspaces() لإيجاد Workspace الخاص بالمنصة الحالية
- *   - repo.observeConversationsByWorkspace(wsId) لعرض الشجرة
- * - التنقل بين المحادثات واختيارها يتم الآن عبر واجهة عامة في ChatViewModel
- *   (currentWebConversationId / openWebConversation / clearWebConversationSelection)
- *   بدل الكتابة المباشرة إلى MutableStateFlow عبر Reflection.
+ * الهدف الاستراتيجي: شاشة محادثة واحدة (ChatScreen) يعمل فيها GeckoView
+ * كمحرك خلفي مخفي. هذه الشاشة تبقى أداة اختبار/تشخيص — وستبقى ظاهرة
+ * لمنصة Arena تحديدًا لأنها لا تدعم الإرسال التلقائي (لصق يدوي).
  *
- * ✅ خطوة 1.ب.1: منطق بناء contextBlock و classifyHost/buildFinalTextForPlatform
- *   استُخرج إلى WebSendCoordinator (repository) دون أي تغيير سلوكي، تمهيدًا
- *   لإعادة استخدامه من مكوّن GeckoView مخفي مستقبلاً داخل ChatScreen.
+ * ✅ خطوة الويب — Workspace لكل محادثة (نموذج موحَّد مع API):
+ * - أُلغي "web:global" كوجهة كتابة؛ المحادثة النشطة (أو محادثة جديدة
+ *   بـWorkspace فريد) هي هدف أي إرسال، والملخص المُحقَن يُقرأ من
+ *   vm.workspaceSummary — نفس المصدر الذي يُحدَّث، فيتطابقان دائمًا.
+ * - أُزيل الاعتماد على Reflection لاستخراج ConversationRepository:
+ *   الحقن يقرأ StateFlow مباشرة، والشجرة تعمل عبر دوال الـVM العامة.
  */
 @Composable
 fun GeckoTestScreen(
@@ -155,10 +147,34 @@ fun GeckoTestScreen(
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val scope = rememberCoroutineScope()
 
-    // محاولة الحصول على ConversationRepository (لا نغيّر signature الشاشة).
-    // إن كان موجودًا داخل ChatViewModel (حتى لو private) سنستخرجه بالـ reflection.
-    val conversationRepository: ConversationRepository? = remember(chatViewModel) {
-        resolveConversationRepositoryFromViewModel(chatViewModel)
+    // ✅ ملخص Workspace المحادثة النشطة — مصدر الحقن الوحيد (يتطابق مع
+    // المصدر الذي يحدّثه onWebAiResponse في الـVM).
+    val workspaceSummaryFlow = remember(chatViewModel) {
+        chatViewModel?.workspaceSummary ?: MutableStateFlow("")
+    }
+    val currentWorkspaceSummary by workspaceSummaryFlow.collectAsStateWithLifecycle()
+
+    // عرض رسائل النجاح/الخطأ القادمة من الـVM داخل شاشة الويب (سقالة تطوير).
+    val vmErrorFlow = remember(chatViewModel) {
+        chatViewModel?.error ?: MutableStateFlow<String?>(null)
+    }
+    val vmError by vmErrorFlow.collectAsStateWithLifecycle()
+    val vmSuccessFlow = remember(chatViewModel) {
+        chatViewModel?.successMessage ?: MutableStateFlow<String?>(null)
+    }
+    val vmSuccess by vmSuccessFlow.collectAsStateWithLifecycle()
+
+    LaunchedEffect(vmError) {
+        vmError?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            chatViewModel?.clearError()
+        }
+    }
+    LaunchedEffect(vmSuccess) {
+        vmSuccess?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            chatViewModel?.clearSuccessMessage()
+        }
     }
 
     // ✅ مهم: ضمان وجود المنصات الافتراضية
@@ -294,9 +310,6 @@ fun GeckoTestScreen(
         if (platform.url.isNotBlank()) hostOrEmptyFrom(platform.url) else hostOrEmptyFrom(currentUrl)
 
     fun webKind(): WebSendCoordinator.WebKind = WebSendCoordinator.classifyHost(targetDomainStable())
-
-    // ✅ مساحة عمل مستقلة لكل منصة على حدة:
-    fun webWorkspaceScopeKey(): String = "web:global"
 
     // ============================================================
     // Gecko delegates
@@ -661,7 +674,7 @@ fun GeckoTestScreen(
                 }
 
                 // الفروع
-                if (chatViewModel != null && conversationRepository != null) {
+                if (chatViewModel != null) {
                     IconButton(onClick = { showWebTreeSheet = true }) {
                         Icon(
                             Icons.Filled.AccountTree,
@@ -932,18 +945,10 @@ fun GeckoTestScreen(
                                     }
                                 }
 
-                            // ✅ Workspace Summary injection (مستقل لكل منصة)
-                            val workspaceSummary: String = conversationRepository
-                                ?.let { repo ->
-                                    runCatching {
-                                        val ws = repo.getOrCreateWorkspace(
-                                            scopeKey = webWorkspaceScopeKey(),
-                                            title = "WEB • ${platform.name}"
-                                        )
-                                        ws.summary.trim()
-                                    }.getOrNull()
-                                }
-                                .orEmpty()
+                            // ✅ ملخص Workspace المحادثة النشطة — يُقرأ من
+                            // vm.workspaceSummary (نفس المصدر المُحدَّث)،
+                            // بلا Reflection وبلا web:global.
+                            val workspaceSummary: String = currentWorkspaceSummary.trim()
 
                             val extraNotes = aiSettings.customSystemInstruction.trim()
                             val includeAccuracy = accuracyEnabled
@@ -989,13 +994,10 @@ fun GeckoTestScreen(
     // =========================
     // ✅ Web Conversation Tree (BottomSheet)
     // =========================
-    if (showWebTreeSheet && chatViewModel != null && conversationRepository != null) {
+    if (showWebTreeSheet && chatViewModel != null) {
         WebGlobalTreeBottomSheet(
-            repo = conversationRepository,
             vm = chatViewModel,
             platformName = platform.name,
-            webAgentId = webAgentId,
-            scopeKey = webWorkspaceScopeKey(),
             enabledPlatforms = enabledPlatforms,
             onHandoffRequested = { messageId, targetPlatform ->
                 scope.launch {
@@ -1209,60 +1211,39 @@ private data class PendingWebHandoff(
 
 /* ============================ Web Tree BottomSheet ============================ */
 
+/**
+ * شجرة محادثات الويب — تعمل كليًا عبر دوال ChatViewModel العامة بعد
+ * إلغاء web:global:
+ * - القائمة من vm.webConversations (محادثات Workspaces ذات بادئة "web:"،
+ *   وتشمل أرشيف web:global القديم للقراءة).
+ * - الملخص المعروض هو ملخص Workspace المحادثة النشطة (vm.workspaceSummary).
+ * - الإنشاء/التفريع/التصفير تمر عبر الـVM حصريًا (لا كتابة مباشرة في repo).
+ *
+ * ملاحظة سقالة: "المسار/Breadcrumb" يتوقف عند أول سلف غير موجود في
+ * قائمة الويب (مثلاً أصل API في انتقال عابر للمنصات) — مقبول هنا.
+ */
 @Composable
 private fun WebGlobalTreeBottomSheet(
-    repo: ConversationRepository,
     vm: ChatViewModel,
     platformName: String,
-    webAgentId: String?,
-    scopeKey: String,
     enabledPlatforms: List<WebPlatform>,
     onHandoffRequested: (Long, WebPlatform) -> Unit,
     currentPlatformId: String,
     onDismiss: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Ensure workspace exists
-    LaunchedEffect(repo, scopeKey) {
-        runCatching {
-            repo.getOrCreateWorkspace(
-                scopeKey = scopeKey,
-                title = "WEB • $platformName"
-            )
-        }
-    }
-
-    val wsFlow = remember(repo, scopeKey) {
-        repo.observeAllWorkspaces().map { all ->
-            all.firstOrNull { it.scopeKey == scopeKey }
-        }
-    }
-    val ws: Workspace? by wsFlow.collectAsStateWithLifecycle(initialValue = null)
-
-    val currentId by vm.currentWebConversationId.collectAsStateWithLifecycle(
-        initialValue = null
-    )
-
-    fun openConversation(id: Long) {
-        vm.openWebConversation(id)
-    }
-
-    val convsFlow = remember(repo, ws?.id) {
-        ws?.id?.let { repo.observeConversationsByWorkspace(it) }
-            ?: kotlinx.coroutines.flow.flowOf(emptyList())
-    }
-    val convsRaw: List<Conversation> by convsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val convsRaw: List<Conversation> by vm.webConversations.collectAsStateWithLifecycle()
     val convs: List<Conversation> = remember(convsRaw) { convsRaw.sortedByDescending { it.updatedAt } }
     val byId: Map<Long, Conversation> = remember(convs) { convs.associateBy { it.id } }
 
-    // ✅ منع استخدام معرّف محادثة تابع لمزود آخر (يحمي من ربط فرع بمحادثة لا تنتمي لهذه المساحة)
-    LaunchedEffect(currentId, byId) {
-        if (currentId != null && currentId !in byId) {
-            vm.clearWebConversationSelection()
-        }
+    val currentId by vm.currentWebConversationId.collectAsStateWithLifecycle()
+    val currentWorkspaceId by vm.currentWorkspaceId.collectAsStateWithLifecycle()
+    val wsSummary by vm.workspaceSummary.collectAsStateWithLifecycle()
+    val currentMessages by vm.messages.collectAsStateWithLifecycle()
+
+    fun openConversation(id: Long) {
+        vm.openWebConversation(id)
     }
 
     fun pathToRoot(id: Long): List<Conversation> {
@@ -1293,15 +1274,6 @@ private fun WebGlobalTreeBottomSheet(
         convs.filter { it.parentConversationId == null }.sortedByDescending { it.updatedAt }
     }
 
-    val currentMessagesFlow = remember(repo, currentId) {
-        currentId?.let { repo.getMessages(it) }
-            ?: kotlinx.coroutines.flow.flowOf(emptyList())
-    }
-
-    val currentMessages by currentMessagesFlow.collectAsStateWithLifecycle(
-        initialValue = emptyList()
-    )
-
     var showResetConfirm by rememberSaveable { mutableStateOf(false) }
 
     // ✅ معرّف الرسالة التي طُلبت المتابعة منها إلى منصة أخرى (لعرض نافذة اختيار المنصة)
@@ -1327,26 +1299,22 @@ private fun WebGlobalTreeBottomSheet(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "Workspace: $scopeKey",
+                text = "Workspace الحالي: ${currentWorkspaceId?.toString() ?: "—"}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (ws == null) {
-                Text("⚠️ تعذر تحميل Workspace.")
+            if (wsSummary.isNotBlank()) {
+                Text(
+                    text = "WORKSPACE_SUMMARY (مختصر):\n${wsSummary.take(220)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
             } else {
-                if (ws!!.summary.isNotBlank()) {
-                    Text(
-                        text = "WORKSPACE_SUMMARY (مختصر):\n${ws!!.summary.take(220)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                } else {
-                    Text(
-                        text = "WORKSPACE_SUMMARY فارغ حاليًا.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "WORKSPACE_SUMMARY فارغ حاليًا.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -1357,7 +1325,9 @@ private fun WebGlobalTreeBottomSheet(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = currentConv?.title?.takeIf { it.isNotBlank() } ?: "لا توجد محادثة محددة بعد",
+                        text = currentConv?.title?.takeIf { it.isNotBlank() }
+                            ?: currentId?.let { "ID: $it (محادثة نشطة خارج قائمة الويب)" }
+                            ?: "لا توجد محادثة محددة بعد",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
@@ -1368,75 +1338,19 @@ private fun WebGlobalTreeBottomSheet(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
-                            onClick = {
-                                val workspaceId = ws?.id
-                                if (workspaceId == null) {
-                                    Toast.makeText(context, "Workspace غير متاح", Toast.LENGTH_SHORT).show()
-                                    return@OutlinedButton
-                                }
-                                scope.launch {
-                                    runCatching {
-                                        val title = "Web: $platformName".take(60)
-                                        val newId = repo.insertConversation(
-                                            Conversation(
-                                                title = title,
-                                                memoryAccessEnabled = true,
-                                                agentId = webAgentId,
-                                                workspaceId = workspaceId,
-                                                parentConversationId = null
-                                            )
-                                        )
-                                        repo.updateTitleAndTimestamp(
-                                            id = newId,
-                                            title = title,
-                                            updatedAt = System.currentTimeMillis()
-                                        )
-                                        openConversation(newId)
-                                    }.onFailure { e ->
-                                        Toast.makeText(context, "⚠️ فشل إنشاء محادثة: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            enabled = ws != null
+                            onClick = { vm.newWebConversation("Web: $platformName") }
                         ) { Text("➕ محادثة جديدة") }
 
                         OutlinedButton(
-                            onClick = {
-                                val workspaceId = ws?.id
-                                val pid = currentId
-                                if (workspaceId == null || pid == null) {
-                                    Toast.makeText(context, "اختر محادثة أولًا", Toast.LENGTH_SHORT).show()
-                                    return@OutlinedButton
-                                }
-                                scope.launch {
-                                    runCatching {
-                                        val base = (currentConv?.title ?: "Web: $platformName").trim().take(45)
-                                        val branchTitle = ("فرع: $base").take(60)
-                                        val newId = repo.insertConversation(
-                                            Conversation(
-                                                title = branchTitle,
-                                                memoryAccessEnabled = true,
-                                                agentId = webAgentId,
-                                                workspaceId = workspaceId,
-                                                parentConversationId = pid
-                                            )
-                                        )
-                                        repo.updateTitleAndTimestamp(
-                                            id = newId,
-                                            title = branchTitle,
-                                            updatedAt = System.currentTimeMillis()
-                                        )
-                                        openConversation(newId)
-                                    }.onFailure { e ->
-                                        Toast.makeText(context, "⚠️ فشل إنشاء فرع: ${e.message ?: "خطأ"}", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            enabled = ws != null && currentId != null
+                            onClick = { vm.branchFromCurrentWebConversation() },
+                            enabled = currentId != null
                         ) { Text("🪵 تفريع") }
 
                         OutlinedButton(
-                            onClick = { vm.clearWebConversationSelection() }
+                            onClick = {
+                                vm.clearWebConversationSelection()
+                                vm.newConversation()
+                            }
                         ) {
                             Text("⛔ إلغاء التحديد")
                         }
@@ -1568,14 +1482,14 @@ private fun WebGlobalTreeBottomSheet(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Reset workspace بالكامل (يحذف كل محادثات ورسائل $scopeKey + يصفر summary).",
+                        text = "حذف كل محادثات ورسائل Workspace المحادثة الحالية + تصفير ملخصه.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedButton(
                         onClick = { showResetConfirm = true },
-                        enabled = ws != null
-                    ) { Text("🧨 Reset $scopeKey") }
+                        enabled = currentWorkspaceId != null
+                    ) { Text("🧨 Reset Workspace الحالي") }
                 }
             }
 
@@ -1647,28 +1561,13 @@ private fun WebGlobalTreeBottomSheet(
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
             title = { Text("تأكيد Reset") },
-            text = { Text("سيتم حذف كل المحادثات والرسائل ضمن $scopeKey وتصفير Workspace Summary. هل أنت متأكد؟") },
+            text = { Text("سيتم حذف كل المحادثات والرسائل ضمن Workspace المحادثة الحالية وتصفير ملخصه. هل أنت متأكد؟") },
             confirmButton = {
                 Button(
                     onClick = {
-                        val wsId = ws?.id
-                        if (wsId == null) {
-                            Toast.makeText(context, "Workspace غير متاح", Toast.LENGTH_SHORT).show()
-                            showResetConfirm = false
-                            return@Button
-                        }
-                        scope.launch {
-                            runCatching {
-                                repo.resetWorkspaceFully(wsId)
-                                vm.clearWebConversationSelection()
-                                Toast.makeText(context, "✅ تم Reset", Toast.LENGTH_SHORT).show()
-                                showResetConfirm = false
-                                onDismiss()
-                            }.onFailure { e ->
-                                Toast.makeText(context, "⚠️ فشل Reset: ${e.message ?: "خطأ"}", Toast.LENGTH_LONG).show()
-                                showResetConfirm = false
-                            }
-                        }
+                        vm.resetWebGlobalWorkspaceFully()
+                        showResetConfirm = false
+                        onDismiss()
                     }
                 ) { Text("نعم") }
             },
@@ -1846,25 +1745,4 @@ private fun GeckoUnavailableDialog(
         confirmButton = { Button(onClick = onOpenBrowser) { Text("📱 فتح في المتصفح") } },
         dismissButton = { OutlinedButton(onClick = onBack) { Text("رجوع") } }
     )
-}
-
-/**
- * يحاول استخراج ConversationRepository من ChatViewModel بدون تغيير الـ API لهذه الشاشة.
- * يعتمد على وجود field داخل ChatViewModel نوعه ConversationRepository (حتى لو private).
- */
-private fun resolveConversationRepositoryFromViewModel(vm: ChatViewModel?): ConversationRepository? {
-    if (vm == null) return null
-    return runCatching {
-        val wanted = ConversationRepository::class.java
-        var c: Class<*>? = vm.javaClass
-        while (c != null) {
-            val f = c.declaredFields.firstOrNull { wanted.isAssignableFrom(it.type) }
-            if (f != null) {
-                f.isAccessible = true
-                return@runCatching (f.get(vm) as? ConversationRepository)
-            }
-            c = c.superclass
-        }
-        null
-    }.getOrNull()
 }
