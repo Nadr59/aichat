@@ -366,21 +366,40 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val parent = conversationRepository.getConversationById(parentId)
                     ?: throw IllegalStateException("المحادثة الأصل غير موجودة")
 
-                val ws = ensureWorkspaceForConversation(parentId)
+                // ═══════════════════════════════════════════════════════
+                // ✅ قرار تصميمي (ب) — إصلاح "الفرع لا يرث سياق الأصل":
+                // 1) الفرع يحصل على Workspace جديد خاص به (newUniqueApiScopeKey)
+                //    بدل مشاركة Workspace الأصل — منع التلوث المتبادل بين
+                //    الأصل والفرع مستقبلاً.
+                // 2) تُنسخ "لقطة" من ملخص الأصل لحظة التفريع إلى Workspace
+                //    الفرع، فيرث الماضي ثم ينعزل ويُحدَّث ملخصه من تبادلاته
+                //    هو فقط بعد ذلك.
+                // 3) يُنسخ كامل سجل رسائل الأصل إلى الفرع — يضمن السياق
+                //    فورًا حتى لو لم يكن ملخص الأصل قد اكتمل توليده بعد
+                //    (توليد الملخص غير متزامن وقد يتأخر ثوانيًا بعد الرد).
+                //    لإلغاء نسخ الرسائل فقط: احذف كتلة parentMessages.forEach
+                //    أدناه و branchContextMessageCount من المُنشئ.
+                // ═══════════════════════════════════════════════════════
+                val parentWs = ensureWorkspaceForConversation(parentId)
 
-                val branchTitle = buildString {
-                    val base = parent.title.trim().ifBlank { "محادثة" }.take(45)
-                    append("فرع: ")
-                    append(base)
-                }.take(60)
+                val baseTitle = parent.title.trim().ifBlank { "محادثة" }.take(45)
+                val branchTitle = "فرع: $baseTitle".take(60)
+
+                val branchWs = conversationRepository.getOrCreateWorkspace(
+                    scopeKey = newUniqueApiScopeKey(),
+                    title = "فرع • $baseTitle".take(80)
+                )
+
+                val parentMessages = conversationRepository.getMessagesOnce(parentId)
 
                 val newId = conversationRepository.insertConversation(
                     Conversation(
                         title = branchTitle.ifBlank { "فرع جديد" },
                         memoryAccessEnabled = parent.memoryAccessEnabled,
                         agentId = parent.agentId,
-                        workspaceId = ws.id,
-                        parentConversationId = parentId
+                        workspaceId = branchWs.id,
+                        parentConversationId = parentId,
+                        branchContextMessageCount = parentMessages.size
                     )
                 )
 
@@ -389,6 +408,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     title = branchTitle.ifBlank { "فرع جديد" },
                     updatedAt = System.currentTimeMillis()
                 )
+
+                parentMessages.forEach { message ->
+                    conversationRepository.insertMessage(
+                        message.copy(
+                            id = 0,
+                            conversationId = newId
+                        )
+                    )
+                }
+
+                if (parentWs.summary.isNotBlank()) {
+                    conversationRepository.updateWorkspaceSummary(branchWs.id, parentWs.summary)
+                }
 
                 _selectedImageBase64.value = null
                 _memoryContext.value = ""
@@ -431,17 +463,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val messagesToCopy = originalMessages.take(selectedIndex + 1)
-                val ws = ensureWorkspaceForConversation(parentId)
+
+                // ✅ قرار (ب): Workspace جديد للفرع + لقطة ملخص الأصل ثم انعزال،
+                // بدل مشاركة Workspace الأصل (نفس منطق branchFromCurrentConversation).
+                val parentWs = ensureWorkspaceForConversation(parentId)
 
                 val baseTitle = parent.title.trim().ifBlank { "محادثة" }.take(45)
                 val branchTitle = "فرع: $baseTitle".take(60)
+
+                val branchWs = conversationRepository.getOrCreateWorkspace(
+                    scopeKey = newUniqueApiScopeKey(),
+                    title = "فرع • $baseTitle".take(80)
+                )
 
                 val newId = conversationRepository.insertConversation(
                     Conversation(
                         title = branchTitle,
                         memoryAccessEnabled = parent.memoryAccessEnabled,
                         agentId = parent.agentId,
-                        workspaceId = ws.id,
+                        workspaceId = branchWs.id,
                         parentConversationId = parentId,
                         branchContextMessageCount = messagesToCopy.size
                     )
@@ -460,6 +500,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             conversationId = newId
                         )
                     )
+                }
+
+                if (parentWs.summary.isNotBlank()) {
+                    conversationRepository.updateWorkspaceSummary(branchWs.id, parentWs.summary)
                 }
 
                 _selectedImageBase64.value = null
@@ -1515,7 +1559,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 val newChunks = mutableListOf<String>()
                 var skipped = 0
-                for (chunk in limited) {
+                for (chunk in limitedChunks) {
                     if (memoryRepository.existsByHash(calculateHash(chunk))) skipped++ else newChunks.add(chunk)
                 }
 
@@ -1608,3 +1652,4 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
+
