@@ -68,7 +68,8 @@ fun ChatScreen(
     webPlatformsViewModel: WebPlatformsViewModel,
     settings: AiSettings,
     onBack: () -> Unit,
-    onOpenAgents: () -> Unit
+    onOpenAgents: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -90,6 +91,16 @@ fun ChatScreen(
     // في الاتجاهات الثلاثة: API→ويب، ويب→ويب (نفس/مختلف المنصة).
     // ═══════════════════════════════════════════════════════════════
     val workspaceSummary by viewModel.workspaceSummary.collectAsState()
+
+    // ✅ إضافة جديدة (قائمة المزودين السريعة):
+    // state محلي يعكس المزود النشط الحالي ونموذجه، يتحدّث فورًا
+    // عند التبديل من قائمة API — بدل قراءة settings الثابتة وقت التكوين.
+    var activeProviderId by remember { mutableStateOf(settings.provider) }
+    var activeProviderLabel by remember {
+        mutableStateOf(
+            "${settings.getProviderLabel(settings.provider)} · ${settings.getActiveModel()}"
+        )
+    }
 
     // Tree data
     val parentConversationId by viewModel.currentParentConversationId.collectAsState()
@@ -118,6 +129,7 @@ fun ChatScreen(
     }
 
     var showAgentDialog by remember { mutableStateOf(false) }
+    var topMenuExpanded by remember { mutableStateOf(false) }
     var showWebImportDialog by remember { mutableStateOf(false) }
 
     // ✅ عارض سجلات التشخيص المؤقت
@@ -505,7 +517,7 @@ fun ChatScreen(
                         )
 
                         Text(
-                            settings.getActiveModel().take(40),
+                            activeProviderLabel.take(40),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -536,51 +548,116 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { showDebugLogs = true }
-                    ) {
-                        Icon(
-                            Icons.Filled.BugReport,
-                            contentDescription = "سجلات التشخيص"
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { showAgentDialog = true }
-                    ) {
-                        Icon(
-                            Icons.Filled.SmartToy,
-                            contentDescription = "Agent"
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { showTreeSheet = true },
-                        enabled = conversationId != null
-                    ) {
-                        Icon(
-                            Icons.Filled.AccountTree,
-                            contentDescription = "شجرة المحادثة"
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            viewModel.toggleMemoryAccess(
-                                !memoryAccessEnabled
+                    // ✅ قائمة خيارات موحّدة (⋮) — تجمع كل ما كان أيقونات مبعثرة.
+                    Box {
+                        IconButton(onClick = { topMenuExpanded = true }) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = "خيارات المحادثة"
                             )
                         }
-                    ) {
-                        Icon(
-                            Icons.Filled.Memory,
-                            contentDescription = "Memory access",
-                            tint = if (memoryAccessEnabled) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                                    .copy(alpha = .35f)
-                            }
-                        )
+
+                        DropdownMenu(
+                            expanded = topMenuExpanded,
+                            onDismissRequest = { topMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.Memory,
+                                            contentDescription = null,
+                                            tint = if (memoryAccessEnabled) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            if (memoryAccessEnabled) {
+                                                "الذاكرة: مفعّلة"
+                                            } else {
+                                                "الذاكرة: معطّلة"
+                                            }
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.toggleMemoryAccess(!memoryAccessEnabled)
+                                    topMenuExpanded = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.SmartToy,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("اختيار Agent")
+                                    }
+                                },
+                                onClick = {
+                                    showAgentDialog = true
+                                    topMenuExpanded = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.AccountTree,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("شجرة المحادثة")
+                                    }
+                                },
+                                onClick = {
+                                    showTreeSheet = true
+                                    topMenuExpanded = false
+                                },
+                                enabled = conversationId != null
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.Settings,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("الإعدادات")
+                                    }
+                                },
+                                onClick = {
+                                    onOpenSettings()
+                                    topMenuExpanded = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.BugReport,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("سجلات التشخيص")
+                                    }
+                                },
+                                onClick = {
+                                    showDebugLogs = true
+                                    topMenuExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -595,8 +672,21 @@ fun ChatScreen(
             ProviderSelectorRow(
                 enabledWebPlatforms = enabledWebPlatforms,
                 selectedWebPlatformId = selectedWebPlatformId,
-                onSelectApi = { selectedWebPlatformId = null },
-                onSelectWebPlatform = { id -> selectedWebPlatformId = id }
+                settings = settings,
+                activeProviderId = activeProviderId,
+                activeProviderLabel = activeProviderLabel,
+                onProviderChange = { newProviderId, newLabel ->
+                    activeProviderId = newProviderId
+                    activeProviderLabel = newLabel
+                    selectedWebPlatformId = null
+                    Toast.makeText(
+                        context,
+                        "تم التبديل إلى $newLabel",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                },
+                onSelectWebPlatform = { id -> selectedWebPlatformId = id },
+                onOpenSettings = onOpenSettings
             )
 
             Column(
@@ -1563,31 +1653,122 @@ private fun hostOf(url: String): String =
 private fun ProviderSelectorRow(
     enabledWebPlatforms: List<WebPlatform>,
     selectedWebPlatformId: String?,
-    onSelectApi: () -> Unit,
-    onSelectWebPlatform: (String) -> Unit
+    settings: AiSettings,
+    activeProviderId: String,
+    activeProviderLabel: String,
+    onProviderChange: (String, String) -> Unit,
+    onSelectWebPlatform: (String) -> Unit,
+    onOpenSettings: () -> Unit
 ) {
+    val configuredProviders = remember { settings.getConfiguredApiProviders() }
+    var apiMenuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        FilterChip(
-            selected = selectedWebPlatformId == null,
-            onClick = onSelectApi,
-            label = {
-                Text("API")
-            },
-            leadingIcon = {
-                Icon(
-                    Icons.Filled.SmartToy,
-                    contentDescription = null
+        // ── شريحة المزود النشط — تفتح قائمة التبديل السريع ──
+        Box {
+            FilterChip(
+                selected = selectedWebPlatformId == null,
+                onClick = { apiMenuExpanded = true },
+                label = {
+                    Text("⚡ $activeProviderLabel ▾")
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.SmartToy,
+                        contentDescription = null
+                    )
+                }
+            )
+
+            DropdownMenu(
+                expanded = apiMenuExpanded,
+                onDismissRequest = { apiMenuExpanded = false }
+            ) {
+                if (configuredProviders.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("لا يوجد مزودون مهيّأون") },
+                        onClick = { },
+                        enabled = false
+                    )
+                } else {
+                    configuredProviders.forEach { info ->
+                        val isActive = info.provider == activeProviderId
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (isActive) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                    } else {
+                                        Spacer(Modifier.width(22.dp))
+                                    }
+
+                                    Column {
+                                        Text(
+                                            info.label,
+                                            fontWeight = if (isActive) {
+                                                FontWeight.SemiBold
+                                            } else {
+                                                FontWeight.Normal
+                                            }
+                                        )
+                                        Text(
+                                            info.model.take(30),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                apiMenuExpanded = false
+                                if (isActive) return@DropdownMenuItem
+
+                                val model = settings.activateApiProvider(info.provider)
+                                val newLabel = "${info.label} · $model"
+
+                                onProviderChange(info.provider, newLabel)
+                            }
+                        )
+                    }
+                }
+
+                HorizontalDivider()
+
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("إدارة المزودين")
+                        }
+                    },
+                    onClick = {
+                        apiMenuExpanded = false
+                        onOpenSettings()
+                    }
                 )
             }
-        )
+        }
 
+        // ── منصات الويب (بدون لاحقة "قريبًا" — تظهر معطّلة فقط) ──
         enabledWebPlatforms.forEach { platform ->
             val kind = WebSendCoordinator.classifyHost(hostOf(platform.url))
             val usable = kind == WebSendCoordinator.WebKind.CHATGPT ||
@@ -1601,10 +1782,7 @@ private fun ProviderSelectorRow(
                 },
                 enabled = usable,
                 label = {
-                    Text(
-                        "${platform.iconEmoji} ${platform.name}" +
-                            if (!usable) " · قريبًا" else ""
-                    )
+                    Text("${platform.iconEmoji} ${platform.name}")
                 }
             )
         }
@@ -1793,75 +1971,75 @@ private fun MessageBubble(
 
     val align = if (isUser) Alignment.End else Alignment.Start
 
+    // ✅ قائمة الإجراءات — تظهر فقط عند long-press (بدل الأيقونات الدائمة).
+    var actionsMenuExpanded by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = align
     ) {
-        // ── 1.ج.2: الفقاعة الآن تحتوي النص فقط، بلا أزرار كبيرة داخلها ──
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = bg,
-            tonalElevation = 1.dp,
-            modifier = Modifier
-                .widthIn(max = 520.dp)
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = {
-                        onCopy()
+        Box {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = bg,
+                tonalElevation = 1.dp,
+                modifier = Modifier
+                    .widthIn(max = 520.dp)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            // نسخ فوري (كما كان) + إظهار قائمة الإجراءات.
+                            onCopy()
+                            actionsMenuExpanded = true
+                        }
+                    )
+            ) {
+                Text(
+                    message.content,
+                    color = fg,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+
+            DropdownMenu(
+                expanded = actionsMenuExpanded,
+                onDismissRequest = { actionsMenuExpanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Memory,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("حفظ كذاكرة")
+                        }
+                    },
+                    onClick = {
+                        actionsMenuExpanded = false
+                        onSaveMemory()
                     }
                 )
-        ) {
-            Text(
-                message.content,
-                color = fg,
-                modifier = Modifier.padding(12.dp)
-            )
-        }
 
-        // ── صف أيقونات صغيرة أسفل الفقاعة بدل الأزرار الكبيرة الداخلية ──
-        Row(
-            modifier = Modifier.padding(
-                top = 2.dp,
-                start = 4.dp,
-                end = 4.dp
-            ),
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onCopy,
-                modifier = Modifier.size(26.dp)
-            ) {
-                Icon(
-                    Icons.Filled.ContentCopy,
-                    contentDescription = "نسخ",
-                    modifier = Modifier.size(14.dp),
-                    tint = fg.copy(alpha = 0.55f)
-                )
-            }
-
-            IconButton(
-                onClick = onSaveMemory,
-                modifier = Modifier.size(26.dp)
-            ) {
-                Icon(
-                    Icons.Filled.Memory,
-                    contentDescription = "حفظ كذاكرة",
-                    modifier = Modifier.size(14.dp),
-                    tint = fg.copy(alpha = 0.55f)
-                )
-            }
-
-            IconButton(
-                onClick = onBranch,
-                enabled = branchEnabled,
-                modifier = Modifier.size(26.dp)
-            ) {
-                Icon(
-                    Icons.Filled.AccountTree,
-                    contentDescription = "محادثة جديدة من هنا",
-                    modifier = Modifier.size(14.dp),
-                    tint = fg.copy(alpha = if (branchEnabled) 0.55f else 0.25f)
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.AccountTree,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("تفريع من هنا")
+                        }
+                    },
+                    onClick = {
+                        actionsMenuExpanded = false
+                        onBranch()
+                    },
+                    enabled = branchEnabled
                 )
             }
         }
