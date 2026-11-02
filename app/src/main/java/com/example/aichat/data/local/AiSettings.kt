@@ -324,4 +324,100 @@ class AiSettings(context: Context) {
             else -> getActiveKey().isNotBlank()
         }
     }
+
+    // ============================================================
+    // ✅ إضافة جديدة — مُبدّل المزودين السريع (قائمة API في ChatScreen)
+    //
+    // إضافات فقط — لم يُمَسّ أي شيء أعلاه.
+    //
+    // الغرض: شريحة واحدة في شريط المنصات تعرض المزود النشط، وفتحها
+    // يعرض المزودين "المُهيّأين" فقط (من لديهم مفتاح/تهيئة محفوظة)
+    // للتبديل الفوري بينهم دون دخول الإعدادات.
+    //
+    // قواعد التهيئة لكل مزود:
+    // - مزودو المفاتيح (gemini..huggingface): مفتاح غير فارغ + نموذج غير فارغ.
+    // - ollama: محلي بلا مفتاح — يكفي نموذج غير فارغ.
+    // - custom: بعض الخوادم لا تتطلب اسم نموذج — يكفي customUrl غير فارغ
+    //   (استثناء موثَّق ومعتمَد).
+    // ============================================================
+
+    /**
+     * اسم عرض موحّد لأي مزود (يُستخدم في شريحة الشريط والقائمة والـToast).
+     */
+    fun getProviderLabel(providerId: String): String {
+        return when (providerId.trim().lowercase()) {
+            "gemini" -> "Gemini"
+            "openrouter" -> "OpenRouter"
+            "openai" -> "OpenAI"
+            "mistral" -> "Mistral"
+            "groq" -> "Groq"
+            "nvidia" -> "NVIDIA NIM"
+            "huggingface", "hugging face", "hf" -> "Hugging Face"
+            "ollama" -> "Ollama"
+            "custom" -> "Custom"
+            else -> providerId.trim()
+        }
+    }
+
+    /**
+     * قائمة المزودين المُهيّأين فعليًا (لديهم ما يلزم للإرسال)،
+     * بالترتيب الثابت نفسه المتبع في الإعدادات.
+     */
+    fun getConfiguredApiProviders(): List<ApiProviderInfo> {
+        val list = mutableListOf<ApiProviderInfo>()
+
+        if (geminiKey.isNotBlank() && geminiModel.isNotBlank()) {
+            list.add(ApiProviderInfo("gemini", getProviderLabel("gemini"), geminiModel))
+        }
+        if (openrouterKey.isNotBlank() && openrouterModel.isNotBlank()) {
+            list.add(ApiProviderInfo("openrouter", getProviderLabel("openrouter"), openrouterModel))
+        }
+        if (openaiKey.isNotBlank() && openaiModel.isNotBlank()) {
+            list.add(ApiProviderInfo("openai", getProviderLabel("openai"), openaiModel))
+        }
+        if (mistralKey.isNotBlank() && mistralModel.isNotBlank()) {
+            list.add(ApiProviderInfo("mistral", getProviderLabel("mistral"), mistralModel))
+        }
+        if (groqKey.isNotBlank() && groqModel.isNotBlank()) {
+            list.add(ApiProviderInfo("groq", getProviderLabel("groq"), groqModel))
+        }
+        if (nvidiaKey.isNotBlank() && nvidiaModel.isNotBlank()) {
+            list.add(ApiProviderInfo("nvidia", getProviderLabel("nvidia"), nvidiaModel))
+        }
+        if (huggingfaceKey.isNotBlank() && huggingfaceModel.isNotBlank()) {
+            list.add(
+                ApiProviderInfo("huggingface", getProviderLabel("huggingface"), huggingfaceModel)
+            )
+        }
+        if (ollamaModel.isNotBlank()) {
+            list.add(ApiProviderInfo("ollama", getProviderLabel("ollama"), ollamaModel))
+        }
+        if (customUrl.isNotBlank()) {
+            list.add(ApiProviderInfo("custom", getProviderLabel("custom"), customModel))
+        }
+
+        return list
+    }
+
+    /**
+     * يجعل المزود الممرَّر هو النشط ويحفظه فورًا في SharedPreferences،
+     * ثم يُرجع نموذجه المحفوظ (لعرضه في Toast التأكيد وعنوان الشريط).
+     *
+     * ملاحظة: لا تُستدعى إلا بمزود موجود في getConfiguredApiProviders()،
+     * لكنها لا تفترض ذلك — تقرأ النموذج عبر getActiveModel() المجرّبة.
+     */
+    fun activateApiProvider(providerId: String): String {
+        provider = providerId
+        return getActiveModel()
+    }
 }
+
+/**
+ * وصف عنصر واحد في قائمة مُبدّل المزودين السريع.
+ * data class خارج الـclass — مستوى top-level في نفس الملف.
+ */
+data class ApiProviderInfo(
+    val provider: String,
+    val label: String,
+    val model: String
+)
