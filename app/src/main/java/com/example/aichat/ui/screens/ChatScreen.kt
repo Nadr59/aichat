@@ -516,10 +516,27 @@ fun ChatScreen(
                             fontWeight = FontWeight.SemiBold
                         )
 
-                        Text(
-                            activeProviderLabel.take(40),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        EngineSelector(
+                            settings = settings,
+                            activeProviderId = activeProviderId,
+                            activeProviderLabel = activeProviderLabel,
+                            enabledWebPlatforms = enabledWebPlatforms,
+                            selectedWebPlatformId = selectedWebPlatformId,
+                            selectedWebPlatformName = selectedWebPlatformName,
+                            onProviderChange = { newProviderId, newLabel ->
+                                activeProviderId = newProviderId
+                                activeProviderLabel = newLabel
+                                selectedWebPlatformId = null
+                                Toast.makeText(
+                                    context,
+                                    "تم التبديل إلى $newLabel",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onSelectWebPlatform = { id ->
+                                selectedWebPlatformId = id
+                            },
+                            onOpenSettings = onOpenSettings
                         )
 
                         currentAgentName?.let {
@@ -669,26 +686,6 @@ fun ChatScreen(
                 .padding(padding)
                 .imePadding() // ← 1.ج.1: يدفع المحتوى فوق الكيبورد بدل أن يُغطّى به
         ) {
-            ProviderSelectorRow(
-                enabledWebPlatforms = enabledWebPlatforms,
-                selectedWebPlatformId = selectedWebPlatformId,
-                settings = settings,
-                activeProviderId = activeProviderId,
-                activeProviderLabel = activeProviderLabel,
-                onProviderChange = { newProviderId, newLabel ->
-                    activeProviderId = newProviderId
-                    activeProviderLabel = newLabel
-                    selectedWebPlatformId = null
-                    Toast.makeText(
-                        context,
-                        "تم التبديل إلى $newLabel",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                },
-                onSelectWebPlatform = { id -> selectedWebPlatformId = id },
-                onOpenSettings = onOpenSettings
-            )
-
             Column(
                 modifier = Modifier.weight(1f)
             ) {
@@ -1647,142 +1644,203 @@ private fun VisibleWebEngineHost(
 private fun hostOf(url: String): String =
     runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")
 
-/* ----------------------------- Provider selector (1.ب.2 / 1.ب.3 / 1.ب.4) ----------------------------- */
+/* ----------------------------- مُحدِّد المحرّك الموحّد (API + منصات الويب) ----------------------------- */
 
+/**
+ * مُحدِّد واحد في الشريط العلوي يعرض المحرّك الحالي:
+ * - "⚡ المزود · النموذج" عندما يكون API هو النشط.
+ * - "🌐 اسم المنصة" عندما تكون منصة ويب هي النشطة.
+ *
+ * الضغط عليه يفتح قائمة موحّدة بقسمين:
+ *   1) مزودو API المُهيّأون (مفاتيحهم محفوظة).
+ *   2) منصات الويب المتاحة (المفعّلة والقابلة للحقن فقط).
+ * وسطر أخير للانتقال إلى الإعدادات.
+ *
+ * يحل محل شريط الـChips المستطيل القديم بالكامل.
+ */
 @Composable
-private fun ProviderSelectorRow(
-    enabledWebPlatforms: List<WebPlatform>,
-    selectedWebPlatformId: String?,
+private fun EngineSelector(
     settings: AiSettings,
     activeProviderId: String,
     activeProviderLabel: String,
+    enabledWebPlatforms: List<WebPlatform>,
+    selectedWebPlatformId: String?,
+    selectedWebPlatformName: String?,
     onProviderChange: (String, String) -> Unit,
     onSelectWebPlatform: (String) -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val configuredProviders = remember { settings.getConfiguredApiProviders() }
-    var apiMenuExpanded by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // ── شريحة المزود النشط — تفتح قائمة التبديل السريع ──
-        Box {
-            FilterChip(
-                selected = selectedWebPlatformId == null,
-                onClick = { apiMenuExpanded = true },
-                label = {
-                    Text("⚡ $activeProviderLabel ▾")
-                },
-                leadingIcon = {
-                    Icon(
-                        Icons.Filled.SmartToy,
-                        contentDescription = null
-                    )
+    // منصات الويب القابلة للاستخدام فعليًا فقط (نفس معيار الشريط القديم).
+    val usableWebPlatforms = remember(enabledWebPlatforms) {
+        enabledWebPlatforms.filter { platform ->
+            val kind = WebSendCoordinator.classifyHost(hostOf(platform.url))
+            kind == WebSendCoordinator.WebKind.CHATGPT ||
+                kind == WebSendCoordinator.WebKind.VENICE ||
+                kind == WebSendCoordinator.WebKind.ARENA
+        }
+    }
+
+    val currentLabel = if (selectedWebPlatformId != null) {
+        val platform = enabledWebPlatforms.firstOrNull { it.id == selectedWebPlatformId }
+        "${platform?.iconEmoji ?: "🌐"} ${selectedWebPlatformName ?: "منصة ويب"}"
+    } else {
+        "⚡ $activeProviderLabel"
+    }
+
+    Box {
+        Row(
+            modifier = Modifier.clickable { menuExpanded = true },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = currentLabel.take(34),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selectedWebPlatformId != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 }
             )
 
-            DropdownMenu(
-                expanded = apiMenuExpanded,
-                onDismissRequest = { apiMenuExpanded = false }
-            ) {
-                if (configuredProviders.isEmpty()) {
-                    DropdownMenuItem(
-                        text = { Text("لا يوجد مزودون مهيّأون") },
-                        onClick = { },
-                        enabled = false
-                    )
-                } else {
-                    configuredProviders.forEach { info ->
-                        val isActive = info.provider == activeProviderId
-
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (isActive) {
-                                        Icon(
-                                            Icons.Filled.Check,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                    } else {
-                                        Spacer(Modifier.width(22.dp))
-                                    }
-
-                                    Column {
-                                        Text(
-                                            info.label,
-                                            fontWeight = if (isActive) {
-                                                FontWeight.SemiBold
-                                            } else {
-                                                FontWeight.Normal
-                                            }
-                                        )
-                                        Text(
-                                            info.model.take(30),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            },
-                            onClick = {
-                                apiMenuExpanded = false
-                                if (isActive) return@DropdownMenuItem
-
-                                val model = settings.activateApiProvider(info.provider)
-                                val newLabel = "${info.label} · $model"
-
-                                onProviderChange(info.provider, newLabel)
-                            }
-                        )
-                    }
-                }
-
-                HorizontalDivider()
-
-                DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Filled.Settings,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text("إدارة المزودين")
-                        }
-                    },
-                    onClick = {
-                        apiMenuExpanded = false
-                        onOpenSettings()
-                    }
-                )
-            }
+            Icon(
+                Icons.Filled.ArrowDropDown,
+                contentDescription = "تبديل المزود أو المنصة",
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
-        // ── منصات الويب (بدون لاحقة "قريبًا" — تظهر معطّلة فقط) ──
-        enabledWebPlatforms.forEach { platform ->
-            val kind = WebSendCoordinator.classifyHost(hostOf(platform.url))
-            val usable = kind == WebSendCoordinator.WebKind.CHATGPT ||
-                kind == WebSendCoordinator.WebKind.VENICE ||
-                kind == WebSendCoordinator.WebKind.ARENA
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
+            // ── القسم الأول: مزودو API ──
+            if (configuredProviders.isNotEmpty()) {
+                Text(
+                    "مزودو API",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
 
-            FilterChip(
-                selected = selectedWebPlatformId == platform.id,
-                onClick = {
-                    if (usable) onSelectWebPlatform(platform.id)
+                configuredProviders.forEach { info ->
+                    val isActive =
+                        selectedWebPlatformId == null && info.provider == activeProviderId
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isActive) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                } else {
+                                    Spacer(Modifier.width(22.dp))
+                                }
+
+                                Column {
+                                    Text(
+                                        info.label,
+                                        fontWeight = if (isActive) {
+                                            FontWeight.SemiBold
+                                        } else {
+                                            FontWeight.Normal
+                                        }
+                                    )
+                                    Text(
+                                        info.model.take(30),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            if (isActive) return@DropdownMenuItem
+
+                            val model = settings.activateApiProvider(info.provider)
+                            onProviderChange(info.provider, "${info.label} · $model")
+                        }
+                    )
+                }
+            }
+
+            // ── القسم الثاني: منصات الويب ──
+            if (usableWebPlatforms.isNotEmpty()) {
+                if (configuredProviders.isNotEmpty()) {
+                    HorizontalDivider()
+                }
+
+                Text(
+                    "منصات الويب",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+
+                usableWebPlatforms.forEach { platform ->
+                    val isActive = selectedWebPlatformId == platform.id
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isActive) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                } else {
+                                    Spacer(Modifier.width(22.dp))
+                                }
+
+                                Text("${platform.iconEmoji} ${platform.name}")
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            if (isActive) return@DropdownMenuItem
+                            onSelectWebPlatform(platform.id)
+                        }
+                    )
+                }
+            }
+
+            if (configuredProviders.isEmpty() && usableWebPlatforms.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("لا يوجد مزودون مهيّأون بعد") },
+                    onClick = { },
+                    enabled = false
+                )
+            }
+
+            HorizontalDivider()
+
+            DropdownMenuItem(
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Settings,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("إدارة المزودين")
+                    }
                 },
-                enabled = usable,
-                label = {
-                    Text("${platform.iconEmoji} ${platform.name}")
+                onClick = {
+                    menuExpanded = false
+                    onOpenSettings()
                 }
             )
         }
