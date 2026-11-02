@@ -298,6 +298,9 @@ fun ChatScreen(
     var webLoadError by remember(selectedWebPlatformId) { mutableStateOf<String?>(null) }
     var webSendInFlight by remember(selectedWebPlatformId) { mutableStateOf(false) }
     var webRuntimeMissing by remember(selectedWebPlatformId) { mutableStateOf(false) }
+    // ✅ G1: عدّاد انتظار رد الويب — يميّز "تأخر" عن "فشل محتمل"
+    var webSendElapsedSec by remember(selectedWebPlatformId) { mutableStateOf(0) }
+    var webSendTimedOut by remember(selectedWebPlatformId) { mutableStateOf(false) }
 
     val sendDisabledExternally = selectedWebPlatformId != null && (
         !isWebSendCapable || webPageLoading || webSendInFlight || webRuntimeMissing
@@ -344,6 +347,7 @@ fun ChatScreen(
         if (platform != null && isWebSendCapable && platform.memoryEnabled) {
             app.onAiResponseCaptured = { source, text ->
                 webSendInFlight = false
+                webSendTimedOut = false
                 viewModel.onWebAiResponse(
                     platformId = source.ifBlank { platform.id },
                     platformName = platform.name,
@@ -356,6 +360,29 @@ fun ChatScreen(
             app.onAiResponseCaptured = null
             app.onManualCaptureResult = null
             app.onContextWritten = null
+        }
+    }
+
+    // ✅ G1: عدّاد الانتظار — يعمل فقط أثناء webSendInFlight.
+    // عند انقضاء المهلة: نحرّر الواجهة فقط (webSendInFlight=false)،
+    // ولا نلمس طابور الـVM — فأي رد متأخر يُلتقط ويُحفظ كالمعتاد.
+    LaunchedEffect(webSendInFlight) {
+        if (!webSendInFlight) return@LaunchedEffect
+
+        webSendElapsedSec = 0
+        webSendTimedOut = false
+
+        while (webSendInFlight && webSendElapsedSec < WEB_REPLY_TIMEOUT_SEC) {
+            delay(1000)
+            webSendElapsedSec++
+        }
+
+        if (webSendInFlight) {
+            webSendInFlight = false
+            webSendTimedOut = true
+            app.logDebug(
+                "⏱️ WEB_REPLY_TIMEOUT platform=${selectedPlatform?.id ?: "?"} بعد ${WEB_REPLY_TIMEOUT_SEC}ث دون التقاط"
+            )
         }
     }
 
@@ -459,6 +486,8 @@ fun ChatScreen(
             delay(80)
 
             webSendInFlight = true
+            webSendTimedOut = false
+            webSendElapsedSec = 0
             userInput = TextFieldValue("")
             viewModel.clearEnhancedQuery()
 
@@ -695,14 +724,25 @@ fun ChatScreen(
                         webRuntimeMissing -> "⚠️ تعذر تهيئة محرك الويب"
                         webLoadError != null -> "⚠️ ${webLoadError}"
                         webPageLoading -> "جاري تجهيز الصفحة..."
-                        webSendInFlight -> "بانتظار الرد..."
+                        webSendTimedOut ->
+                            "⚠️ لم يصل رد خلال ${WEB_REPLY_TIMEOUT_SEC}ث — أعد الإرسال، وأي رد متأخر سيُحفظ تلقائيًا"
+                        webSendInFlight && webSendElapsedSec >= WEB_REPLY_WARN_AFTER_SEC ->
+                            "الرد متأخر (${webSendElapsedSec}ث) — لا يزال الانتظار جاريًا"
+                        webSendInFlight -> "بانتظار الرد... (${webSendElapsedSec}ث)"
                         else -> "جاهز"
                     }
+
+                    val statusIsAlert = webSendTimedOut ||
+                        (webSendInFlight && webSendElapsedSec >= WEB_REPLY_WARN_AFTER_SEC)
 
                     Text(
                         text = "${selectedPlatform?.iconEmoji ?: "🌐"} ${selectedPlatform?.name.orEmpty()} — $statusLabel",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (statusIsAlert) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 4.dp)
@@ -1643,6 +1683,10 @@ private fun VisibleWebEngineHost(
 
 private fun hostOf(url: String): String =
     runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")
+
+// ✅ G1: عتبات انتظار رد الويب (بالثواني)
+private const val WEB_REPLY_WARN_AFTER_SEC = 60
+private const val WEB_REPLY_TIMEOUT_SEC = 120
 
 /* ----------------------------- مُحدِّد المحرّك الموحّد (API + منصات الويب) ----------------------------- */
 
