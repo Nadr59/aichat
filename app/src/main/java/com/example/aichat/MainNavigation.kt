@@ -114,13 +114,14 @@ fun MainNavigation(app: AichatApp) {
                         else conversationId.toLongOrNull()?.let { chatViewModel.openConversation(it) }
                     }
 
-                    ChatScreen(
+                                        ChatScreen(
                         viewModel = chatViewModel,
                         agentsViewModel = agentsViewModel,
                         webPlatformsViewModel = webPlatformsViewModel,
                         settings = settings,
                         onBack = { navController.popBackStack() },
-                        onOpenAgents = { navController.navigate("agents") }
+                        onOpenAgents = { navController.navigate("agents") },
+                        onOpenSettings = { navController.navigate("settings") }
                     )
                 }
 
