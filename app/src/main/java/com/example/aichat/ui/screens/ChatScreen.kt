@@ -1,3 +1,4 @@
+
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -67,7 +68,8 @@ fun ChatScreen(
     webPlatformsViewModel: WebPlatformsViewModel,
     settings: AiSettings,
     onBack: () -> Unit,
-    onOpenAgents: () -> Unit
+    onOpenAgents: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -89,6 +91,16 @@ fun ChatScreen(
     // في الاتجاهات الثلاثة: API→ويب، ويب→ويب (نفس/مختلف المنصة).
     // ═══════════════════════════════════════════════════════════════
     val workspaceSummary by viewModel.workspaceSummary.collectAsState()
+
+    // ✅ إضافة جديدة (قائمة المزودين السريعة):
+    // state محلي يعكس المزود النشط الحالي ونموذجه، يتحدّث فورًا
+    // عند التبديل من قائمة API — بدل قراءة settings الثابتة وقت التكوين.
+    var activeProviderId by remember { mutableStateOf(settings.provider) }
+    var activeProviderLabel by remember {
+        mutableStateOf(
+            "${settings.getProviderLabel(settings.provider)} · ${settings.getActiveModel()}"
+        )
+    }
 
     // Tree data
     val parentConversationId by viewModel.currentParentConversationId.collectAsState()
@@ -117,6 +129,7 @@ fun ChatScreen(
     }
 
     var showAgentDialog by remember { mutableStateOf(false) }
+    var topMenuExpanded by remember { mutableStateOf(false) }
     var showWebImportDialog by remember { mutableStateOf(false) }
 
     // ✅ عارض سجلات التشخيص المؤقت
@@ -285,6 +298,9 @@ fun ChatScreen(
     var webLoadError by remember(selectedWebPlatformId) { mutableStateOf<String?>(null) }
     var webSendInFlight by remember(selectedWebPlatformId) { mutableStateOf(false) }
     var webRuntimeMissing by remember(selectedWebPlatformId) { mutableStateOf(false) }
+    // ✅ G1: عدّاد انتظار رد الويب — يميّز "تأخر" عن "فشل محتمل"
+    var webSendElapsedSec by remember(selectedWebPlatformId) { mutableStateOf(0) }
+    var webSendTimedOut by remember(selectedWebPlatformId) { mutableStateOf(false) }
 
     val sendDisabledExternally = selectedWebPlatformId != null && (
         !isWebSendCapable || webPageLoading || webSendInFlight || webRuntimeMissing
@@ -331,6 +347,7 @@ fun ChatScreen(
         if (platform != null && isWebSendCapable && platform.memoryEnabled) {
             app.onAiResponseCaptured = { source, text ->
                 webSendInFlight = false
+                webSendTimedOut = false
                 viewModel.onWebAiResponse(
                     platformId = source.ifBlank { platform.id },
                     platformName = platform.name,
@@ -343,6 +360,29 @@ fun ChatScreen(
             app.onAiResponseCaptured = null
             app.onManualCaptureResult = null
             app.onContextWritten = null
+        }
+    }
+
+    // ✅ G1: عدّاد الانتظار — يعمل فقط أثناء webSendInFlight.
+    // عند انقضاء المهلة: نحرّر الواجهة فقط (webSendInFlight=false)،
+    // ولا نلمس طابور الـVM — فأي رد متأخر يُلتقط ويُحفظ كالمعتاد.
+    LaunchedEffect(webSendInFlight) {
+        if (!webSendInFlight) return@LaunchedEffect
+
+        webSendElapsedSec = 0
+        webSendTimedOut = false
+
+        while (webSendInFlight && webSendElapsedSec < WEB_REPLY_TIMEOUT_SEC) {
+            delay(1000)
+            webSendElapsedSec++
+        }
+
+        if (webSendInFlight) {
+            webSendInFlight = false
+            webSendTimedOut = true
+            app.logDebug(
+                "⏱️ WEB_REPLY_TIMEOUT platform=${selectedPlatform?.id ?: "?"} بعد ${WEB_REPLY_TIMEOUT_SEC}ث دون التقاط"
+            )
         }
     }
 
@@ -446,6 +486,8 @@ fun ChatScreen(
             delay(80)
 
             webSendInFlight = true
+            webSendTimedOut = false
+            webSendElapsedSec = 0
             userInput = TextFieldValue("")
             viewModel.clearEnhancedQuery()
 
@@ -503,10 +545,27 @@ fun ChatScreen(
                             fontWeight = FontWeight.SemiBold
                         )
 
-                        Text(
-                            settings.getActiveModel().take(40),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        EngineSelector(
+                            settings = settings,
+                            activeProviderId = activeProviderId,
+                            activeProviderLabel = activeProviderLabel,
+                            enabledWebPlatforms = enabledWebPlatforms,
+                            selectedWebPlatformId = selectedWebPlatformId,
+                            selectedWebPlatformName = selectedWebPlatformName,
+                            onProviderChange = { newProviderId, newLabel ->
+                                activeProviderId = newProviderId
+                                activeProviderLabel = newLabel
+                                selectedWebPlatformId = null
+                                Toast.makeText(
+                                    context,
+                                    "تم التبديل إلى $newLabel",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onSelectWebPlatform = { id ->
+                                selectedWebPlatformId = id
+                            },
+                            onOpenSettings = onOpenSettings
                         )
 
                         currentAgentName?.let {
@@ -535,51 +594,116 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { showDebugLogs = true }
-                    ) {
-                        Icon(
-                            Icons.Filled.BugReport,
-                            contentDescription = "سجلات التشخيص"
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { showAgentDialog = true }
-                    ) {
-                        Icon(
-                            Icons.Filled.SmartToy,
-                            contentDescription = "Agent"
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { showTreeSheet = true },
-                        enabled = conversationId != null
-                    ) {
-                        Icon(
-                            Icons.Filled.AccountTree,
-                            contentDescription = "شجرة المحادثة"
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            viewModel.toggleMemoryAccess(
-                                !memoryAccessEnabled
+                    // ✅ قائمة خيارات موحّدة (⋮) — تجمع كل ما كان أيقونات مبعثرة.
+                    Box {
+                        IconButton(onClick = { topMenuExpanded = true }) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = "خيارات المحادثة"
                             )
                         }
-                    ) {
-                        Icon(
-                            Icons.Filled.Memory,
-                            contentDescription = "Memory access",
-                            tint = if (memoryAccessEnabled) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                                    .copy(alpha = .35f)
-                            }
-                        )
+
+                        DropdownMenu(
+                            expanded = topMenuExpanded,
+                            onDismissRequest = { topMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.Memory,
+                                            contentDescription = null,
+                                            tint = if (memoryAccessEnabled) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            if (memoryAccessEnabled) {
+                                                "الذاكرة: مفعّلة"
+                                            } else {
+                                                "الذاكرة: معطّلة"
+                                            }
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.toggleMemoryAccess(!memoryAccessEnabled)
+                                    topMenuExpanded = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.SmartToy,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("اختيار Agent")
+                                    }
+                                },
+                                onClick = {
+                                    showAgentDialog = true
+                                    topMenuExpanded = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.AccountTree,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("شجرة المحادثة")
+                                    }
+                                },
+                                onClick = {
+                                    showTreeSheet = true
+                                    topMenuExpanded = false
+                                },
+                                enabled = conversationId != null
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.Settings,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("الإعدادات")
+                                    }
+                                },
+                                onClick = {
+                                    onOpenSettings()
+                                    topMenuExpanded = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.BugReport,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("سجلات التشخيص")
+                                    }
+                                },
+                                onClick = {
+                                    showDebugLogs = true
+                                    topMenuExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -591,13 +715,6 @@ fun ChatScreen(
                 .padding(padding)
                 .imePadding() // ← 1.ج.1: يدفع المحتوى فوق الكيبورد بدل أن يُغطّى به
         ) {
-            ProviderSelectorRow(
-                enabledWebPlatforms = enabledWebPlatforms,
-                selectedWebPlatformId = selectedWebPlatformId,
-                onSelectApi = { selectedWebPlatformId = null },
-                onSelectWebPlatform = { id -> selectedWebPlatformId = id }
-            )
-
             Column(
                 modifier = Modifier.weight(1f)
             ) {
@@ -607,14 +724,25 @@ fun ChatScreen(
                         webRuntimeMissing -> "⚠️ تعذر تهيئة محرك الويب"
                         webLoadError != null -> "⚠️ ${webLoadError}"
                         webPageLoading -> "جاري تجهيز الصفحة..."
-                        webSendInFlight -> "بانتظار الرد..."
+                        webSendTimedOut ->
+                            "⚠️ لم يصل رد خلال ${WEB_REPLY_TIMEOUT_SEC}ث — أعد الإرسال، وأي رد متأخر سيُحفظ تلقائيًا"
+                        webSendInFlight && webSendElapsedSec >= WEB_REPLY_WARN_AFTER_SEC ->
+                            "الرد متأخر (${webSendElapsedSec}ث) — لا يزال الانتظار جاريًا"
+                        webSendInFlight -> "بانتظار الرد... (${webSendElapsedSec}ث)"
                         else -> "جاهز"
                     }
+
+                    val statusIsAlert = webSendTimedOut ||
+                        (webSendInFlight && webSendElapsedSec >= WEB_REPLY_WARN_AFTER_SEC)
 
                     Text(
                         text = "${selectedPlatform?.iconEmoji ?: "🌐"} ${selectedPlatform?.name.orEmpty()} — $statusLabel",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (statusIsAlert) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 4.dp)
@@ -1556,54 +1684,207 @@ private fun VisibleWebEngineHost(
 private fun hostOf(url: String): String =
     runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")
 
-/* ----------------------------- Provider selector (1.ب.2 / 1.ب.3 / 1.ب.4) ----------------------------- */
+// ✅ G1: عتبات انتظار رد الويب (بالثواني)
+private const val WEB_REPLY_WARN_AFTER_SEC = 60
+private const val WEB_REPLY_TIMEOUT_SEC = 120
 
+/* ----------------------------- مُحدِّد المحرّك الموحّد (API + منصات الويب) ----------------------------- */
+
+/**
+ * مُحدِّد واحد في الشريط العلوي يعرض المحرّك الحالي:
+ * - "⚡ المزود · النموذج" عندما يكون API هو النشط.
+ * - "🌐 اسم المنصة" عندما تكون منصة ويب هي النشطة.
+ *
+ * الضغط عليه يفتح قائمة موحّدة بقسمين:
+ *   1) مزودو API المُهيّأون (مفاتيحهم محفوظة).
+ *   2) منصات الويب المتاحة (المفعّلة والقابلة للحقن فقط).
+ * وسطر أخير للانتقال إلى الإعدادات.
+ *
+ * يحل محل شريط الـChips المستطيل القديم بالكامل.
+ */
 @Composable
-private fun ProviderSelectorRow(
+private fun EngineSelector(
+    settings: AiSettings,
+    activeProviderId: String,
+    activeProviderLabel: String,
     enabledWebPlatforms: List<WebPlatform>,
     selectedWebPlatformId: String?,
-    onSelectApi: () -> Unit,
-    onSelectWebPlatform: (String) -> Unit
+    selectedWebPlatformName: String?,
+    onProviderChange: (String, String) -> Unit,
+    onSelectWebPlatform: (String) -> Unit,
+    onOpenSettings: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        FilterChip(
-            selected = selectedWebPlatformId == null,
-            onClick = onSelectApi,
-            label = {
-                Text("API")
-            },
-            leadingIcon = {
-                Icon(
-                    Icons.Filled.SmartToy,
-                    contentDescription = null
-                )
-            }
-        )
+    val configuredProviders = remember { settings.getConfiguredApiProviders() }
+    var menuExpanded by remember { mutableStateOf(false) }
 
-        enabledWebPlatforms.forEach { platform ->
+    // منصات الويب القابلة للاستخدام فعليًا فقط (نفس معيار الشريط القديم).
+    val usableWebPlatforms = remember(enabledWebPlatforms) {
+        enabledWebPlatforms.filter { platform ->
             val kind = WebSendCoordinator.classifyHost(hostOf(platform.url))
-            val usable = kind == WebSendCoordinator.WebKind.CHATGPT ||
+            kind == WebSendCoordinator.WebKind.CHATGPT ||
                 kind == WebSendCoordinator.WebKind.VENICE ||
                 kind == WebSendCoordinator.WebKind.ARENA
+        }
+    }
 
-            FilterChip(
-                selected = selectedWebPlatformId == platform.id,
-                onClick = {
-                    if (usable) onSelectWebPlatform(platform.id)
-                },
-                enabled = usable,
-                label = {
-                    Text(
-                        "${platform.iconEmoji} ${platform.name}" +
-                            if (!usable) " · قريبًا" else ""
+    val currentLabel = if (selectedWebPlatformId != null) {
+        val platform = enabledWebPlatforms.firstOrNull { it.id == selectedWebPlatformId }
+        "${platform?.iconEmoji ?: "🌐"} ${selectedWebPlatformName ?: "منصة ويب"}"
+    } else {
+        "⚡ $activeProviderLabel"
+    }
+
+    Box {
+        Row(
+            modifier = Modifier.clickable { menuExpanded = true },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = currentLabel.take(34),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selectedWebPlatformId != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+
+            Icon(
+                Icons.Filled.ArrowDropDown,
+                contentDescription = "تبديل المزود أو المنصة",
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
+            // ── القسم الأول: مزودو API ──
+            if (configuredProviders.isNotEmpty()) {
+                Text(
+                    "مزودو API",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+
+                configuredProviders.forEach { info ->
+                    val isActive =
+                        selectedWebPlatformId == null && info.provider == activeProviderId
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isActive) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                } else {
+                                    Spacer(Modifier.width(22.dp))
+                                }
+
+                                Column {
+                                    Text(
+                                        info.label,
+                                        fontWeight = if (isActive) {
+                                            FontWeight.SemiBold
+                                        } else {
+                                            FontWeight.Normal
+                                        }
+                                    )
+                                    Text(
+                                        info.model.take(30),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            if (isActive) return@DropdownMenuItem
+
+                            val model = settings.activateApiProvider(info.provider)
+                            onProviderChange(info.provider, "${info.label} · $model")
+                        }
                     )
+                }
+            }
+
+            // ── القسم الثاني: منصات الويب ──
+            if (usableWebPlatforms.isNotEmpty()) {
+                if (configuredProviders.isNotEmpty()) {
+                    HorizontalDivider()
+                }
+
+                Text(
+                    "منصات الويب",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+
+                usableWebPlatforms.forEach { platform ->
+                    val isActive = selectedWebPlatformId == platform.id
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isActive) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                } else {
+                                    Spacer(Modifier.width(22.dp))
+                                }
+
+                                Text("${platform.iconEmoji} ${platform.name}")
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            if (isActive) return@DropdownMenuItem
+                            onSelectWebPlatform(platform.id)
+                        }
+                    )
+                }
+            }
+
+            if (configuredProviders.isEmpty() && usableWebPlatforms.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("لا يوجد مزودون مهيّأون بعد") },
+                    onClick = { },
+                    enabled = false
+                )
+            }
+
+            HorizontalDivider()
+
+            DropdownMenuItem(
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Settings,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("إدارة المزودين")
+                    }
+                },
+                onClick = {
+                    menuExpanded = false
+                    onOpenSettings()
                 }
             )
         }
@@ -1792,75 +2073,75 @@ private fun MessageBubble(
 
     val align = if (isUser) Alignment.End else Alignment.Start
 
+    // ✅ قائمة الإجراءات — تظهر فقط عند long-press (بدل الأيقونات الدائمة).
+    var actionsMenuExpanded by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = align
     ) {
-        // ── 1.ج.2: الفقاعة الآن تحتوي النص فقط، بلا أزرار كبيرة داخلها ──
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = bg,
-            tonalElevation = 1.dp,
-            modifier = Modifier
-                .widthIn(max = 520.dp)
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = {
-                        onCopy()
+        Box {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = bg,
+                tonalElevation = 1.dp,
+                modifier = Modifier
+                    .widthIn(max = 520.dp)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            // نسخ فوري (كما كان) + إظهار قائمة الإجراءات.
+                            onCopy()
+                            actionsMenuExpanded = true
+                        }
+                    )
+            ) {
+                Text(
+                    message.content,
+                    color = fg,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+
+            DropdownMenu(
+                expanded = actionsMenuExpanded,
+                onDismissRequest = { actionsMenuExpanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Memory,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("حفظ كذاكرة")
+                        }
+                    },
+                    onClick = {
+                        actionsMenuExpanded = false
+                        onSaveMemory()
                     }
                 )
-        ) {
-            Text(
-                message.content,
-                color = fg,
-                modifier = Modifier.padding(12.dp)
-            )
-        }
 
-        // ── صف أيقونات صغيرة أسفل الفقاعة بدل الأزرار الكبيرة الداخلية ──
-        Row(
-            modifier = Modifier.padding(
-                top = 2.dp,
-                start = 4.dp,
-                end = 4.dp
-            ),
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onCopy,
-                modifier = Modifier.size(26.dp)
-            ) {
-                Icon(
-                    Icons.Filled.ContentCopy,
-                    contentDescription = "نسخ",
-                    modifier = Modifier.size(14.dp),
-                    tint = fg.copy(alpha = 0.55f)
-                )
-            }
-
-            IconButton(
-                onClick = onSaveMemory,
-                modifier = Modifier.size(26.dp)
-            ) {
-                Icon(
-                    Icons.Filled.Memory,
-                    contentDescription = "حفظ كذاكرة",
-                    modifier = Modifier.size(14.dp),
-                    tint = fg.copy(alpha = 0.55f)
-                )
-            }
-
-            IconButton(
-                onClick = onBranch,
-                enabled = branchEnabled,
-                modifier = Modifier.size(26.dp)
-            ) {
-                Icon(
-                    Icons.Filled.AccountTree,
-                    contentDescription = "محادثة جديدة من هنا",
-                    modifier = Modifier.size(14.dp),
-                    tint = fg.copy(alpha = if (branchEnabled) 0.55f else 0.25f)
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.AccountTree,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("تفريع من هنا")
+                        }
+                    },
+                    onClick = {
+                        actionsMenuExpanded = false
+                        onBranch()
+                    },
+                    enabled = branchEnabled
                 )
             }
         }
@@ -1948,14 +2229,16 @@ private fun InputBar(
     onRefineStyle: (QueryStyle) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // ✅ طي الأدوات: قائمة مرفقات + قائمة صياغة + صف فرعي للتحسين النشط.
+    var attachMenu by remember { mutableStateOf(false) }
     var styleMenu by remember { mutableStateOf(false) }
     val displayedText = value.text
 
     Column(
         modifier = modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // ── 1.ج.1: مقبض طي/فرد مربع الإدخال ──
+        // مقبض الطي/الفرد محفوظ كما كان (لكنه الآن يتحكم فقط بارتفاع حقل النص).
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center
@@ -2000,10 +2283,85 @@ private fun InputBar(
             }
         }
 
+        // ── صف الإدخال الرئيسي: [+ مرفقات] [حقل النص] [🎛️ صياغة] [➤] ──
         Row(
             verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            // قائمة المرفقات — تجمع: معرض، كاميرا، ملف، صفحة ويب.
+            Box {
+                IconButton(
+                    onClick = { attachMenu = true },
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = "مرفقات وأدوات"
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = attachMenu,
+                    onDismissRequest = { attachMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("صورة من المعرض")
+                            }
+                        },
+                        onClick = {
+                            attachMenu = false
+                            onOpenGallery()
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("التقاط صورة")
+                            }
+                        },
+                        onClick = {
+                            attachMenu = false
+                            onOpenCamera()
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("ملف")
+                            }
+                        },
+                        onClick = {
+                            attachMenu = false
+                            onOpenFile()
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Language, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("استيراد صفحة ويب")
+                            }
+                        },
+                        onClick = {
+                            attachMenu = false
+                            onOpenWebImport()
+                        }
+                    )
+                }
+            }
+
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -2040,6 +2398,59 @@ private fun InputBar(
                 )
             )
 
+            // قائمة الصياغة — تحسين السؤال + تحسين النمط.
+            Box {
+                IconButton(
+                    onClick = { styleMenu = true },
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Filled.Tune,
+                        contentDescription = "أدوات الصياغة"
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = styleMenu,
+                    onDismissRequest = { styleMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(if (isEnhancing) "جارٍ التحسين…" else "✨ تحسين السؤال")
+                        },
+                        onClick = {
+                            styleMenu = false
+                            onEnhance()
+                        },
+                        enabled = !isLoading &&
+                            !isEnhancing &&
+                            displayedText.isNotBlank()
+                    )
+
+                    HorizontalDivider()
+
+                    Text(
+                        "تحسين النمط",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+
+                    enumValues<QueryStyle>().forEach { style ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(style.name)
+                            },
+                            onClick = {
+                                styleMenu = false
+                                onRefineStyle(style)
+                            },
+                            enabled = !isLoading && displayedText.isNotBlank()
+                        )
+                    }
+                }
+            }
+
             IconButton(
                 onClick = onSend,
                 enabled = !isLoading && displayedText.isNotBlank() && !sendDisabledExternally
@@ -2051,105 +2462,17 @@ private fun InputBar(
             }
         }
 
-        if (expanded) {
+        // ── صف فرعي يظهر فقط عند وجود نص مُحسَّن نشط ──
+        if (isEnhanced) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.End
             ) {
-                IconButton(
-                    onClick = onOpenGallery,
+                TextButton(
+                    onClick = onClearEnhanced,
                     enabled = !isLoading
                 ) {
-                    Icon(
-                        Icons.Filled.Image,
-                        contentDescription = "Gallery"
-                    )
-                }
-
-                IconButton(
-                    onClick = onOpenCamera,
-                    enabled = !isLoading
-                ) {
-                    Icon(
-                        Icons.Filled.CameraAlt,
-                        contentDescription = "Camera"
-                    )
-                }
-
-                IconButton(
-                    onClick = onOpenFile,
-                    enabled = !isLoading
-                ) {
-                    Icon(
-                        Icons.Filled.AttachFile,
-                        contentDescription = "File"
-                    )
-                }
-
-                IconButton(
-                    onClick = onOpenWebImport,
-                    enabled = !isLoading
-                ) {
-                    Icon(
-                        Icons.Filled.Language,
-                        contentDescription = "Web"
-                    )
-                }
-
-                Spacer(Modifier.weight(1f))
-
-                Box {
-                    IconButton(
-                        onClick = {
-                            styleMenu = true
-                        },
-                        enabled = !isLoading
-                    ) {
-                        Icon(
-                            Icons.Filled.Tune,
-                            contentDescription = "Refine style"
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = styleMenu,
-                        onDismissRequest = {
-                            styleMenu = false
-                        }
-                    ) {
-                        enumValues<QueryStyle>().forEach { style ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(style.name)
-                                },
-                                onClick = {
-                                    styleMenu = false
-                                    onRefineStyle(style)
-                                }
-                            )
-                        }
-                    }
-                }
-
-                if (isEnhanced) {
-                    TextButton(
-                        onClick = onClearEnhanced,
-                        enabled = !isLoading
-                    ) {
-                        Text("إلغاء التحسين")
-                    }
-                } else {
-                    TextButton(
-                        onClick = onEnhance,
-                        enabled = !isLoading &&
-                            !isEnhancing &&
-                            displayedText.isNotBlank()
-                    ) {
-                        Text(
-                            if (isEnhancing) "جارٍ التحسين…" else "تحسين السؤال"
-                        )
-                    }
+                    Text("إلغاء التحسين")
                 }
             }
         }
@@ -2319,3 +2642,5 @@ private fun guessIsUser(message: Message): Boolean {
 
     return false
 }
+
+
