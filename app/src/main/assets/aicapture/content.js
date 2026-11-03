@@ -2,7 +2,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.56";
+var VERSION = "1.0.57-diag";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -1346,6 +1346,47 @@ function finishCapture(answer) {
   );
 }
 
+function buildChatGPTDiagSnapshot() {
+  var containers = getChatGPTConversationContainers();
+  var out = "🔬 DIAG chatgpt snapshot: legacy=" + lastChatgptUsedLegacyFallback +
+    " containers=" + containers.length;
+
+  for (var i = 0; i < containers.length && i < 2; i++) {
+    var c = containers[i];
+    var raw = "";
+    var inner = "";
+    try { raw = c.textContent || ""; } catch (_) {}
+    try { inner = c.innerText || ""; } catch (_) {}
+    var stripped = getElementTextNoSrOnly(c);
+
+    var srCount = 0;
+    var srSample = "";
+    try {
+      var sr = c.querySelectorAll(".sr-only, [class*='sr-only']");
+      srCount = sr.length;
+      for (var k = 0; k < sr.length && k < 4; k++) {
+        srSample += "[" + String(sr[k].textContent || "").trim().substring(0, 30) + "]";
+      }
+    } catch (_) {}
+
+    out += " | c" + i +
+      ": rawLen=" + raw.length +
+      " innerLen=" + inner.length +
+      " strippedLen=" + stripped.length +
+      " extRaw=" + extractChatGPTAssistantText(raw).length +
+      " extInner=" + extractChatGPTAssistantText(inner).length +
+      " extStripped=" + extractChatGPTAssistantText(stripped).length +
+      " srNodes=" + srCount + " srSample=" + srSample +
+      " tail=" + JSON.stringify(raw.slice(-100));
+  }
+
+  out += " | userEls=" + getUserMessageElements().length +
+    " roleAttrEls=" + document.querySelectorAll("[data-message-author-role]").length +
+    " articles=" + document.querySelectorAll("article").length;
+
+  return out;
+}
+
 function watchForResponse() {
   if (!captureActive || captureFinished) return;
 
@@ -1364,6 +1405,20 @@ function watchForResponse() {
   }
 
   if (!current) {
+    if (CURRENT_PLATFORM.id === "chatgpt") {
+      diagEmptyPollCount++;
+      if (
+        diagEmptyPollCount <= 120 &&
+        (diagEmptyPollCount === 1 || diagEmptyPollCount % 5 === 0)
+      ) {
+        try {
+          log(buildChatGPTDiagSnapshot());
+        } catch (eSnap) {
+          log("🔬 DIAG chatgpt snapshot failed: " + eSnap);
+        }
+      }
+    }
+
     if (CURRENT_PLATFORM.id === "venice") {
       diagEmptyPollCount++;
       if (diagEmptyPollCount === 1 || diagEmptyPollCount % 5 === 0) {
