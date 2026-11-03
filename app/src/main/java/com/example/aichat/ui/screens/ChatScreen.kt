@@ -1,4 +1,3 @@
-
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -2185,16 +2184,14 @@ private fun InputBar(
     onRefineStyle: (QueryStyle) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // ✅ طي الأدوات: قائمة مرفقات + قائمة صياغة + صف فرعي للتحسين النشط.
-    var attachMenu by remember { mutableStateOf(false) }
     var styleMenu by remember { mutableStateOf(false) }
     val displayedText = value.text
 
     Column(
         modifier = modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // مقبض الطي/الفرد محفوظ كما كان (لكنه الآن يتحكم فقط بارتفاع حقل النص).
+        // ── 1.ج.1: مقبض طي/فرد مربع الإدخال ──
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center
@@ -2239,85 +2236,10 @@ private fun InputBar(
             }
         }
 
-        // ── صف الإدخال الرئيسي: [+ مرفقات] [حقل النص] [🎛️ صياغة] [➤] ──
         Row(
             verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // قائمة المرفقات — تجمع: معرض، كاميرا، ملف، صفحة ويب.
-            Box {
-                IconButton(
-                    onClick = { attachMenu = true },
-                    enabled = !isLoading
-                ) {
-                    Icon(
-                        Icons.Filled.Add,
-                        contentDescription = "مرفقات وأدوات"
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = attachMenu,
-                    onDismissRequest = { attachMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("صورة من المعرض")
-                            }
-                        },
-                        onClick = {
-                            attachMenu = false
-                            onOpenGallery()
-                        }
-                    )
-
-                    DropdownMenuItem(
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("التقاط صورة")
-                            }
-                        },
-                        onClick = {
-                            attachMenu = false
-                            onOpenCamera()
-                        }
-                    )
-
-                    DropdownMenuItem(
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("ملف")
-                            }
-                        },
-                        onClick = {
-                            attachMenu = false
-                            onOpenFile()
-                        }
-                    )
-
-                    DropdownMenuItem(
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Language, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("استيراد صفحة ويب")
-                            }
-                        },
-                        onClick = {
-                            attachMenu = false
-                            onOpenWebImport()
-                        }
-                    )
-                }
-            }
-
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -2354,59 +2276,6 @@ private fun InputBar(
                 )
             )
 
-            // قائمة الصياغة — تحسين السؤال + تحسين النمط.
-            Box {
-                IconButton(
-                    onClick = { styleMenu = true },
-                    enabled = !isLoading
-                ) {
-                    Icon(
-                        Icons.Filled.Tune,
-                        contentDescription = "أدوات الصياغة"
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = styleMenu,
-                    onDismissRequest = { styleMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(if (isEnhancing) "جارٍ التحسين…" else "✨ تحسين السؤال")
-                        },
-                        onClick = {
-                            styleMenu = false
-                            onEnhance()
-                        },
-                        enabled = !isLoading &&
-                            !isEnhancing &&
-                            displayedText.isNotBlank()
-                    )
-
-                    HorizontalDivider()
-
-                    Text(
-                        "تحسين النمط",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                    )
-
-                    enumValues<QueryStyle>().forEach { style ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(style.name)
-                            },
-                            onClick = {
-                                styleMenu = false
-                                onRefineStyle(style)
-                            },
-                            enabled = !isLoading && displayedText.isNotBlank()
-                        )
-                    }
-                }
-            }
-
             IconButton(
                 onClick = onSend,
                 enabled = !isLoading && displayedText.isNotBlank() && !sendDisabledExternally
@@ -2418,17 +2287,105 @@ private fun InputBar(
             }
         }
 
-        // ── صف فرعي يظهر فقط عند وجود نص مُحسَّن نشط ──
-        if (isEnhanced) {
+        if (expanded) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
-                    onClick = onClearEnhanced,
+                IconButton(
+                    onClick = onOpenGallery,
                     enabled = !isLoading
                 ) {
-                    Text("إلغاء التحسين")
+                    Icon(
+                        Icons.Filled.Image,
+                        contentDescription = "Gallery"
+                    )
+                }
+
+                IconButton(
+                    onClick = onOpenCamera,
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Filled.CameraAlt,
+                        contentDescription = "Camera"
+                    )
+                }
+
+                IconButton(
+                    onClick = onOpenFile,
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Filled.AttachFile,
+                        contentDescription = "File"
+                    )
+                }
+
+                IconButton(
+                    onClick = onOpenWebImport,
+                    enabled = !isLoading
+                ) {
+                    Icon(
+                        Icons.Filled.Language,
+                        contentDescription = "Web"
+                    )
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                Box {
+                    IconButton(
+                        onClick = {
+                            styleMenu = true
+                        },
+                        enabled = !isLoading
+                    ) {
+                        Icon(
+                            Icons.Filled.Tune,
+                            contentDescription = "Refine style"
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = styleMenu,
+                        onDismissRequest = {
+                            styleMenu = false
+                        }
+                    ) {
+                        enumValues<QueryStyle>().forEach { style ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(style.name)
+                                },
+                                onClick = {
+                                    styleMenu = false
+                                    onRefineStyle(style)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (isEnhanced) {
+                    TextButton(
+                        onClick = onClearEnhanced,
+                        enabled = !isLoading
+                    ) {
+                        Text("إلغاء التحسين")
+                    }
+                } else {
+                    TextButton(
+                        onClick = onEnhance,
+                        enabled = !isLoading &&
+                            !isEnhancing &&
+                            displayedText.isNotBlank()
+                    ) {
+                        Text(
+                            if (isEnhancing) "جارٍ التحسين…" else "تحسين السؤال"
+                        )
+                    }
                 }
             }
         }
