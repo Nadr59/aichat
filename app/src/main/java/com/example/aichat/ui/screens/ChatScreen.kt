@@ -366,7 +366,9 @@ fun ChatScreen(
     // ✅ G1: عدّاد الانتظار — يعمل فقط أثناء webSendInFlight.
     // عند انقضاء المهلة: نحرّر الواجهة فقط (webSendInFlight=false)،
     // ولا نلمس طابور الـVM — فأي رد متأخر يُلتقط ويُحفظ كالمعتاد.
-    LaunchedEffect(webSendInFlight) {
+     
+            LaunchedEffect(webSendInFlight) {
+        if (true) return@LaunchedEffect // TEMP-DIAG: تعطيل عدّاد G1 مؤقتًا
         if (!webSendInFlight) return@LaunchedEffect
 
         webSendElapsedSec = 0
