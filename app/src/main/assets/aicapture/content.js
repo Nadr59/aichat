@@ -2,7 +2,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.57-diag";
+var VERSION = "1.0.58-diag";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -1387,6 +1387,126 @@ function buildChatGPTDiagSnapshot() {
   return out;
 }
 
+var dsPrevLen = -1;
+var dsStableCount = 0;
+var dsLastDumpedLen = -1;
+var dsDumpCount = 0;
+
+function diagNodeLabel(n) {
+  var tag = String(n.tagName || "?").toLowerCase();
+  if (tag === "svg" || tag === "path") return tag;
+  var label = tag;
+  try {
+    var cls = String(n.getAttribute("class") || "").trim();
+    if (cls) label += "." + cls.split(/\s+/).slice(0, 3).join(".").substring(0, 60);
+  } catch (_) {}
+  try {
+    var shown = 0;
+    for (var i = 0; i < n.attributes.length && shown < 4; i++) {
+      var a = n.attributes[i];
+      if (a.name === "class" || a.name === "style") continue;
+      label += "[" + a.name + "=" + String(a.value).substring(0, 24) + "]";
+      shown++;
+    }
+  } catch (_) {}
+  var tl = 0;
+  var il = 0;
+  try { tl = String(n.textContent || "").length; } catch (_) {}
+  try { il = String(n.innerText || "").length; } catch (_) {}
+  label += " k=" + n.children.length + " t=" + tl + " i=" + il;
+  if (n.children.length === 0) {
+    label += " \"" + String(n.textContent || "").replace(/\s+/g, " ").substring(0, 30) + "\"";
+  }
+  return label;
+}
+
+function collectDiagTree(root, maxNodes) {
+  var lines = [];
+
+  function hasMeta(n) {
+    try {
+      for (var i = 0; i < n.attributes.length; i++) {
+        var nm = n.attributes[i].name;
+        if (nm.indexOf("data-") === 0 || nm.indexOf("aria-") === 0 || nm === "role" || nm === "id") {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function walk(n, depth) {
+    if (lines.length >= maxNodes || depth > 16) return;
+    var tag = String(n.tagName || "").toLowerCase();
+    var kids = n.children;
+    var skip = depth > 0 && kids.length === 1 && !hasMeta(n);
+    if (!skip) lines.push(depth + ":" + diagNodeLabel(n));
+    if (tag === "svg") return;
+    for (var i = 0; i < kids.length && i < 10; i++) walk(kids[i], depth + 1);
+  }
+
+  walk(root, 0);
+  return lines;
+}
+
+function buildChatGPTProbeLine(c) {
+  var sels = [
+    ".markdown", "[class*='markdown']", ".prose", "[class*='prose']",
+    "[data-testid]", "[data-message-id]", "[data-turn]", "[class*='turn']",
+    "[class*='message']", ".whitespace-pre-wrap", "[dir='auto']",
+    "[role='article']", "[role='listitem']", "[role='log']", "p"
+  ];
+  var out = "";
+  for (var i = 0; i < sels.length; i++) {
+    var cnt = -1;
+    try { cnt = c.querySelectorAll(sels[i]).length; } catch (_) {}
+    out += sels[i] + "=" + cnt + " ";
+  }
+  var tids = "";
+  try {
+    var els = c.querySelectorAll("[data-testid]");
+    for (var j = 0; j < els.length && j < 8; j++) {
+      tids += els[j].getAttribute("data-testid") + ",";
+    }
+  } catch (_) {}
+  var labels = "";
+  try {
+    var ls = c.querySelectorAll("[aria-label]");
+    for (var k = 0; k < ls.length && k < 8; k++) {
+      labels += "[" + ls[k].getAttribute("aria-label") + "]";
+    }
+  } catch (_) {}
+  return out + "| testids=" + tids + " | aria=" + labels;
+}
+
+function maybeLogChatGPTStructure() {
+  var containers = getChatGPTConversationContainers();
+  if (!containers.length) return;
+  var c = containers[0];
+  var len = 0;
+  try { len = String(c.textContent || "").length; } catch (_) {}
+
+  if (len === dsPrevLen) {
+    dsStableCount++;
+  } else {
+    dsStableCount = 0;
+    dsPrevLen = len;
+  }
+
+  if (len <= 0 || dsStableCount < 2 || len === dsLastDumpedLen || dsDumpCount >= 6) return;
+
+  dsLastDumpedLen = len;
+  dsDumpCount++;
+  var tag = "🔬 DIAG tree#" + dsDumpCount + " len=" + len;
+  log(tag + " probes: " + buildChatGPTProbeLine(c));
+
+  var joined = collectDiagTree(c, 100).join(" ¦ ");
+  var parts = Math.ceil(joined.length / 1200);
+  for (var p = 0; p < parts; p++) {
+    log(tag + " part " + (p + 1) + "/" + parts + ": " + joined.substring(p * 1200, (p + 1) * 1200));
+  }
+}
+
 function watchForResponse() {
   if (!captureActive || captureFinished) return;
 
@@ -1407,6 +1527,11 @@ function watchForResponse() {
   if (!current) {
     if (CURRENT_PLATFORM.id === "chatgpt") {
       diagEmptyPollCount++;
+      try {
+        maybeLogChatGPTStructure();
+      } catch (eDump) {
+        log("🔬 DIAG tree failed: " + eDump);
+      }
       if (
         diagEmptyPollCount <= 120 &&
         (diagEmptyPollCount === 1 || diagEmptyPollCount % 5 === 0)
