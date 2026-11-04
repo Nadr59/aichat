@@ -2,7 +2,7 @@
 (function () {
 "use strict";
 
-var VERSION = "1.0.58-diag";
+var VERSION = "1.0.59";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -999,6 +999,117 @@ function extractLatestPlatformResponse() {
   return "";
 }
 
+// ============================================================
+// [v1.0.59] ChatGPT: استخراج الرد من بنية الجوال (data-message-role)
+// ------------------------------------------------------------
+// دليل من شجرة DOM الفعلية (سجل 06:00): ChatGPT يقدّم لـ Gecko تخطيط
+// الجوال: li[data-message-role="assistant"] ونص الرد وحده داخل
+// [data-assistant-markdown-root]. علامة "قال ChatGPT:" موجودة كـ
+// aria-label على h4 لا كنص، لذلك كان extractChatGPTAssistantText يُرجع
+// فارغًا دائمًا.
+// ============================================================
+
+var baselineAssistantItemCount = -1;
+var lastChatgptItemFlagsLogged = "";
+
+function getChatGPTAssistantItems() {
+  var out = [];
+
+  try {
+    var list = document.querySelectorAll('[data-message-role="assistant"]');
+    for (var i = 0; i < list.length; i++) out.push(list[i]);
+  } catch (_) {}
+
+  return out;
+}
+
+function readChatGPTAssistantItemText(item) {
+  if (!item) return "";
+
+  var root = null;
+
+  try {
+    root = item.querySelector(
+      "[data-assistant-markdown-root], [data-assistant-markdown]"
+    );
+  } catch (_) {}
+
+  // إن وُجدت حاوية الرد نعتمدها وحدها (حتى لو كانت فارغة بعد: الرد لم يبدأ).
+  if (root) {
+    return cleanAssistantResponse(getElementText(root));
+  }
+
+  // احتياط: لا توجد حاوية markdown، ننظّف نسخة من عنصر الرسالة.
+  try {
+    var clone = item.cloneNode(true);
+    var junk = clone.querySelectorAll(
+      "[data-message-actions], [data-message-attribution], [popover], " +
+      "button, svg, script, style, [hidden], [aria-hidden='true']"
+    );
+
+    for (var j = 0; j < junk.length; j++) {
+      try {
+        if (junk[j].parentNode) junk[j].parentNode.removeChild(junk[j]);
+      } catch (_) {}
+    }
+
+    return cleanAssistantResponse(
+      String(clone.textContent || "").replace(/\u00a0/g, " ")
+    );
+  } catch (_) {}
+
+  return "";
+}
+
+function getChatGPTItemFlags(item) {
+  var complete = false;
+  var busy = "none";
+
+  try { complete = item.hasAttribute("data-message-complete"); } catch (_) {}
+
+  try {
+    var b = item.querySelector("[aria-busy]");
+    if (b) busy = String(b.getAttribute("aria-busy"));
+  } catch (_) {}
+
+  return "complete=" + complete + " busy=" + busy;
+}
+
+function getChatGPTItemAssistantText() {
+  var items = getChatGPTAssistantItems();
+  if (!items.length) return "";
+
+  var last = items[items.length - 1];
+  var text = readChatGPTAssistantItemText(last);
+
+  if (!text) return "";
+  if (isInvalidChatGPTResponse(text)) return "";
+  if (looksLikeInjectedPrompt(text)) return "";
+  if (isArenaRejectedCandidate(text)) return "";
+
+  try {
+    var flags = getChatGPTItemFlags(last) +
+      " items=" + items.length +
+      " baselineItems=" + baselineAssistantItemCount;
+
+    if (flags !== lastChatgptItemFlagsLogged) {
+      lastChatgptItemFlagsLogged = flags;
+      log("🔬 DIAG chatgpt item-extract " + flags + " len=" + text.length);
+    }
+  } catch (_) {}
+
+  return text;
+}
+
+// true إن ظهر عنصر assistant جديد بعد بدء الالتقاط (يميّز رد جديدًا
+// مطابقًا حرفيًا للرد السابق من الرد القديم نفسه).
+function chatgptNewAssistantItemAppeared() {
+  if (CURRENT_PLATFORM.id !== "chatgpt") return false;
+  if (baselineAssistantItemCount < 0) return false;
+
+  return getChatGPTAssistantItems().length > baselineAssistantItemCount;
+}
+
 function getCurrentAssistantText() {
   if (CURRENT_PLATFORM.id === "arena") {
     var arenaNodes = getArenaAssistantElements();
@@ -1019,6 +1130,11 @@ function getCurrentAssistantText() {
 
   if (CURRENT_PLATFORM.id !== "chatgpt") {
     return extractLatestPlatformResponse();
+  }
+
+  // [v1.0.59] بنية الجوال: إن وُجدت عناصر assistant نستخدمها ولا نسقط للقديم.
+  if (getChatGPTAssistantItems().length > 0) {
+    return getChatGPTItemAssistantText();
   }
 
   var elements = getPlatformResponseElements();
@@ -1217,6 +1333,10 @@ function startResponseCapture(reason) {
   stableSince = 0;
   captureStartedAt = Date.now();
   diagEmptyPollCount = 0;
+  lastChatgptItemFlagsLogged = "";
+  baselineAssistantItemCount = CURRENT_PLATFORM.id === "chatgpt"
+    ? getChatGPTAssistantItems().length
+    : -1;
   baselineAssistant = getCurrentAssistantText();
 
   log(
@@ -1527,11 +1647,6 @@ function watchForResponse() {
   if (!current) {
     if (CURRENT_PLATFORM.id === "chatgpt") {
       diagEmptyPollCount++;
-      try {
-        maybeLogChatGPTStructure();
-      } catch (eDump) {
-        log("🔬 DIAG tree failed: " + eDump);
-      }
       if (
         diagEmptyPollCount <= 120 &&
         (diagEmptyPollCount === 1 || diagEmptyPollCount % 5 === 0)
@@ -1570,7 +1685,11 @@ function watchForResponse() {
     return;
   }
 
-  if (baselineAssistant && current === baselineAssistant) {
+  if (
+    baselineAssistant &&
+    current === baselineAssistant &&
+    !chatgptNewAssistantItemAppeared()
+  ) {
     setTimeout(watchForResponse, 1000);
     return;
   }
