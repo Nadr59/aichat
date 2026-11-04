@@ -1,4 +1,3 @@
-
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -298,6 +297,7 @@ fun ChatScreen(
     var webLoadError by remember(selectedWebPlatformId) { mutableStateOf<String?>(null) }
     var webSendInFlight by remember(selectedWebPlatformId) { mutableStateOf(false) }
     var webRuntimeMissing by remember(selectedWebPlatformId) { mutableStateOf(false) }
+
     // ✅ G1: عدّاد انتظار رد الويب — يميّز "تأخر" عن "فشل محتمل"
     var webSendElapsedSec by remember(selectedWebPlatformId) { mutableStateOf(0) }
     var webSendTimedOut by remember(selectedWebPlatformId) { mutableStateOf(false) }
@@ -366,8 +366,7 @@ fun ChatScreen(
     // ✅ G1: عدّاد الانتظار — يعمل فقط أثناء webSendInFlight.
     // عند انقضاء المهلة: نحرّر الواجهة فقط (webSendInFlight=false)،
     // ولا نلمس طابور الـVM — فأي رد متأخر يُلتقط ويُحفظ كالمعتاد.
-     
-                LaunchedEffect(webSendInFlight) {
+    LaunchedEffect(webSendInFlight) {
         if (!webSendInFlight) return@LaunchedEffect
 
         webSendElapsedSec = 0
@@ -481,10 +480,45 @@ fun ChatScreen(
 
         if (rawText.isBlank()) return
 
+        val activeConversationIdAtSend = conversationId
+
         scope.launch {
             keyboardController?.hide()
             focusManager.clearFocus(force = true)
             delay(80)
+
+            val priorMessages = activeConversationIdAtSend
+                ?.let { activeId ->
+                    viewModel.messages.value
+                        .filter { it.conversationId == activeId }
+                        .takeLast(WEB_CONTEXT_RECENT_MESSAGE_COUNT)
+                }
+                .orEmpty()
+
+            val recentMessagesContext = priorMessages
+                .joinToString(separator = "\n\n") { message ->
+                    val speaker = when (message.role.lowercase(Locale.ROOT)) {
+                        "user" -> "المستخدم"
+                        "assistant" -> "المساعد"
+                        else -> message.role
+                    }
+
+                    val attachmentNote =
+                        if (message.imageBase64 != null) {
+                            " [مرفق صورة سابقة غير منقول]"
+                        } else {
+                            ""
+                        }
+
+                    "$speaker$attachmentNote:\n${message.content}"
+                }
+                .let { transcript ->
+                    if (transcript.isBlank()) {
+                        ""
+                    } else {
+                        "RECENT_CONVERSATION_MESSAGES:\n$transcript"
+                    }
+                }
 
             webSendInFlight = true
             webSendTimedOut = false
@@ -507,7 +541,8 @@ fun ChatScreen(
             // المستخدم من جانب API)، وهذا يحل مشكلة فشل انتقال السياق في
             // الاتجاهات: API→ويب، ويب→ويب (نفس/مختلف المنصة).
             val contextBlock = WebSendCoordinator.buildContextBlock(
-                workspaceSummary = workspaceSummary
+                workspaceSummary = workspaceSummary,
+                extraNotes = recentMessagesContext
             )
 
             val finalText = WebSendCoordinator.buildFinalTextForPlatform(
@@ -1688,6 +1723,7 @@ private fun hostOf(url: String): String =
 // ✅ G1: عتبات انتظار رد الويب (بالثواني)
 private const val WEB_REPLY_WARN_AFTER_SEC = 60
 private const val WEB_REPLY_TIMEOUT_SEC = 120
+private const val WEB_CONTEXT_RECENT_MESSAGE_COUNT = 4
 
 /* ----------------------------- مُحدِّد المحرّك الموحّد (API + منصات الويب) ----------------------------- */
 
@@ -2643,5 +2679,3 @@ private fun guessIsUser(message: Message): Boolean {
 
     return false
 }
-
-
