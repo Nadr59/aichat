@@ -1,3 +1,5 @@
+
+
 package com.example.aichat.ui.viewmodel
 
 import android.app.Application
@@ -274,6 +276,40 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }.trim()
     }
 
+    private fun cleanWorkspaceSummaryOutput(rawSummary: String): String {
+        val trimmed = rawSummary.trim()
+        val knownHeading = Regex("""^(?:الملخص المحدّث|الملخص المحدث)\s*:\s*""")
+        return knownHeading.replaceFirst(trimmed, "").trim()
+    }
+
+    private fun logWorkspaceSummarySkipped(path: String, workspaceId: Long) {
+        (getApplication<Application>() as? AichatApp)?.logDebug(
+            "WORKSPACE_SUMMARY_SKIPPED path=$path workspaceId=$workspaceId " +
+                "reason=empty_after_cleanup previous_preserved=true"
+        )
+    }
+
+    private fun logWorkspaceSummaryFailure(
+        path: String,
+        workspaceId: Long,
+        error: Exception
+    ) {
+        val errorType = error.javaClass.simpleName.ifBlank {
+            error.javaClass.name
+        }
+        val detail = error.message
+            ?.replace(Regex("""\s+"""), " ")
+            ?.trim()
+            ?.take(120)
+            .orEmpty()
+            .ifBlank { "no_message" }
+
+        (getApplication<Application>() as? AichatApp)?.logDebug(
+            "WORKSPACE_SUMMARY_ERROR path=$path workspaceId=$workspaceId " +
+                "type=$errorType detail=$detail"
+        )
+    }
+
     private suspend fun generateUpdatedWorkspaceSummary(
         previousSummary: String,
         userText: String,
@@ -294,21 +330,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             appendLine("ASSISTANT: $a")
             appendLine()
             appendLine("قواعد الإخراج:")
-            appendLine("- أعد الملخص المحدّث فقط دون شرح إضافي.")
+            appendLine("- أعد نص الملخص فقط دون شرح إضافي.")
             appendLine("- اجعله بالعربية.")
             appendLine("- حافظ على الحقائق المهمة والتفضيلات والمهام والقرارات والأسماء.")
             appendLine("- لا تكرر نص الحوار حرفيًا، لخّصه.")
+            appendLine("- لا تكتب عنوانًا مثل «الملخص المحدّث:» أو مقدمة أو خاتمة أو دعوة للمتابعة.")
+            appendLine("- لا تعرض المحتوى بصيغة سؤال وجواب؛ ادمج المعلومات المهمة في ملخص موجز.")
             appendLine("- طول أقصى ~1200 حرف.")
         }.trim()
 
-        return repository.sendMessage(
+        val generated = repository.sendMessage(
             history = emptyList(),
             userMessage = prompt,
             imageBase64 = null,
             memoryContext = "",
             hasMemorySource = false,
             agentPrompt = ""
-        ).trim()
+        )
+
+        return cleanWorkspaceSummaryOutput(generated)
     }
 
     private fun updateWorkspaceSummaryAsync(
@@ -318,12 +358,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val prev = _workspaceSummary.value
         viewModelScope.launch {
-            runCatching {
+            try {
                 val updated = generateUpdatedWorkspaceSummary(prev, userText, assistantText)
-                if (updated.isNotBlank()) {
-                    conversationRepository.updateWorkspaceSummary(workspaceId, updated)
-                    _workspaceSummary.value = updated
+                if (updated.isBlank()) {
+                    logWorkspaceSummarySkipped("api", workspaceId)
+                    return@launch
                 }
+
+                conversationRepository.updateWorkspaceSummary(workspaceId, updated)
+                _workspaceSummary.value = updated
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logWorkspaceSummaryFailure("api", workspaceId, e)
             }
         }
     }
@@ -334,13 +381,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         assistantText: String
     ) {
         viewModelScope.launch {
-            runCatching {
+            try {
                 val prev = conversationRepository.getWorkspaceById(workspaceId)?.summary.orEmpty()
                 val updated = generateUpdatedWorkspaceSummary(prev, userText, assistantText)
-                if (updated.isNotBlank()) {
-                    conversationRepository.updateWorkspaceSummary(workspaceId, updated)
-                    if (_currentWorkspaceId.value == workspaceId) _workspaceSummary.value = updated
+                if (updated.isBlank()) {
+                    logWorkspaceSummarySkipped("web", workspaceId)
+                    return@launch
                 }
+
+                conversationRepository.updateWorkspaceSummary(workspaceId, updated)
+                if (_currentWorkspaceId.value == workspaceId) _workspaceSummary.value = updated
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logWorkspaceSummaryFailure("web", workspaceId, e)
             }
         }
     }
@@ -1706,3 +1760,5 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
+
+ 
