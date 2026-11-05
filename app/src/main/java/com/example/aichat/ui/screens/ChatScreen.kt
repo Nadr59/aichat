@@ -1,3 +1,4 @@
+
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -43,6 +44,7 @@ import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
 import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.data.model.WebPlatform
+import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.WebSendCoordinator
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
@@ -481,6 +483,7 @@ fun ChatScreen(
         if (rawText.isBlank()) return
 
         val activeConversationIdAtSend = conversationId
+        val agentIdAtSend = currentAgentId
 
         scope.launch {
             keyboardController?.hide()
@@ -537,10 +540,16 @@ fun ChatScreen(
                 return@launch
             }
 
+            val agentPromptForWeb = agents
+                .firstOrNull { it.id == agentIdAtSend }
+                ?.let { AgentPromptBuilder.build(it) }
+                .orEmpty()
+
             // بناء كتلة السياق من ملخص الـ Workspace الحالي (نفس المصدر
             // المستخدم من جانب API)، وهذا يحل مشكلة فشل انتقال السياق في
             // الاتجاهات: API→ويب، ويب→ويب (نفس/مختلف المنصة).
             val contextBlock = WebSendCoordinator.buildContextBlock(
+                agentPrompt = agentPromptForWeb,
                 workspaceSummary = workspaceSummary,
                 extraNotes = recentMessagesContext
             )
