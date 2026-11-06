@@ -1,4 +1,5 @@
 
+
 package com.example.aichat.ui.viewmodel
 
 import android.app.Application
@@ -46,11 +47,33 @@ import java.util.Locale
 /** الحد الأقصى لعدد خطوات سلسلة الوكلاء (القرار 4). */
 const val MAX_AGENT_CHAIN_STEPS = 5
 
+/** الحد الأقصى لطول التعليمة الإضافية لكل خطوة (بالحروف). */
+const val MAX_CHAIN_EXTRA_INSTRUCTION_CHARS = 300
+
 /** تقدم سلسلة الوكلاء الجارية: الخطوة الحالية من الإجمالي واسم الوكيل. */
 data class AgentChainProgress(
     val step: Int,
     val total: Int,
     val agentName: String
+)
+
+/**
+ * ما تستلمه الخطوة (من الثانية فصاعدًا). الخطوة الأولى تستلم نص المستخدم دائمًا.
+ * - PREVIOUS_ONLY: مخرج الخطوة السابقة فقط (الأنبوب النقي، الافتراضي).
+ * - ORIGINAL_AND_PREVIOUS: النص الأصلي + مخرج السابقة بعنوانين ثابتين.
+ * - ORIGINAL_ONLY: نص المستخدم الأصلي فقط (يتجاهل مخرج السابقة).
+ */
+enum class ChainInputMode {
+    PREVIOUS_ONLY,
+    ORIGINAL_AND_PREVIOUS,
+    ORIGINAL_ONLY
+}
+
+/** وصف خطوة في السلسلة: الوكيل + وضع الاستلام + تعليمة إضافية اختيارية. */
+data class ChainStepSpec(
+    val agentId: String,
+    val inputMode: ChainInputMode = ChainInputMode.PREVIOUS_ONLY,
+    val extraInstruction: String = ""
 )
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
@@ -863,8 +886,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // Agent Chain (API only) — سلسلة وكلاء
     // =========================
     //
-    // أنبوب نقي: كل خطوة تستلم مخرج السابقة فقط، بلا تاريخ وبلا ملخص
-    // وبلا ذاكرة مشتركة. الوكيل صندوق أسود: نص يدخل ← نص يخرج.
+    // الافتراضي أنبوب نقي: كل خطوة تستلم مخرج السابقة فقط، بلا تاريخ وبلا
+    // ملخص وبلا ذاكرة مشتركة. يمكن لكل خطوة (من الثانية) اختيار وضع استلام
+    // آخر (ChainInputMode) وتعليمة إضافية اختيارية (ChainStepSpec).
+    // الوكيل صندوق أسود: نص يدخل ← نص يخرج.
     // يستخدم _isLoading نفسه، فيمنع الإرسال العادي والتفريع والتصفير أثناءه.
     // المزود الفعّال هو settings.provider عبر repository.sendMessage.
 
@@ -882,18 +907,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         chainJob?.cancel()
     }
 
+    /**
+     * توافق مع الواجهة الحالية: سلسلة بالأوضاع الافتراضية (أنبوب نقي،
+     * بلا تعليمات إضافية). تُحذف بعد تحديث ChatScreen لاستخدام runAgentChainSteps.
+     */
     fun runAgentChain(userText: String, agentIds: List<String>) {
+        runAgentChainSteps(userText, agentIds.map { ChainStepSpec(agentId = it) })
+    }
+
+    /** يركّب مدخل الخطوة حسب وضعها. الخطوة الأولى تستلم نص المستخدم دائمًا. */
+    private fun buildChainStepInput(
+        mode: ChainInputMode,
+        isFirst: Boolean,
+        original: String,
+        previous: String
+    ): String {
+        if (isFirst) return original
+        return when (mode) {
+            ChainInputMode.PREVIOUS_ONLY -> previous
+            ChainInputMode.ORIGINAL_ONLY -> original
+            ChainInputMode.ORIGINAL_AND_PREVIOUS ->
+                "النص الأصلي:\n$original\n\nناتج المرحلة السابقة:\n$previous"
+        }
+    }
+
+    fun runAgentChainSteps(userText: String, steps: List<ChainStepSpec>) {
         val text = userText.trim()
 
         if (text.isBlank()) {
             _error.value = "اكتب النص أولًا قبل تشغيل السلسلة."
             return
         }
-        if (agentIds.isEmpty()) {
+        if (steps.isEmpty()) {
             _error.value = "أضف وكيلًا واحدًا على الأقل إلى السلسلة."
             return
         }
-        if (agentIds.size > MAX_AGENT_CHAIN_STEPS) {
+        if (steps.size > MAX_AGENT_CHAIN_STEPS) {
             _error.value = "الحد الأقصى للسلسلة $MAX_AGENT_CHAIN_STEPS خطوات."
             return
         }
@@ -907,20 +956,34 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _error.value = null
 
         chainJob = viewModelScope.launch {
-            val total = agentIds.size
+            val total = steps.size
             var completed = 0
             var activeStep = 0
             var activeAgentName = ""
 
             try {
                 // 1) تحقق مسبق: كل الوكلاء موجودون قبل أي حفظ.
-                val agents = agentIds.mapIndexed { index, id ->
-                    agentRepository.getById(id)
+                val agents = steps.mapIndexed { index, step ->
+                    agentRepository.getById(step.agentId)
                         ?: throw IllegalStateException(
                             "الوكيل في الخطوة ${index + 1} غير موجود (ربما حُذف)."
                         )
                 }
-                val prompts = agents.map { AgentPromptBuilder.build(it) }
+
+                // تعليمة إضافية لكل خطوة (مقصوصة) تُلحق بتعليمات وكيلها فقط.
+                val extras = steps.map {
+                    it.extraInstruction.trim().take(MAX_CHAIN_EXTRA_INSTRUCTION_CHARS)
+                }
+                val prompts = agents.mapIndexed { index, agent ->
+                    val base = AgentPromptBuilder.build(agent)
+                    val extraBlock = extras[index]
+                        .takeIf { it.isNotBlank() }
+                        ?.let { "تعليمة إضافية لهذه الخطوة:\n$it" }
+                        .orEmpty()
+                    listOf(base, extraBlock)
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n\n")
+                }
 
                 logAgentChain("start total=$total agents=${agents.joinToString("|") { it.name }}")
 
@@ -986,11 +1049,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     activeStep = index + 1
                     activeAgentName = agent.name
                     _chainProgress.value = AgentChainProgress(activeStep, total, agent.name)
-                    logAgentChain("step_start step=$activeStep/$total agent=${agent.name}")
+
+                    val modeLabel =
+                        if (index == 0) "FIRST" else steps[index].inputMode.name
+                    logAgentChain(
+                        "step_start step=$activeStep/$total agent=${agent.name} " +
+                            "mode=$modeLabel extraChars=${extras[index].length}"
+                    )
+
+                    val stepInput = buildChainStepInput(
+                        mode = steps[index].inputMode,
+                        isFirst = index == 0,
+                        original = text,
+                        previous = current
+                    )
 
                     val output = repository.sendMessage(
                         history = emptyList(),
-                        userMessage = current,
+                        userMessage = stepInput,
                         imageBase64 = null,
                         memoryContext = "",
                         hasMemorySource = false,
@@ -1004,6 +1080,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         throw IllegalStateException("أعاد الوكيل ردًا فارغًا.")
                     }
 
+                    // العلامة هي السطر الأول داخل المحتوى؛ والخطوة التالية تستلم المخرج الخام بلا العلامة.
                     conversationRepository.insertMessage(
                         Message(
                             conversationId = convId,
