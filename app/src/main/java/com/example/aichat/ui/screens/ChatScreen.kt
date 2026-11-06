@@ -1,4 +1,3 @@
-
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -42,12 +41,15 @@ import com.example.aichat.AichatApp
 import com.example.aichat.GeckoSessionManager
 import com.example.aichat.data.local.AiSettings
 import com.example.aichat.data.model.Message
+import com.example.aichat.data.model.AgentProfile
 import com.example.aichat.data.model.QueryStyle
 import com.example.aichat.data.model.WebPlatform
 import com.example.aichat.repository.AgentPromptBuilder
 import com.example.aichat.repository.WebSendCoordinator
 import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
+import com.example.aichat.ui.viewmodel.AgentChainProgress
+import com.example.aichat.ui.viewmodel.MAX_AGENT_CHAIN_STEPS
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 import kotlinx.coroutines.delay
@@ -82,6 +84,7 @@ fun ChatScreen(
     val isEnhancing by viewModel.isEnhancing.collectAsState()
     val conversationId by viewModel.currentConversationId.collectAsState()
     val currentAgentId by viewModel.currentAgentId.collectAsState()
+    val chainProgress by viewModel.chainProgress.collectAsState()
 
     // ═══════════════════════════════════════════════════════════════
     // ✅ تعديل جديد (إصلاح استمرارية السياق بين API ومنصات الويب):
@@ -130,6 +133,7 @@ fun ChatScreen(
     }
 
     var showAgentDialog by remember { mutableStateOf(false) }
+    var showChainDialog by remember { mutableStateOf(false) }
     var topMenuExpanded by remember { mutableStateOf(false) }
     var showWebImportDialog by remember { mutableStateOf(false) }
 
@@ -701,6 +705,33 @@ fun ChatScreen(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
+                                            Icons.Filled.Link,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Column {
+                                            Text("سلسلة وكلاء")
+                                            if (selectedWebPlatformId != null) {
+                                                Text(
+                                                    "السلسلة تعمل مع API فقط الآن",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    showChainDialog = true
+                                    topMenuExpanded = false
+                                },
+                                enabled = selectedWebPlatformId == null && !isLoading
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
                                             Icons.Filled.AccountTree,
                                             contentDescription = null
                                         )
@@ -863,7 +894,22 @@ fun ChatScreen(
 
                             if (isLoading) {
                                 item("thinking") {
-                                    ThinkingBubble()
+                                    val progress = chainProgress
+                                    if (progress != null) {
+                                        AgentChainProgressBubble(
+                                            progress = progress,
+                                            onCancel = {
+                                                viewModel.cancelAgentChain()
+                                                Toast.makeText(
+                                                    context,
+                                                    "جارٍ إيقاف السلسلة…",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        )
+                                    } else {
+                                        ThinkingBubble()
+                                    }
                                 }
                             }
                         }
@@ -1434,6 +1480,35 @@ fun ChatScreen(
                     }
                 ) {
                     Text("إدارة/استيراد Agents")
+                }
+            }
+        )
+    }
+
+    // Agent chain dialog
+    if (showChainDialog) {
+        val chainInputText = (
+            if (isEnhanced) enhancedInput.text else userInput.text
+        ).trim()
+
+        AgentChainDialog(
+            agents = agents,
+            inputText = chainInputText,
+            onDismiss = { showChainDialog = false },
+            onRun = { agentIds ->
+                if (selectedImage != null) {
+                    Toast.makeText(
+                        context,
+                        "السلسلة لا تدعم الصور الآن. أزل الصورة المحددة أولًا.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    showChainDialog = false
+                    keyboardController?.hide()
+                    focusManager.clearFocus(force = true)
+                    viewModel.runAgentChain(chainInputText, agentIds)
+                    userInput = TextFieldValue("")
+                    viewModel.clearEnhancedQuery()
                 }
             }
         )
@@ -2687,4 +2762,208 @@ private fun guessIsUser(message: Message): Boolean {
     }
 
     return false
+}
+
+/* ----------------------------- Agent Chain UI ----------------------------- */
+
+@Composable
+private fun AgentChainDialog(
+    agents: List<AgentProfile>,
+    inputText: String,
+    onDismiss: () -> Unit,
+    onRun: (List<String>) -> Unit
+) {
+    // السلسلة تُبنى لحظة التشغيل ولا تُحفظ (القرار 3).
+    val chain = remember { mutableStateListOf<String>() }
+    val nameById = remember(agents) { agents.associate { it.id to it.name } }
+    val isFull = chain.size >= MAX_AGENT_CHAIN_STEPS
+    val canRun = chain.isNotEmpty() && inputText.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("سلسلة وكلاء") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = if (inputText.isBlank()) {
+                            "⚠️ اكتب نصك في خانة الإدخال أولًا"
+                        } else {
+                            inputText.take(120) + if (inputText.length > 120) "…" else ""
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (inputText.isBlank()) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+
+                Text(
+                    "السلسلة (${chain.size}/$MAX_AGENT_CHAIN_STEPS)",
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                if (chain.isEmpty()) {
+                    Text(
+                        "اختر وكيلًا من القائمة أدناه ليُضاف إلى آخر السلسلة.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    chain.forEachIndexed { index, agentId ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${index + 1}. ${nameById[agentId] ?: "(وكيل محذوف)"}",
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1
+                            )
+
+                            IconButton(
+                                onClick = { chain.add(index - 1, chain.removeAt(index)) },
+                                enabled = index > 0,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.ArrowUpward,
+                                    contentDescription = "أعلى",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { chain.add(index + 1, chain.removeAt(index)) },
+                                enabled = index < chain.lastIndex,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.ArrowDownward,
+                                    contentDescription = "أسفل",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { chain.removeAt(index) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "حذف",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                Text(
+                    if (isFull) "الوكلاء المتاحون (اكتمل الحد الأقصى)" else "الوكلاء المتاحون",
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                if (agents.isEmpty()) {
+                    Text(
+                        "لا يوجد وكلاء مستوردون. استورد وكيلًا من «إدارة/استيراد Agents».",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    agents.forEach { agent ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !isFull) { chain.add(agent.id) }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = if (isFull) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                }
+                            )
+                            Text(
+                                agent.name,
+                                maxLines = 1,
+                                color = if (isFull) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onRun(chain.toList()) },
+                enabled = canRun
+            ) {
+                Text("تشغيل")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء")
+            }
+        }
+    )
+}
+
+@Composable
+private fun AgentChainProgressBubble(
+    progress: AgentChainProgress,
+    onCancel: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp
+            )
+
+            Text(
+                "الخطوة ${progress.step} من ${progress.total} — ${progress.agentName}…",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f)
+            )
+
+            TextButton(onClick = onCancel) {
+                Text("إلغاء")
+            }
+        }
+    }
 }
