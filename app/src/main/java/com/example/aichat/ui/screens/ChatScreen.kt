@@ -1,3 +1,4 @@
+
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -50,6 +51,9 @@ import com.example.aichat.ui.components.AgentPickerDialog
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import com.example.aichat.ui.viewmodel.AgentChainProgress
 import com.example.aichat.ui.viewmodel.MAX_AGENT_CHAIN_STEPS
+import com.example.aichat.ui.viewmodel.ChainInputMode
+import com.example.aichat.ui.viewmodel.ChainStepSpec
+import com.example.aichat.ui.viewmodel.MAX_CHAIN_EXTRA_INSTRUCTION_CHARS
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
 import kotlinx.coroutines.delay
@@ -1495,7 +1499,7 @@ fun ChatScreen(
             agents = agents,
             inputText = chainInputText,
             onDismiss = { showChainDialog = false },
-            onRun = { agentIds ->
+            onRun = { steps ->
                 if (selectedImage != null) {
                     Toast.makeText(
                         context,
@@ -1506,7 +1510,7 @@ fun ChatScreen(
                     showChainDialog = false
                     keyboardController?.hide()
                     focusManager.clearFocus(force = true)
-                    viewModel.runAgentChain(chainInputText, agentIds)
+                    viewModel.runAgentChainSteps(chainInputText, steps)
                     userInput = TextFieldValue("")
                     viewModel.clearEnhancedQuery()
                 }
@@ -2771,10 +2775,10 @@ private fun AgentChainDialog(
     agents: List<AgentProfile>,
     inputText: String,
     onDismiss: () -> Unit,
-    onRun: (List<String>) -> Unit
+    onRun: (List<ChainStepSpec>) -> Unit
 ) {
-    // السلسلة تُبنى لحظة التشغيل ولا تُحفظ (القرار 3).
-    val chain = remember { mutableStateListOf<String>() }
+    // السلسلة تُبنى لحظة التشغيل ولا تُحفظ الآن (الحفظ في الخطوة 2).
+    val chain = remember { mutableStateListOf<ChainStepSpec>() }
     val nameById = remember(agents) { agents.associate { it.id to it.name } }
     val isFull = chain.size >= MAX_AGENT_CHAIN_STEPS
     val canRun = chain.isNotEmpty() && inputText.isNotBlank()
@@ -2786,7 +2790,7 @@ private fun AgentChainDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 440.dp)
+                    .heightIn(max = 480.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -2823,49 +2827,122 @@ private fun AgentChainDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    chain.forEachIndexed { index, agentId ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                    chain.forEachIndexed { index, step ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                "${index + 1}. ${nameById[agentId] ?: "(وكيل محذوف)"}",
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1
-                            )
-
-                            IconButton(
-                                onClick = { chain.add(index - 1, chain.removeAt(index)) },
-                                enabled = index > 0,
-                                modifier = Modifier.size(36.dp)
+                            Column(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(
-                                    Icons.Filled.ArrowUpward,
-                                    contentDescription = "أعلى",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "${index + 1}. ${nameById[step.agentId] ?: "(وكيل محذوف)"}",
+                                        modifier = Modifier.weight(1f),
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1
+                                    )
 
-                            IconButton(
-                                onClick = { chain.add(index + 1, chain.removeAt(index)) },
-                                enabled = index < chain.lastIndex,
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Filled.ArrowDownward,
-                                    contentDescription = "أسفل",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                                    IconButton(
+                                        onClick = { chain.add(index - 1, chain.removeAt(index)) },
+                                        enabled = index > 0,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ArrowUpward,
+                                            contentDescription = "أعلى",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
 
-                            IconButton(
-                                onClick = { chain.removeAt(index) },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Filled.Delete,
-                                    contentDescription = "حذف",
-                                    modifier = Modifier.size(18.dp)
+                                    IconButton(
+                                        onClick = { chain.add(index + 1, chain.removeAt(index)) },
+                                        enabled = index < chain.lastIndex,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ArrowDownward,
+                                            contentDescription = "أسفل",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { chain.removeAt(index) },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Delete,
+                                            contentDescription = "حذف",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                if (index == 0) {
+                                    Text(
+                                        "الخطوة الأولى تستلم نصك الأصلي دائمًا.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    Text(
+                                        "ما تستلمه هذه الخطوة:",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    ChainInputMode.values().forEach { mode ->
+                                        val label = when (mode) {
+                                            ChainInputMode.PREVIOUS_ONLY -> "ناتج السابقة فقط"
+                                            ChainInputMode.ORIGINAL_AND_PREVIOUS -> "الأصل + ناتج السابقة"
+                                            ChainInputMode.ORIGINAL_ONLY -> "النص الأصلي فقط"
+                                        }
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    chain[index] = chain[index].copy(inputMode = mode)
+                                                },
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = step.inputMode == mode,
+                                                onClick = null
+                                            )
+                                            Text(
+                                                label,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier.padding(start = 8.dp)
+                                            )
+                                        }
+                                    }
+                                    if (step.inputMode == ChainInputMode.ORIGINAL_ONLY) {
+                                        Text(
+                                            "تنبيه: هذه الخطوة تتجاهل ناتج السابقة.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+
+                                OutlinedTextField(
+                                    value = step.extraInstruction,
+                                    onValueChange = {
+                                        chain[index] = chain[index].copy(
+                                            extraInstruction = it.take(MAX_CHAIN_EXTRA_INSTRUCTION_CHARS)
+                                        )
+                                    },
+                                    label = { Text("تعليمة إضافية (اختياري)") },
+                                    supportingText = {
+                                        Text("${step.extraInstruction.length}/$MAX_CHAIN_EXTRA_INSTRUCTION_CHARS")
+                                    },
+                                    maxLines = 3,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }
@@ -2890,7 +2967,9 @@ private fun AgentChainDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = !isFull) { chain.add(agent.id) }
+                                .clickable(enabled = !isFull) {
+                                    chain.add(ChainStepSpec(agentId = agent.id))
+                                }
                                 .padding(vertical = 8.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
