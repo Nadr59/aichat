@@ -1,8 +1,9 @@
 
+
 (function () {
 "use strict";
 
-var VERSION = "1.0.59";
+var VERSION = "1.0.60";
 var HOST = String((location && location.hostname) || "");
 var HREF = String((location && location.href) || "");
 
@@ -1326,6 +1327,10 @@ var diagEmptyPollCount = 0;
 var lastSentResponseSignature = "";
 var lastSentResponseAt = 0;
 
+// [v1.0.60] معرّف الإرسال (contextId) الذي بدأ الالتقاط الحالي. يُعاد في
+// ASSISTANT_RESPONSE كحقل إضافي. 0 = الرد لا يخص إرسالًا من التطبيق.
+var captureContextId = 0;
+
 function startResponseCapture(reason) {
   captureActive = true;
   captureFinished = false;
@@ -1399,6 +1404,9 @@ function tryResumeVeniceCapture() {
     age + "ms)"
   );
 
+  // [v1.0.60] المعرّف محفوظ في sessionStorage ضمن حالة الالتقاط.
+  captureContextId = state.contextId || 0;
+
   startResponseCapture("resumed_after_reload");
 }
 
@@ -1454,15 +1462,21 @@ function finishCapture(answer) {
     clearVeniceCaptureState();
   }
 
+  // [v1.0.60] حقل إضافي: الرد القديم (بلا contextId) يبقى صالحًا.
+  var responseContextId = captureContextId || 0;
+  captureContextId = 0;
+
   sendToBackground({
     type: "ASSISTANT_RESPONSE",
     text: answer,
-    source: CURRENT_PLATFORM.id
+    source: CURRENT_PLATFORM.id,
+    contextId: responseContextId
   });
 
   log(
     "📤 ASSISTANT_RESPONSE sent source=" +
-    CURRENT_PLATFORM.id + " len=" + answer.length
+    CURRENT_PLATFORM.id + " len=" + answer.length +
+    " contextId=" + responseContextId
   );
 }
 
@@ -2563,6 +2577,13 @@ function injectAndSend(opts) {
           return;
         }
 
+        // [v1.0.60] المعرّف يُضبط قبل بدء الالتقاط. وتُصفَّر بصمة آخر رد
+        // مُرسَل حتى لا يُبتلع الرد المطابق لسابقه (كبت التكرار 30ث) عند
+        // الإرسال من التطبيق.
+        captureContextId = contextId;
+        lastSentResponseSignature = "";
+        lastSentResponseAt = 0;
+
         startResponseCapture("app_injected_prompt");
 
         if (CURRENT_PLATFORM.id === "venice") {
@@ -2702,3 +2723,5 @@ if (shouldSendDiagnostics()) {
   } catch (_) {}
 }
 })();
+
+  
