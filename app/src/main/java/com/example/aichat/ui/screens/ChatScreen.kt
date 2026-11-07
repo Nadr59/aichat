@@ -3124,7 +3124,6 @@ private fun AgentChainDialog(
         }
     )
 }
-
 @Composable
 private fun AgentChainProgressBubble(
     progress: AgentChainProgress,
@@ -3156,7 +3155,9 @@ private fun AgentChainProgressBubble(
             }
         }
     }
-    @Composable
+}
+
+@Composable
 private fun AgentChainResumeBar(
     nextStep: Int,
     total: Int,
