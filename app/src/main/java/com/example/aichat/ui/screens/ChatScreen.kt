@@ -66,6 +66,15 @@ import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
 import java.io.File
 import java.util.Locale
+import com.example.aichat.ui.viewmodel.ChainStore
+import com.example.aichat.ui.viewmodel.SavedChain
+import com.example.aichat.ui.viewmodel.MAX_SAVED_CHAIN_NAME_CHARS
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2777,11 +2786,23 @@ private fun AgentChainDialog(
     onDismiss: () -> Unit,
     onRun: (List<ChainStepSpec>) -> Unit
 ) {
-    // السلسلة تُبنى لحظة التشغيل ولا تُحفظ الآن (الحفظ في الخطوة 2).
     val chain = remember { mutableStateListOf<ChainStepSpec>() }
     val nameById = remember(agents) { agents.associate { it.id to it.name } }
     val isFull = chain.size >= MAX_AGENT_CHAIN_STEPS
-    val canRun = chain.isNotEmpty() && inputText.isNotBlank()
+    val hasMissingAgent = chain.any { it.agentId !in nameById }
+    val canRun = chain.isNotEmpty() && inputText.isNotBlank() && !hasMissingAgent
+
+    // السلاسل المحفوظة (ملف JSON في مجلد التطبيق).
+    val dialogContext = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val store = remember { ChainStore(dialogContext) }
+    var saved by remember { mutableStateOf<List<SavedChain>>(emptyList()) }
+    var saveName by remember { mutableStateOf("") }
+    val nameExists = saved.any { it.name.equals(saveName.trim(), ignoreCase = true) }
+
+    LaunchedEffect(Unit) {
+        saved = runCatching { store.loadAll() }.getOrDefault(emptyList())
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2822,7 +2843,7 @@ private fun AgentChainDialog(
 
                 if (chain.isEmpty()) {
                     Text(
-                        "اختر وكيلًا من القائمة أدناه ليُضاف إلى آخر السلسلة.",
+                        "اختر وكيلًا من القائمة أدناه، أو حمّل سلسلة محفوظة.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2841,10 +2862,16 @@ private fun AgentChainDialog(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val missing = step.agentId !in nameById
                                     Text(
                                         "${index + 1}. ${nameById[step.agentId] ?: "(وكيل محذوف)"}",
                                         modifier = Modifier.weight(1f),
                                         fontWeight = FontWeight.SemiBold,
+                                        color = if (missing) {
+                                            MaterialTheme.colorScheme.error
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
                                         maxLines = 1
                                     )
 
@@ -2947,6 +2974,114 @@ private fun AgentChainDialog(
                             }
                         }
                     }
+
+                    if (hasMissingAgent) {
+                        Text(
+                            "⚠️ في السلسلة وكيل محذوف. احذف خطوته ثم أضف بديلًا ليُفعَّل التشغيل.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    // حفظ السلسلة الحالية باسم
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = saveName,
+                            onValueChange = { saveName = it.take(MAX_SAVED_CHAIN_NAME_CHARS) },
+                            label = { Text("اسم السلسلة للحفظ") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            enabled = saveName.isNotBlank(),
+                            onClick = {
+                                val toSave = chain.toList()
+                                val nameToSave = saveName
+                                scope.launch {
+                                    try {
+                                        saved = store.save(nameToSave, toSave)
+                                        Toast.makeText(dialogContext, "حُفظت السلسلة.", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            dialogContext,
+                                            e.message ?: "تعذر حفظ السلسلة.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            }
+                        ) {
+                            Text(if (nameExists) "استبدال" else "حفظ")
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                Text(
+                    "السلاسل المحفوظة (${saved.size})",
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                if (saved.isEmpty()) {
+                    Text(
+                        "لا توجد سلاسل محفوظة بعد.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    saved.forEach { item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    chain.clear()
+                                    chain.addAll(item.steps)
+                                    saveName = item.name
+                                },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${item.name}  •  ${item.steps.size} خطوات",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                maxLines = 1
+                            )
+                            IconButton(
+                                onClick = {
+                                    val idToDelete = item.id
+                                    scope.launch {
+                                        try {
+                                            saved = store.delete(idToDelete)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(
+                                                dialogContext,
+                                                e.message ?: "تعذر حذف السلسلة.",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "حذف السلسلة المحفوظة",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "لمسة على السلسلة تحمّلها وتستبدل السلسلة الحالية في الحوار.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 HorizontalDivider()
