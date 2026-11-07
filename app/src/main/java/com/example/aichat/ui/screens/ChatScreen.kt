@@ -98,20 +98,14 @@ fun ChatScreen(
     val conversationId by viewModel.currentConversationId.collectAsState()
     val currentAgentId by viewModel.currentAgentId.collectAsState()
     val chainProgress by viewModel.chainProgress.collectAsState()
+    val chainResume by viewModel.chainResume.collectAsState()
 
-    // ═══════════════════════════════════════════════════════════════
-    // ✅ تعديل جديد (إصلاح استمرارية السياق بين API ومنصات الويب):
-    // نقرأ ملخص الـ Workspace الحالي لاستخدامه كسياق يُحقن في صفحات
-    // الويب قبل كل سؤال. هذا الملخص مُحدَّث تلقائيًا من ChatViewModel
-    // بعد كل تبادل سواء جاء عبر API أو عبر الويب (نفس workspaceId
-    // بفضل التوحيد في خطوة 1.أ)، لذلك هو المصدر الصحيح لضمان السياق
-    // في الاتجاهات الثلاثة: API→ويب، ويب→ويب (نفس/مختلف المنصة).
+    
+    
     // ═══════════════════════════════════════════════════════════════
     val workspaceSummary by viewModel.workspaceSummary.collectAsState()
 
-    // ✅ إضافة جديدة (قائمة المزودين السريعة):
-    // state محلي يعكس المزود النشط الحالي ونموذجه، يتحدّث فورًا
-    // عند التبديل من قائمة API — بدل قراءة settings الثابتة وقت التكوين.
+    
     var activeProviderId by remember { mutableStateOf(settings.provider) }
     var activeProviderLabel by remember {
         mutableStateOf(
@@ -382,9 +376,7 @@ fun ChatScreen(
         }
     }
 
-    // ✅ G1: عدّاد الانتظار — يعمل فقط أثناء webSendInFlight.
-    // عند انقضاء المهلة: نحرّر الواجهة فقط (webSendInFlight=false)،
-    // ولا نلمس طابور الـVM — فأي رد متأخر يُلتقط ويُحفظ كالمعتاد.
+    
     LaunchedEffect(webSendInFlight) {
         if (!webSendInFlight) return@LaunchedEffect
 
@@ -472,22 +464,7 @@ fun ChatScreen(
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // ✅ التعديل الوحيد المقصود في هذه الجلسة: sendWebMessage()
-    //
-    // قبل التعديل: كانت الدالة تُرسل textToSend الخام فقط عبر
-    // app.setContextPending(...)، متجاوزةً WebSendCoordinator.buildContextBlock
-    // وbuildFinalTextForPlatform الموجودتين أصلاً وجاهزتين.
-    //
-    // بعد التعديل: نبني contextBlock من workspaceSummary الحالي (نفس القيمة
-    // التي يستخدمها sendChatMessage() عبر API)، وندمجه مع السؤال بالصيغة
-    // المناسبة لكل منصة (مخفية لـ ChatGPT/Venice، مرئية لـ Arena) عبر
-    // buildFinalTextForPlatform. النص المُسجَّل في قاعدة البيانات والعنوان
-    // يبقى rawText النظيف (بدون كتلة السياق) حفاظًا على نظافة السجل.
-    //
-    // لا تغيير على: onWebUserMessageSentAndTrackInViewModelScope، منطق
-    // Arena/ChatGPT/Venice الالتقاطي، أو أي شيء آخر في هذا الملف.
-    // ═══════════════════════════════════════════════════════════════════════
+    
     fun sendWebMessage() {
         val platform = selectedPlatform ?: return
         if (!isWebSendCapable) return
@@ -562,9 +539,7 @@ fun ChatScreen(
                 ?.let { AgentPromptBuilder.build(it) }
                 .orEmpty()
 
-            // بناء كتلة السياق من ملخص الـ Workspace الحالي (نفس المصدر
-            // المستخدم من جانب API)، وهذا يحل مشكلة فشل انتقال السياق في
-            // الاتجاهات: API→ويب، ويب→ويب (نفس/مختلف المنصة).
+            
             val contextBlock = WebSendCoordinator.buildContextBlock(
                 agentPrompt = agentPromptForWeb,
                 workspaceSummary = workspaceSummary,
@@ -849,11 +824,7 @@ fun ChatScreen(
                 }
 
                 if (isArenaPlatform && selectedPlatform != null) {
-                    // ── 1.ب.4: استبدال منطقة الرسائل بمحرك ويب مرئي ──
-                    // المستخدم يكتب في InputBar كالمعتاد؛ النص يُحقن تلقائيًا
-                    // في صفحة Arena الظاهرة هنا، ويضغط المستخدم الإرسال يدويًا
-                    // داخل الصفحة نفسها. بمجرد التقاط الرد تلقائيًا، يمكن
-                    // التبديل لـ API لرؤية الفقاعات المحدثة.
+                    
                     VisibleWebEngineHost(
                         platform = selectedPlatform,
                         app = app,
@@ -1824,18 +1795,7 @@ private const val WEB_CONTEXT_RECENT_MESSAGE_COUNT = 4
 
 /* ----------------------------- مُحدِّد المحرّك الموحّد (API + منصات الويب) ----------------------------- */
 
-/**
- * مُحدِّد واحد في الشريط العلوي يعرض المحرّك الحالي:
- * - "⚡ المزود · النموذج" عندما يكون API هو النشط.
- * - "🌐 اسم المنصة" عندما تكون منصة ويب هي النشطة.
- *
- * الضغط عليه يفتح قائمة موحّدة بقسمين:
- *   1) مزودو API المُهيّأون (مفاتيحهم محفوظة).
- *   2) منصات الويب المتاحة (المفعّلة والقابلة للحقن فقط).
- * وسطر أخير للانتقال إلى الإعدادات.
- *
- * يحل محل شريط الـChips المستطيل القديم بالكامل.
- */
+
 @Composable
 private fun EngineSelector(
     settings: AiSettings,
@@ -3180,4 +3140,44 @@ private fun AgentChainProgressBubble(
             }
         }
     }
+    @Composable
+private fun AgentChainResumeBar(
+    nextStep: Int,
+    total: Int,
+    agentName: String,
+    onResume: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "السلسلة متوقفة عند الخطوة $nextStep من $total — $agentName",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f)
+            )
+
+            TextButton(onClick = onResume) {
+                Text("أكمل من الخطوة $nextStep")
+            }
+
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Dismiss",
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
+    }
 }
+
