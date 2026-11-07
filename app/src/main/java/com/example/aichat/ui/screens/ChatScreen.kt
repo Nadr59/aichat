@@ -54,6 +54,8 @@ import com.example.aichat.ui.viewmodel.AgentChainProgress
 import com.example.aichat.ui.viewmodel.MAX_AGENT_CHAIN_STEPS
 import com.example.aichat.ui.viewmodel.ChainInputMode
 import com.example.aichat.ui.viewmodel.ChainStepSpec
+import com.example.aichat.ui.viewmodel.CHAIN_CHANNEL_API
+import com.example.aichat.ui.viewmodel.ChainStepSender
 import com.example.aichat.ui.viewmodel.MAX_CHAIN_EXTRA_INSTRUCTION_CHARS
 import com.example.aichat.ui.viewmodel.ChatViewModel
 import com.example.aichat.ui.viewmodel.WebPlatformsViewModel
