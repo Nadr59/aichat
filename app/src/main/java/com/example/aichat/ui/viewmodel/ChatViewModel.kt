@@ -49,6 +49,18 @@ const val MAX_AGENT_CHAIN_STEPS = 5
 /** الحد الأقصى لطول التعليمة الإضافية لكل خطوة (بالحروف). */
 const val MAX_CHAIN_EXTRA_INSTRUCTION_CHARS = 300
 
+/** مفتاح قناة السلسلة عند التشغيل عبر مزود API. قناة الويب مفتاحها يحدده المستدعي (مثل "web:chatgpt"). */
+const val CHAIN_CHANNEL_API = "api"
+
+/**
+ * دالة إرسال خطوة عبر قناة خارجية (منصة ويب).
+ * تستلم تعليمات الوكيل ومدخل الخطوة، وتُرجع نص الرد الكامل.
+ * عند الفشل أو انتهاء المهلة ترمي استثناءً عاديًا برسالة عربية
+ * (يجب ألا يكون CancellationException وإلا عُدّ إلغاءً لا فشلًا).
+ * الـViewModel لا يعرف شيئًا عن تفاصيل المنصة.
+ */
+typealias ChainStepSender = suspend (agentPrompt: String, input: String) -> String
+
 /** تقدم سلسلة الوكلاء الجارية: الخطوة الحالية من الإجمالي واسم الوكيل. */
 data class AgentChainProgress(
     val step: Int,
@@ -899,7 +911,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // =========================
-    // Agent Chain (API only) — سلسلة وكلاء
+    // Agent Chain — سلسلة وكلاء (API أو منصة ويب واحدة)
     // =========================
     //
     // الافتراضي أنبوب نقي: كل خطوة تستلم مخرج السابقة فقط، بلا تاريخ وبلا
@@ -907,12 +919,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // آخر (ChainInputMode) وتعليمة إضافية اختيارية (ChainStepSpec).
     // الوكيل صندوق أسود: نص يدخل ← نص يخرج.
     // يستخدم _isLoading نفسه، فيمنع الإرسال العادي والتفريع والتصفير أثناءه.
-    // المزود الفعّال هو settings.provider عبر repository.sendMessage.
+    //
+    // القناة: بلا sender ← مزود API الفعّال (settings.provider) عبر repository.sendMessage.
+    // مع sender ← كل الخطوات تمر عبره (منصة ويب واحدة للسلسلة كلها؛ لا خلط).
+    // الـViewModel لا يعرف تفاصيل المنصة؛ الشاشة تبني الـsender.
     //
     // الاستكمال: عند فشل خطوة أو إلغاء السلسلة تُحفظ حالتها في الذاكرة
     // (chainResumeState). الخطوة الفاشلة/الملغاة لم تُحفظ كرسالة، فالاستكمال
     // يعيد تشغيلها بالمدخل نفسه (آخر مخرج سليم). عدد الخطوات المكتملة = فهرس
-    // (من صفر) الخطوة التالية.
+    // (من صفر) الخطوة التالية. يُرفض الاستكمال من قناة مختلفة عن قناة البدء.
 
     private var chainJob: Job? = null
 
@@ -928,7 +943,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val steps: List<ChainStepSpec>,
         val agentNames: List<String>,
         val lastOutput: String,
-        val nextIndex: Int
+        val nextIndex: Int,
+        val channelKey: String
     )
 
     private var chainResumeState: ChainResumeState? = null
@@ -953,7 +969,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         steps: List<ChainStepSpec>,
         agentNames: List<String>,
         lastOutput: String,
-        nextIndex: Int
+        nextIndex: Int,
+        channelKey: String
     ) {
         if (conversationId == null) return
         if (nextIndex < 0 || nextIndex >= steps.size) return
@@ -966,7 +983,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             steps = steps,
             agentNames = agentNames,
             lastOutput = lastOutput,
-            nextIndex = nextIndex
+            nextIndex = nextIndex,
+            channelKey = channelKey
         )
         _chainResume.value = AgentChainResume(
             conversationId = conversationId,
@@ -981,8 +999,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         chainJob?.cancel()
     }
 
-    /** يستكمل السلسلة المتوقفة من الخطوة الفاشلة/الملغاة. */
-    fun resumeAgentChain() {
+    /**
+     * يستكمل السلسلة المتوقفة من الخطوة الفاشلة/الملغاة.
+     * channelKey/sender يجب أن يطابقا قناة البدء (API: الافتراضي، الويب: مفتاح المنصة + sender).
+     */
+    fun resumeAgentChain(
+        channelKey: String = CHAIN_CHANNEL_API,
+        sender: ChainStepSender? = null
+    ) {
         val state = chainResumeState ?: return
         if (_isLoading.value) return
 
@@ -991,11 +1015,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        if (state.channelKey != channelKey) {
+            _error.value =
+                "بدأت هذه السلسلة على قناة مختلفة (${state.channelKey}). " +
+                    "بدّل إلى القناة نفسها لاستكمالها."
+            return
+        }
+
         logAgentChain("resume from=${state.nextIndex + 1}/${state.steps.size}")
         launchChainJob(
             text = state.originalText,
             steps = state.steps,
-            resume = state
+            resume = state,
+            channelKey = channelKey,
+            sender = sender
         )
     }
 
@@ -1028,7 +1061,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun runAgentChainSteps(userText: String, steps: List<ChainStepSpec>) {
+    fun runAgentChainSteps(
+        userText: String,
+        steps: List<ChainStepSpec>,
+        channelKey: String = CHAIN_CHANNEL_API,
+        sender: ChainStepSender? = null
+    ) {
         val text = userText.trim()
 
         if (text.isBlank()) {
@@ -1049,17 +1087,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        launchChainJob(text = text, steps = steps, resume = null)
+        launchChainJob(
+            text = text,
+            steps = steps,
+            resume = null,
+            channelKey = channelKey,
+            sender = sender
+        )
     }
 
     /**
      * يشغّل السلسلة: من البداية (resume == null) أو من الخطوة المتوقفة.
      * التحقق من المدخلات يجري في المستدعي.
+     * sender != null ← قناة ويب (كل الخطوات عبره)؛ وإلا API.
      */
     private fun launchChainJob(
         text: String,
         steps: List<ChainStepSpec>,
-        resume: ChainResumeState?
+        resume: ChainResumeState?,
+        channelKey: String,
+        sender: ChainStepSender?
     ) {
         _isLoading.value = true
         _error.value = null
@@ -1068,6 +1115,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         chainJob = viewModelScope.launch {
             val total = steps.size
             val startIndex = resume?.nextIndex ?: 0
+            val channel = resume?.channelKey ?: channelKey
+            val channelLabel = if (sender != null) "web" else "api"
 
             // عدد الخطوات المكتملة = فهرس الخطوة التالية.
             var completed = startIndex
@@ -1118,30 +1167,46 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 if (resume == null) {
-                    logAgentChain("start total=$total agents=${agentNames.joinToString("|")}")
+                    logAgentChain(
+                        "start total=$total channel=$channelLabel " +
+                            "agents=${agentNames.joinToString("|")}"
+                    )
 
                     // 2) المحادثة وWorkspace (نفس منطق sendChatMessage دون تعديله).
+                    //    على قناة الويب: Workspace جديد بمفتاح web:conv، ورفض المحادثة الأرشيفية web:global.
                     val existingConvId = _currentConversationId.value
                     val newConvId: Long
                     val newWorkspaceId: Long?
                     val newTitle: String
 
                     if (existingConvId != null) {
-                        newWorkspaceId = runCatching { ensureWorkspaceForConversation(existingConvId) }
-                            .getOrNull()?.id
+                        val existingWs =
+                            runCatching { ensureWorkspaceForConversation(existingConvId) }
+                                .getOrNull()
+
+                        if (sender != null && existingWs?.scopeKey == legacyWebGlobalScopeKey) {
+                            throw IllegalStateException(
+                                "هذه محادثة ويب أرشيفية (للقراءة فقط). ابدأ محادثة جديدة لتشغيل السلسلة."
+                            )
+                        }
+
+                        newWorkspaceId = existingWs?.id
                         newConvId = existingConvId
                         newTitle = conversationRepository.getConversationById(existingConvId)
                             ?.title
                             ?.takeIf { it.isNotBlank() }
                             ?: text.take(50).ifBlank { "محادثة جديدة" }
+
+                        if (sender != null) _currentWebConversationId.value = existingConvId
                     } else {
+                        val title = text.take(50).ifBlank { "محادثة جديدة" }
+
                         val ws = conversationRepository.getOrCreateWorkspace(
-                            scopeKey = newUniqueApiScopeKey(),
-                            title = apiWorkspaceTitle()
+                            scopeKey = if (sender != null) newUniqueWebScopeKey() else newUniqueApiScopeKey(),
+                            title = if (sender != null) title else apiWorkspaceTitle()
                         )
                         setCurrentWorkspaceById(ws.id)
 
-                        val title = text.take(50).ifBlank { "محادثة جديدة" }
                         val id = conversationRepository.insertConversation(
                             Conversation(
                                 title = title,
@@ -1153,6 +1218,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         _currentConversationId.value = id
                         startCollecting(id)
+
+                        if (sender != null) _currentWebConversationId.value = id
 
                         newWorkspaceId = ws.id
                         newConvId = id
@@ -1198,7 +1265,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         if (index == 0) "FIRST" else steps[index].inputMode.name
                     logAgentChain(
                         "step_start step=$activeStep/$total agent=${agent.name} " +
-                            "mode=$modeLabel extraChars=${extras[index].length}"
+                            "mode=$modeLabel extraChars=${extras[index].length} channel=$channelLabel"
                     )
 
                     val stepInput = buildChainStepInput(
@@ -1208,14 +1275,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         previous = current
                     )
 
-                    val output = repository.sendMessage(
-                        history = emptyList(),
-                        userMessage = stepInput,
-                        imageBase64 = null,
-                        memoryContext = "",
-                        hasMemorySource = false,
-                        agentPrompt = prompts[index]
-                    ).trim()
+                    val rawOutput: String = if (sender != null) {
+                        sender(prompts[index], stepInput)
+                    } else {
+                        repository.sendMessage(
+                            history = emptyList(),
+                            userMessage = stepInput,
+                            imageBase64 = null,
+                            memoryContext = "",
+                            hasMemorySource = false,
+                            agentPrompt = prompts[index]
+                        )
+                    }
+                    val output = rawOutput.trim()
 
                     // يُهمَل الرد المتأخر إن أُلغيت السلسلة أثناء انتظاره.
                     ensureActive()
@@ -1268,7 +1340,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     steps = steps,
                     agentNames = agentNames,
                     lastOutput = current,
-                    nextIndex = completed
+                    nextIndex = completed,
+                    channelKey = channel
                 )
                 _successMessage.value = "أُوقفت السلسلة بعد $completed من $total خطوات."
                 logAgentChain("cancelled completed=$completed total=$total")
@@ -1282,7 +1355,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     steps = steps,
                     agentNames = agentNames,
                     lastOutput = current,
-                    nextIndex = completed
+                    nextIndex = completed,
+                    channelKey = channel
                 )
                 val detail = e.message ?: "خطأ غير معروف"
                 _error.value = if (activeStep > 0) {
@@ -2215,5 +2289,4 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
-
 
