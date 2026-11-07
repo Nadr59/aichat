@@ -901,20 +901,36 @@ fun ChatScreen(
                 }
             }
 
-            error?.let { err ->
-                ErrorMessage(
-                    error = err,
-                    onDismiss = viewModel::clearError,
-                    onCopy = {
-                        copyToClipboard(err)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal = 12.dp,
-                            vertical = 6.dp
-                        )
+            Column(modifier = Modifier.fillMaxWidth()) {
+    error?.let { err ->
+        ErrorMessage(
+            error = err,
+            onDismiss = viewModel::clearError,
+            onCopy = {
+                copyToClipboard(err)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = 12.dp,
+                    vertical = 6.dp
                 )
+        )
+    }
+
+    val resume = chainResume
+    if (resume != null && !isLoading && selectedWebPlatformId == null) {
+        AgentChainResumeBar(
+            nextStep = resume.nextStep,
+            total = resume.total,
+            agentName = resume.agentName,
+            onResume = { viewModel.resumeAgentChain() },
+            onDismiss = { viewModel.dismissAgentChainResume() },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+    }
             }
 
             InputBar(
