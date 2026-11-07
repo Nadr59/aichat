@@ -11,6 +11,8 @@ import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.data.model.MemoryItem
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -19,6 +21,12 @@ import org.mozilla.geckoview.WebExtension
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/**
+ * فشل خطوة ويب (إرسال فاشل أو مهلة). استثناء عادي برسالة عربية جاهزة للعرض.
+ * عمدًا ليس CancellationException حتى يُعامَل كفشل لا كإلغاء.
+ */
+class WebStepException(message: String) : Exception(message)
 
 class AichatApp : Application() {
 
@@ -30,6 +38,9 @@ class AichatApp : Application() {
 
         // مهلة انتظار نتيجة الالتقاط اليدوي
         private const val MANUAL_CAPTURE_TTL_MS = 15_000L
+
+        // عدد معرّفات الخطوات المنتهية المحتفَظ بها لإسقاط الردود المتأخرة
+        private const val MAX_RETIRED_STEP_IDS = 20
 
         // اسم الإضافة (assets/aicapture/)
         private const val EXT_BASE_URL = "resource://android/assets/aicapture/"
@@ -186,13 +197,34 @@ class AichatApp : Application() {
         sendSelector: String = "",
         sendWithEnter: Boolean = true
     ) {
+        setContextPendingWithId(
+            id = System.currentTimeMillis(),
+            text = text,
+            targetDomain = targetDomain,
+            inputSelector = inputSelector,
+            sendSelector = sendSelector,
+            sendWithEnter = sendWithEnter
+        )
+    }
+
+    /**
+     * الجسم الفعلي لـ setContextPending، مع معرّف يحدده المستدعي
+     * (تحتاجه sendContextAndAwaitResponse لتسجيل المنتظِر قبل الإرسال).
+     * يعيد false إن كان النص فارغًا.
+     */
+    private fun setContextPendingWithId(
+        id: Long,
+        text: String,
+        targetDomain: String,
+        inputSelector: String,
+        sendSelector: String,
+        sendWithEnter: Boolean
+    ): Boolean {
         val t = text.trim()
         if (t.isBlank()) {
             logDebug("⚠️ setContextPending: empty text")
-            return
+            return false
         }
-
-        val id = System.currentTimeMillis()
 
         synchronized(ctxLock) {
             contextPending = t
@@ -212,6 +244,7 @@ class AichatApp : Application() {
         )
 
         sendPendingContextToPort()
+        return true
     }
 
     /**
@@ -319,6 +352,142 @@ class AichatApp : Application() {
     }
 
     // =========================
+    // Send-and-await (خطوات سلسلة الوكلاء على الويب)
+    // =========================
+    //
+    // منتظِر واحد فقط في أي وقت (خانة السياق واحدة). يُسجَّل معرّفه قبل الإرسال،
+    // فيُوجَّه ردّه (ASSISTANT_RESPONSE بنفس contextId) إليه مباشرة، قبل أي
+    // فحص للالتقاط اليدوي، ولا يصل إلى onAiResponseCaptured فلا يُحفظ مرتين.
+
+    private sealed class StepOutcome {
+        class Reply(val text: String) : StepOutcome()
+        class Failure(val stage: String, val detail: String) : StepOutcome()
+    }
+
+    private val stepLock = Any()
+    private var stepWaiterId: Long = 0L
+    private var stepWaiter: CompletableDeferred<StepOutcome>? = null
+
+    // معرّفات خطوات منتهية (رد/فشل/مهلة/إلغاء): أي رد لاحق بها يُسقَط.
+    private val retiredStepIds = LinkedHashSet<Long>()
+
+    private fun retireStepId(id: Long) {
+        synchronized(stepLock) {
+            retiredStepIds.add(id)
+            while (retiredStepIds.size > MAX_RETIRED_STEP_IDS) {
+                val oldest = retiredStepIds.iterator()
+                oldest.next()
+                oldest.remove()
+            }
+        }
+    }
+
+    /**
+     * يرسل نص الخطوة إلى المنصة وينتظر ردها الكامل.
+     *
+     * يعيد نص الرد. يرمي WebStepException عند فشل الإرسال داخل الصفحة أو عند المهلة.
+     * عند الإلغاء يمرّر CancellationException بعد تنظيف المنتظِر والسياق المعلّق.
+     */
+    suspend fun sendContextAndAwaitResponse(
+        text: String,
+        targetDomain: String,
+        inputSelector: String,
+        sendSelector: String,
+        sendWithEnter: Boolean,
+        timeoutMs: Long
+    ): String {
+        if (text.isBlank()) throw WebStepException("نص الخطوة فارغ.")
+
+        val deferred = CompletableDeferred<StepOutcome>()
+        val id = synchronized(ctxLock) { maxOf(System.currentTimeMillis(), lastContextId + 1) }
+
+        synchronized(stepLock) {
+            if (stepWaiter != null) {
+                throw WebStepException("هناك خطوة ويب قيد الانتظار بالفعل.")
+            }
+            stepWaiterId = id
+            stepWaiter = deferred
+        }
+
+        var gotReply = false
+        try {
+            logDebug("🔗 STEP_WAIT start id=$id timeout=${timeoutMs / 1000}s")
+
+            val sent = setContextPendingWithId(
+                id = id,
+                text = text,
+                targetDomain = targetDomain,
+                inputSelector = inputSelector,
+                sendSelector = sendSelector,
+                sendWithEnter = sendWithEnter
+            )
+            if (!sent) throw WebStepException("نص الخطوة فارغ.")
+
+            val outcome = withTimeoutOrNull(timeoutMs) { deferred.await() }
+
+            when (outcome) {
+                is StepOutcome.Reply -> {
+                    gotReply = true
+                    logDebug("🔗 STEP_WAIT reply id=$id len=${outcome.text.length}")
+                    return outcome.text
+                }
+
+                is StepOutcome.Failure -> {
+                    logDebug("🔗 STEP_WAIT failed id=$id stage=${outcome.stage} detail=${outcome.detail}")
+                    throw WebStepException(
+                        "فشل الإرسال إلى المنصة: ${outcome.stage}" +
+                            (if (outcome.detail.isNotBlank()) " (${outcome.detail})" else "")
+                    )
+                }
+
+                null -> {
+                    logDebug("🔗 STEP_WAIT timeout id=$id after=${timeoutMs / 1000}s")
+                    throw WebStepException(
+                        "انتهت مهلة انتظار رد المنصة (${timeoutMs / 1000} ثانية)."
+                    )
+                }
+            }
+        } finally {
+            if (!gotReply && !deferred.isCompleted) {
+                logDebug("🔗 STEP_WAIT cancelled id=$id")
+            }
+            synchronized(stepLock) {
+                if (stepWaiterId == id) {
+                    stepWaiterId = 0L
+                    stepWaiter = null
+                }
+            }
+            // أي رد يصل لاحقًا بهذا المعرّف يُسقَط (لا يُحفظ كرسالة مستقلة).
+            retireStepId(id)
+            // لا يُعاد حقن سياق لم تستهلكه الصفحة عند إعادة اتصال المنفذ.
+            clearContextIfMatches(id)
+        }
+    }
+
+    /** إن كان المعرّف لمنتظِر حالي: يسلّمه الرد ويعيد true (حتى لو سبق إكماله). */
+    private fun deliverReplyToStepWaiter(contextId: Long, text: String): Boolean {
+        if (contextId == 0L) return false
+        val waiter = synchronized(stepLock) {
+            if (contextId == stepWaiterId) stepWaiter else null
+        } ?: return false
+        waiter.complete(StepOutcome.Reply(text))
+        return true
+    }
+
+    private fun failStepWaiterIfMatches(contextId: Long, stage: String, detail: String) {
+        if (contextId == 0L) return
+        val waiter = synchronized(stepLock) {
+            if (contextId == stepWaiterId) stepWaiter else null
+        } ?: return
+        waiter.complete(StepOutcome.Failure(stage, detail))
+    }
+
+    private fun isRetiredStepId(contextId: Long): Boolean {
+        if (contextId == 0L) return false
+        return synchronized(stepLock) { retiredStepIds.contains(contextId) }
+    }
+
+    // =========================
     // Port message handling
     // =========================
 
@@ -367,6 +536,24 @@ class AichatApp : Application() {
             "ASSISTANT_RESPONSE" -> {
                 val text = json.optString("text", "")
                 val source = json.optString("source", "web")
+                val contextId = json.optLong("contextId", 0L)
+
+                // 1) منتظِر خطوة سلسلة بهذا المعرّف: يستلم الرد قبل أي مسار آخر.
+                if (deliverReplyToStepWaiter(contextId, text)) {
+                    logDebug("📨 ASSISTANT_RESPONSE → step waiter: source=$source id=$contextId len=${text.length}")
+                    return
+                }
+
+                // 2) معرّف خطوة منتهية (مهلة/إلغاء/فشل/مكرر): يُسقَط ولا يُحفظ.
+                if (isRetiredStepId(contextId)) {
+                    logDebug(
+                        "🗑️ ASSISTANT_RESPONSE dropped (retired step id=$contextId): " +
+                            "source=$source len=${text.length}"
+                    )
+                    return
+                }
+
+                // 3) المسار العادي كما كان.
                 if (text.isBlank()) return
 
                 logDebug("📨 ASSISTANT_RESPONSE: source=$source len=${text.length}")
@@ -396,6 +583,9 @@ class AichatApp : Application() {
                 val detail = json.optString("detail", "")
 
                 logDebug("✏️ CONTEXT_WRITTEN success=$success id=$contextId stage=$stage detail=$detail")
+
+                // الفشل وحده ينهي انتظار الخطوة؛ النجاحات المتعددة تُتجاهل.
+                if (!success) failStepWaiterIfMatches(contextId, stage, detail)
 
                 mainHandler.post { onContextWritten?.invoke(success, stage, detail) }
 
