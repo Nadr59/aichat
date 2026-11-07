@@ -3207,7 +3207,39 @@ private fun AgentChainDialog(
 }
 
 @Composable
+private fun AgentChainProgressBubble(
+    progress: AgentChainProgress,
+    onCancel: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp
+            )
 
+            Text(
+                "الخطوة ${progress.step} من ${progress.total} — ${progress.agentName}…",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f)
+            )
+
+            TextButton(onClick = onCancel) {
+                Text("إلغاء")
+            }
+        }
+    }
+}
+
+@Composable
 private fun AgentChainResumeBar(
     nextStep: Int,
     total: Int,
