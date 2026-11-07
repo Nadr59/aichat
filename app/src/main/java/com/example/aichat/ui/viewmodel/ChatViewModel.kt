@@ -1,5 +1,4 @@
 
-
 package com.example.aichat.ui.viewmodel
 
 import android.app.Application
@@ -53,6 +52,17 @@ const val MAX_CHAIN_EXTRA_INSTRUCTION_CHARS = 300
 /** تقدم سلسلة الوكلاء الجارية: الخطوة الحالية من الإجمالي واسم الوكيل. */
 data class AgentChainProgress(
     val step: Int,
+    val total: Int,
+    val agentName: String
+)
+
+/**
+ * سلسلة متوقفة (فشل أو إلغاء) يمكن استكمالها من الخطوة nextStep (تبدأ من 1).
+ * تعيش في ذاكرة الـViewModel فقط وتضيع بإغلاق التطبيق.
+ */
+data class AgentChainResume(
+    val conversationId: Long,
+    val nextStep: Int,
     val total: Int,
     val agentName: String
 )
@@ -437,6 +447,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // =========================
 
     fun openConversation(conversationId: Long) {
+        // الاستكمال يخص محادثة السلسلة فقط؛ فتح محادثة أخرى يلغيه.
+        if (chainResumeState?.conversationId != conversationId) clearChainResume()
+
         _currentConversationId.value = conversationId
         _memoryContext.value = ""
         _enhancedQuery.value = null
@@ -661,6 +674,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun newConversation() {
+        clearChainResume()
+
         messagesCollectJob?.cancel()
         messagesCollectJob = null
 
@@ -755,6 +770,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         _isLoading.value = true
         _error.value = null
+        clearChainResume()
 
         viewModelScope.launch {
             try {
@@ -892,14 +908,72 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // الوكيل صندوق أسود: نص يدخل ← نص يخرج.
     // يستخدم _isLoading نفسه، فيمنع الإرسال العادي والتفريع والتصفير أثناءه.
     // المزود الفعّال هو settings.provider عبر repository.sendMessage.
+    //
+    // الاستكمال: عند فشل خطوة أو إلغاء السلسلة تُحفظ حالتها في الذاكرة
+    // (chainResumeState). الخطوة الفاشلة/الملغاة لم تُحفظ كرسالة، فالاستكمال
+    // يعيد تشغيلها بالمدخل نفسه (آخر مخرج سليم). عدد الخطوات المكتملة = فهرس
+    // (من صفر) الخطوة التالية.
 
     private var chainJob: Job? = null
 
     private val _chainProgress = MutableStateFlow<AgentChainProgress?>(null)
     val chainProgress: StateFlow<AgentChainProgress?> = _chainProgress.asStateFlow()
 
+    /** حالة الاستكمال الداخلية الكاملة (لا تُعرض للواجهة). */
+    private data class ChainResumeState(
+        val conversationId: Long,
+        val workspaceId: Long?,
+        val convTitle: String,
+        val originalText: String,
+        val steps: List<ChainStepSpec>,
+        val agentNames: List<String>,
+        val lastOutput: String,
+        val nextIndex: Int
+    )
+
+    private var chainResumeState: ChainResumeState? = null
+
+    private val _chainResume = MutableStateFlow<AgentChainResume?>(null)
+    val chainResume: StateFlow<AgentChainResume?> = _chainResume.asStateFlow()
+
     private fun logAgentChain(message: String) {
         (getApplication<Application>() as? AichatApp)?.logDebug("AGENT_CHAIN $message")
+    }
+
+    private fun clearChainResume() {
+        chainResumeState = null
+        _chainResume.value = null
+    }
+
+    private fun storeChainResume(
+        conversationId: Long?,
+        workspaceId: Long?,
+        convTitle: String,
+        originalText: String,
+        steps: List<ChainStepSpec>,
+        agentNames: List<String>,
+        lastOutput: String,
+        nextIndex: Int
+    ) {
+        if (conversationId == null) return
+        if (nextIndex < 0 || nextIndex >= steps.size) return
+
+        chainResumeState = ChainResumeState(
+            conversationId = conversationId,
+            workspaceId = workspaceId,
+            convTitle = convTitle,
+            originalText = originalText,
+            steps = steps,
+            agentNames = agentNames,
+            lastOutput = lastOutput,
+            nextIndex = nextIndex
+        )
+        _chainResume.value = AgentChainResume(
+            conversationId = conversationId,
+            nextStep = nextIndex + 1,
+            total = steps.size,
+            agentName = agentNames.getOrNull(nextIndex) ?: "الوكيل ${nextIndex + 1}"
+        )
     }
 
     /** يوقف الخطوات المتبقية ويُبقي ما اكتمل. */
@@ -907,9 +981,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         chainJob?.cancel()
     }
 
+    /** يستكمل السلسلة المتوقفة من الخطوة الفاشلة/الملغاة. */
+    fun resumeAgentChain() {
+        val state = chainResumeState ?: return
+        if (_isLoading.value) return
+
+        if (_currentConversationId.value != state.conversationId) {
+            _error.value = "افتح محادثة السلسلة نفسها لاستكمالها."
+            return
+        }
+
+        logAgentChain("resume from=${state.nextIndex + 1}/${state.steps.size}")
+        launchChainJob(
+            text = state.originalText,
+            steps = state.steps,
+            resume = state
+        )
+    }
+
+    /** يتجاهل الاستكمال المعروض (زر ×). */
+    fun dismissAgentChainResume() {
+        clearChainResume()
+    }
+
     /**
      * توافق مع الواجهة الحالية: سلسلة بالأوضاع الافتراضية (أنبوب نقي،
-     * بلا تعليمات إضافية). تُحذف بعد تحديث ChatScreen لاستخدام runAgentChainSteps.
+     * بلا تعليمات إضافية). غير مستخدمة حاليًا.
      */
     fun runAgentChain(userText: String, agentIds: List<String>) {
         runAgentChainSteps(userText, agentIds.map { ChainStepSpec(agentId = it) })
@@ -952,22 +1049,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        launchChainJob(text = text, steps = steps, resume = null)
+    }
+
+    /**
+     * يشغّل السلسلة: من البداية (resume == null) أو من الخطوة المتوقفة.
+     * التحقق من المدخلات يجري في المستدعي.
+     */
+    private fun launchChainJob(
+        text: String,
+        steps: List<ChainStepSpec>,
+        resume: ChainResumeState?
+    ) {
         _isLoading.value = true
         _error.value = null
+        clearChainResume()
 
         chainJob = viewModelScope.launch {
             val total = steps.size
-            var completed = 0
+            val startIndex = resume?.nextIndex ?: 0
+
+            // عدد الخطوات المكتملة = فهرس الخطوة التالية.
+            var completed = startIndex
             var activeStep = 0
             var activeAgentName = ""
 
+            var convId: Long? = resume?.conversationId
+            var workspaceId: Long? = resume?.workspaceId
+            var convTitle: String = resume?.convTitle.orEmpty()
+            var agentNames: List<String> = resume?.agentNames.orEmpty()
+            var current: String = resume?.lastOutput ?: text
+
             try {
-                // 1) تحقق مسبق: كل الوكلاء موجودون قبل أي حفظ.
+                // 1) تحقق مسبق: وكلاء الخطوات المتبقية موجودون قبل أي حفظ.
                 val agents = steps.mapIndexed { index, step ->
-                    agentRepository.getById(step.agentId)
-                        ?: throw IllegalStateException(
-                            "الوكيل في الخطوة ${index + 1} غير موجود (ربما حُذف)."
-                        )
+                    if (index < startIndex) {
+                        null
+                    } else {
+                        (agentRepository.getById(step.agentId)
+                            ?: throw IllegalStateException(
+                                "الوكيل في الخطوة ${index + 1} غير موجود (ربما حُذف)."
+                            ))
+                    }
+                }
+
+                val previousNames = agentNames
+                agentNames = agents.mapIndexed { index, agent ->
+                    agent?.name ?: previousNames.getOrNull(index) ?: "الوكيل ${index + 1}"
                 }
 
                 // تعليمة إضافية لكل خطوة (مقصوصة) تُلحق بتعليمات وكيلها فقط.
@@ -975,76 +1103,92 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     it.extraInstruction.trim().take(MAX_CHAIN_EXTRA_INSTRUCTION_CHARS)
                 }
                 val prompts = agents.mapIndexed { index, agent ->
-                    val base = AgentPromptBuilder.build(agent)
-                    val extraBlock = extras[index]
-                        .takeIf { it.isNotBlank() }
-                        ?.let { "تعليمة إضافية لهذه الخطوة:\n$it" }
-                        .orEmpty()
-                    listOf(base, extraBlock)
-                        .filter { it.isNotBlank() }
-                        .joinToString("\n\n")
+                    if (agent == null) {
+                        ""
+                    } else {
+                        val base = AgentPromptBuilder.build(agent)
+                        val extraBlock = extras[index]
+                            .takeIf { it.isNotBlank() }
+                            ?.let { "تعليمة إضافية لهذه الخطوة:\n$it" }
+                            .orEmpty()
+                        listOf(base, extraBlock)
+                            .filter { it.isNotBlank() }
+                            .joinToString("\n\n")
+                    }
                 }
 
-                logAgentChain("start total=$total agents=${agents.joinToString("|") { it.name }}")
+                if (resume == null) {
+                    logAgentChain("start total=$total agents=${agentNames.joinToString("|")}")
 
-                // 2) المحادثة وWorkspace (نفس منطق sendChatMessage دون تعديله).
-                val existingConvId = _currentConversationId.value
-                val convId: Long
-                val workspaceId: Long?
-                val convTitle: String
+                    // 2) المحادثة وWorkspace (نفس منطق sendChatMessage دون تعديله).
+                    val existingConvId = _currentConversationId.value
+                    val newConvId: Long
+                    val newWorkspaceId: Long?
+                    val newTitle: String
 
-                if (existingConvId != null) {
-                    workspaceId = runCatching { ensureWorkspaceForConversation(existingConvId) }
-                        .getOrNull()?.id
-                    convId = existingConvId
-                    convTitle = conversationRepository.getConversationById(existingConvId)
-                        ?.title
-                        ?.takeIf { it.isNotBlank() }
-                        ?: text.take(50).ifBlank { "محادثة جديدة" }
-                } else {
-                    val ws = conversationRepository.getOrCreateWorkspace(
-                        scopeKey = newUniqueApiScopeKey(),
-                        title = apiWorkspaceTitle()
-                    )
-                    setCurrentWorkspaceById(ws.id)
+                    if (existingConvId != null) {
+                        newWorkspaceId = runCatching { ensureWorkspaceForConversation(existingConvId) }
+                            .getOrNull()?.id
+                        newConvId = existingConvId
+                        newTitle = conversationRepository.getConversationById(existingConvId)
+                            ?.title
+                            ?.takeIf { it.isNotBlank() }
+                            ?: text.take(50).ifBlank { "محادثة جديدة" }
+                    } else {
+                        val ws = conversationRepository.getOrCreateWorkspace(
+                            scopeKey = newUniqueApiScopeKey(),
+                            title = apiWorkspaceTitle()
+                        )
+                        setCurrentWorkspaceById(ws.id)
 
-                    val title = text.take(50).ifBlank { "محادثة جديدة" }
-                    val id = conversationRepository.insertConversation(
-                        Conversation(
-                            title = title,
-                            memoryAccessEnabled = _memoryAccessEnabled.value,
-                            agentId = _currentAgentId.value,
-                            workspaceId = ws.id,
-                            parentConversationId = null
+                        val title = text.take(50).ifBlank { "محادثة جديدة" }
+                        val id = conversationRepository.insertConversation(
+                            Conversation(
+                                title = title,
+                                memoryAccessEnabled = _memoryAccessEnabled.value,
+                                agentId = _currentAgentId.value,
+                                workspaceId = ws.id,
+                                parentConversationId = null
+                            )
+                        )
+                        _currentConversationId.value = id
+                        startCollecting(id)
+
+                        newWorkspaceId = ws.id
+                        newConvId = id
+                        newTitle = title
+                    }
+
+                    // 3) رسالة المستخدم تُحفظ قبل الخطوات (لا تُحفظ عند الاستكمال).
+                    conversationRepository.insertMessage(
+                        Message(
+                            conversationId = newConvId,
+                            role = "user",
+                            content = text,
+                            messageType = "text"
                         )
                     )
-                    _currentConversationId.value = id
-                    startCollecting(id)
 
-                    workspaceId = ws.id
-                    convId = id
-                    convTitle = title
+                    // من هنا فصاعدًا تصبح المحادثة صالحة للاستكمال عند الفشل.
+                    convId = newConvId
+                    workspaceId = newWorkspaceId
+                    convTitle = newTitle
+
+                    conversationRepository.updateTitleAndTimestamp(
+                        id = newConvId,
+                        title = newTitle,
+                        updatedAt = System.currentTimeMillis()
+                    )
                 }
 
-                // 3) رسالة المستخدم تُحفظ قبل الخطوات.
-                conversationRepository.insertMessage(
-                    Message(
-                        conversationId = convId,
-                        role = "user",
-                        content = text,
-                        messageType = "text"
-                    )
-                )
-                conversationRepository.updateTitleAndTimestamp(
-                    id = convId,
-                    title = convTitle,
-                    updatedAt = System.currentTimeMillis()
-                )
+                val activeConvId = convId
+                    ?: throw IllegalStateException("تعذر تحديد محادثة السلسلة.")
 
-                // 4) الخطوات بالترتيب.
-                var current = text
-                for ((index, agent) in agents.withIndex()) {
+                // 4) الخطوات بالترتيب (من startIndex).
+                for (index in startIndex until total) {
                     ensureActive()
+
+                    val agent = checkNotNull(agents[index])
 
                     activeStep = index + 1
                     activeAgentName = agent.name
@@ -1083,24 +1227,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     // العلامة هي السطر الأول داخل المحتوى؛ والخطوة التالية تستلم المخرج الخام بلا العلامة.
                     conversationRepository.insertMessage(
                         Message(
-                            conversationId = convId,
+                            conversationId = activeConvId,
                             role = "assistant",
                             content = "[$activeStep/$total · ${agent.name}]\n$output",
                             messageType = "text"
                         )
                     )
+
+                    // تُحدَّث حالة الإنجاز فور الحفظ وقبل أي تعليق آخر، حتى لا
+                    // يُكرَّر حفظ الخطوة عند الاستكمال لو وقع إلغاء بعد الحفظ.
+                    completed = activeStep
+                    current = output
+
                     conversationRepository.updateTitleAndTimestamp(
-                        id = convId,
+                        id = activeConvId,
                         title = convTitle,
                         updatedAt = System.currentTimeMillis()
                     )
 
-                    completed = activeStep
-                    current = output
                     logAgentChain("step_done step=$activeStep/$total agent=${agent.name} chars=${output.length}")
                 }
 
-                // 5) الملخص مرة واحدة بعد آخر خطوة (نص المستخدم + المنتج النهائي).
+                // 5) الملخص مرة واحدة بعد اكتمال كل الخطوات (نص المستخدم + المنتج النهائي).
                 workspaceId?.let {
                     updateWorkspaceSummaryAsyncForWorkspace(
                         workspaceId = it,
@@ -1112,10 +1260,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 logAgentChain("finished total=$total")
 
             } catch (e: CancellationException) {
+                storeChainResume(
+                    conversationId = convId,
+                    workspaceId = workspaceId,
+                    convTitle = convTitle,
+                    originalText = text,
+                    steps = steps,
+                    agentNames = agentNames,
+                    lastOutput = current,
+                    nextIndex = completed
+                )
                 _successMessage.value = "أُوقفت السلسلة بعد $completed من $total خطوات."
                 logAgentChain("cancelled completed=$completed total=$total")
                 throw e
             } catch (e: Exception) {
+                storeChainResume(
+                    conversationId = convId,
+                    workspaceId = workspaceId,
+                    convTitle = convTitle,
+                    originalText = text,
+                    steps = steps,
+                    agentNames = agentNames,
+                    lastOutput = current,
+                    nextIndex = completed
+                )
                 val detail = e.message ?: "خطأ غير معروف"
                 _error.value = if (activeStep > 0) {
                     "فشلت الخطوة $activeStep من $total ($activeAgentName): $detail"
@@ -1146,7 +1314,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // - المنصة (ChatGPT/Venice/Arena) قناة توصيل فقط. وحدة السياق هي
     //   "المحادثة" نفسها — سواء كتب فيها المستخدم عبر API أم عبر منصة ويب.
     // - المحادثة النشطة (_currentConversationId) هي الهدف الحتمي لرسائل
-    //   الويب، وملخصها هو ما يُحقَن (عبر vm.workspaceSummary في الشاشة)،
+    //   الويب، وملخصها هو ما يُحقن (عبر vm.workspaceSummary في الشاشة)،
     //   فيتطابق المُحقَن مع المُحدَّث دائمًا — إصلاح خلل "الملخص الذي
     //   يُحدَّث ليس هو الذي يُحقَن".
     // - Arena تمر بنفس هذا المسار تمامًا؛ خصوصيتها (إرسال يدوي عبر شاشة
@@ -2041,8 +2209,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             conversationRepository.deleteMessages(conversation.id)
             conversationRepository.deleteConversation(conversation)
 
+            if (chainResumeState?.conversationId == conversation.id) clearChainResume()
             if (_currentConversationId.value == conversation.id) newConversation()
             if (_currentWebConversationId.value == conversation.id) clearWebConversationSelection()
         }
     }
 }
+
+
