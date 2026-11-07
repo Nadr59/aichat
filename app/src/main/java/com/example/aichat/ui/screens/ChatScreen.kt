@@ -1,4 +1,5 @@
 
+
 package com.example.aichat.ui.screens
 
 import android.content.ClipData
@@ -316,8 +317,39 @@ fun ChatScreen(
     var webSendTimedOut by remember(selectedWebPlatformId) { mutableStateOf(false) }
 
     val sendDisabledExternally = selectedWebPlatformId != null && (
-        !isWebSendCapable || webPageLoading || webSendInFlight || webRuntimeMissing
+        !isWebSendCapable || webPageLoading || webSendInFlight || webRuntimeMissing || isLoading
     )
+
+    // ── سلسلة الوكلاء: مفتاح القناة والـsender (للويب: ChatGPT وVenice فقط) ──
+    val chainChannelKey = selectedPlatform?.let { "web:${it.id}" } ?: CHAIN_CHANNEL_API
+    val chainWebSender: ChainStepSender? = remember(selectedPlatform, webKind, isHiddenAutoSendPlatform) {
+        val platform = selectedPlatform
+        if (platform == null || !isHiddenAutoSendPlatform) {
+            null
+        } else {
+            val platformHost = hostOf(platform.url)
+            val sender: ChainStepSender = { agentPrompt, input ->
+                val contextBlock = WebSendCoordinator.buildContextBlock(
+                    agentPrompt = agentPrompt,
+                    workspaceSummary = ""
+                )
+                val finalText = WebSendCoordinator.buildFinalTextForPlatform(
+                    kind = webKind,
+                    contextBlock = contextBlock,
+                    question = input
+                )
+                app.sendContextAndAwaitResponse(
+                    text = finalText,
+                    targetDomain = platformHost,
+                    inputSelector = platform.inputSelector,
+                    sendSelector = platform.sendSelector,
+                    sendWithEnter = platform.sendWithEnter,
+                    timeoutMs = CHAIN_WEB_STEP_TIMEOUT_MS
+                )
+            }
+            sender
+        }
+    }
 
     // ── 1.ج.1: طي/فرد مربع الإدخال لتحرير مساحة للرسائل/محرك Arena المرئي ──
     var inputBarExpanded by rememberSaveable { mutableStateOf(true) }
@@ -373,6 +405,16 @@ fun ChatScreen(
             app.onAiResponseCaptured = null
             app.onManualCaptureResult = null
             app.onContextWritten = null
+        }
+    }
+
+    // ── إلغاء سلسلة الويب عند مغادرة الشاشة (المحرك المخفي يتوقف بالمغادرة) ──
+    val webIdForChainCancel = androidx.compose.runtime.rememberUpdatedState(selectedWebPlatformId)
+    DisposableEffect(Unit) {
+        onDispose {
+            if (webIdForChainCancel.value != null) {
+                viewModel.cancelAgentChain()
+            }
         }
     }
 
@@ -699,9 +741,9 @@ fun ChatScreen(
                                         Spacer(Modifier.width(8.dp))
                                         Column {
                                             Text("سلسلة وكلاء")
-                                            if (selectedWebPlatformId != null) {
+                                            if (selectedWebPlatformId != null && !isHiddenAutoSendPlatform) {
                                                 Text(
-                                                    "السلسلة تعمل مع API فقط الآن",
+                                                    "السلسلة على الويب: ChatGPT وVenice فقط",
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
@@ -713,7 +755,7 @@ fun ChatScreen(
                                     showChainDialog = true
                                     topMenuExpanded = false
                                 },
-                                enabled = selectedWebPlatformId == null && !isLoading
+                                enabled = (selectedWebPlatformId == null || isHiddenAutoSendPlatform) && !isLoading
                             )
 
                             DropdownMenuItem(
@@ -919,12 +961,27 @@ fun ChatScreen(
     }
 
     val resume = chainResume
-    if (resume != null && !isLoading && selectedWebPlatformId == null) {
+    if (resume != null && !isLoading && (selectedWebPlatformId == null || chainWebSender != null)) {
         AgentChainResumeBar(
             nextStep = resume.nextStep,
             total = resume.total,
             agentName = resume.agentName,
-            onResume = { viewModel.resumeAgentChain() },
+            onResume = {
+                if (selectedWebPlatformId != null &&
+                    (webPageLoading || webRuntimeMissing || webSendInFlight)
+                ) {
+                    Toast.makeText(
+                        context,
+                        "منصة الويب غير جاهزة بعد. حاول بعد قليل.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    viewModel.resumeAgentChain(
+                        channelKey = chainChannelKey,
+                        sender = chainWebSender
+                    )
+                }
+            },
             onDismiss = { viewModel.dismissAgentChainResume() },
             modifier = Modifier
                 .fillMaxWidth()
@@ -1502,11 +1559,30 @@ fun ChatScreen(
                         "السلسلة لا تدعم الصور الآن. أزل الصورة المحددة أولًا.",
                         Toast.LENGTH_LONG
                     ).show()
+                } else if (selectedWebPlatformId != null && !isHiddenAutoSendPlatform) {
+                    Toast.makeText(
+                        context,
+                        "السلسلة على الويب تعمل مع ChatGPT وVenice فقط.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else if (selectedWebPlatformId != null &&
+                    (webPageLoading || webRuntimeMissing || webSendInFlight)
+                ) {
+                    Toast.makeText(
+                        context,
+                        "منصة الويب غير جاهزة بعد (الصفحة تُحمَّل أو رسالة قيد الانتظار). حاول بعد قليل.",
+                        Toast.LENGTH_LONG
+                    ).show()
                 } else {
                     showChainDialog = false
                     keyboardController?.hide()
                     focusManager.clearFocus(force = true)
-                    viewModel.runAgentChainSteps(chainInputText, steps)
+                    viewModel.runAgentChainSteps(
+                        chainInputText,
+                        steps,
+                        channelKey = chainChannelKey,
+                        sender = chainWebSender
+                    )
                     userInput = TextFieldValue("")
                     viewModel.clearEnhancedQuery()
                 }
@@ -1807,6 +1883,9 @@ private fun hostOf(url: String): String =
 // ✅ G1: عتبات انتظار رد الويب (بالثواني)
 private const val WEB_REPLY_WARN_AFTER_SEC = 60
 private const val WEB_REPLY_TIMEOUT_SEC = 120
+
+// مهلة خطوة سلسلة الوكلاء على منصة الويب (300 ثانية)
+private const val CHAIN_WEB_STEP_TIMEOUT_MS = 300_000L
 private const val WEB_CONTEXT_RECENT_MESSAGE_COUNT = 4
 
 /* ----------------------------- مُحدِّد المحرّك الموحّد (API + منصات الويب) ----------------------------- */
@@ -3124,40 +3203,9 @@ private fun AgentChainDialog(
         }
     )
 }
-@Composable
-private fun AgentChainProgressBubble(
-    progress: AgentChainProgress,
-    onCancel: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp
-            )
-
-            Text(
-                "الخطوة ${progress.step} من ${progress.total} — ${progress.agentName}…",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f)
-            )
-
-            TextButton(onClick = onCancel) {
-                Text("إلغاء")
-            }
-        }
-    }
-}
 
 @Composable
+
 private fun AgentChainResumeBar(
     nextStep: Int,
     total: Int,
@@ -3197,4 +3245,3 @@ private fun AgentChainResumeBar(
         }
     }
 }
-
