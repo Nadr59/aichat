@@ -1,4 +1,4 @@
- /*
+/*
  * capture.js — التقاط عام لصفحة ظاهرة وتحويلها إلى "مواد" جاهزة للوكلاء.
  * ملف مستقل: لا يعدّل content.js ولا يتفاعل مع مسار ChatGPT/Venice/Arena.
  *
@@ -54,6 +54,8 @@ var BLOCKED_PATHS = /^\/(messages|notifications|settings|account|login|signin|di
 // Messaging
 // ============================================================
 
+var lastSendError = "";
+
 function sendToBackground(payload) {
   try {
     if (!api || !payload || !payload.type) return;
@@ -64,8 +66,12 @@ function sendToBackground(payload) {
     payload.version = payload.version || VERSION;
     payload.timestamp = payload.timestamp || Date.now();
     var p = api.runtime.sendMessage(payload);
-    if (p && p.catch) p.catch(function () {});
-  } catch (e) {}
+    if (p && p.catch) p.catch(function (err) {
+      lastSendError = String(err && err.message ? err.message : err);
+    });
+  } catch (e) {
+    lastSendError = String(e && e.message ? e.message : e);
+  }
 }
 
 function log(msg) {
@@ -1089,9 +1095,16 @@ function installButton() {
     if (btn.disabled) return;
     btn.disabled = true;
     btn.textContent = "…";
-    captureNow({ mode: "auto" }).then(function () {
+    lastSendError = "";
+    log("🔘 click start");
+    captureNow({ mode: "auto" }).then(function (r) {
+      var n = (r && r.materials) ? r.materials.length : -1;
       btn.disabled = false;
-      btn.textContent = "التقط";
+      setTimeout(function () {
+        btn.textContent = lastSendError ? "✗" : (n >= 0 ? "✓" + n : "؟");
+        log("🔘 click done items=" + n + " sendErr=" + (lastSendError || "none"));
+        setTimeout(function () { btn.textContent = "التقط"; }, 2500);
+      }, 400);
     });
   });
 
@@ -1129,5 +1142,6 @@ if (api && api.runtime && api.runtime.onMessage) {
 }
 
 try { installButton(); } catch (e) { log("⚠️ button install failed: " + e); }
+log("🧩 capture.js loaded v=" + VERSION + " host=" + HOST);
 
 })();
