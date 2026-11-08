@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "AiChat Web Extension",
-  "version": "1.0.57",
+  "version": "1.0.61",
   "description": "AiChat GeckoView WebExtension",
   "permissions": [
     "nativeMessaging",
@@ -18,6 +18,20 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": [
+        "*://chatgpt.com/*",
+        "*://*.chatgpt.com/*",
+        "*://chat.openai.com/*",
+        "*://venice.ai/*",
+        "*://*.venice.ai/*",
+        "*://arena.ai/*",
+        "*://*.arena.ai/*"
+      ],
+      "js": ["capture.js"],
       "run_at": "document_idle"
     }
   ],
