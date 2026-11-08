@@ -386,8 +386,14 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
   // Pass-through: أي رسالة أخرى من content إلى Kotlin
   if (nativePort) {
-    logLocal("↗️ Content → Kotlin: " + JSON.stringify(message));
-    try {
+        const rawLog = JSON.stringify(message);
+    const isMaterialMsg = String(message.type).indexOf("MATERIAL_") === 0;
+    logLocal(
+      "↗️ Content → Kotlin: " +
+      (isMaterialMsg && rawLog.length > 300
+        ? rawLog.slice(0, 300) + "…(" + rawLog.length + " chars)"
+        : rawLog)
+    );
       nativePort.postMessage(message);
     } catch (e) {
       logLocal("❌ Content → Kotlin failed: " + (e && e.message ? e.message : String(e)));
