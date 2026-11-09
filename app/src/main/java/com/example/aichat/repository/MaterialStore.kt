@@ -18,7 +18,53 @@ private const val TEXT_SLACK = 8
 private const val MAX_LINKS = 40
 private const val SAVE_DELAY_MS = 600L
 
+/** حالات المعالجة. النص الفارغ = لم تدخل أي معالجة (مواد قديمة أو مشتركة). */
+object MaterialStatus {
+    const val NONE = ""
+    const val PENDING = "pending"
+    const val PROCESSING = "processing"
+    const val READY = "ready"
+    const val FAILED = "failed"
+}
+
 data class MaterialLink(val text: String, val href: String)
+
+/** خلاصة المادة التي يُنتجها الوكيل. الروابط فيها حقيقية (يضعها التطبيق لا النموذج). */
+data class MaterialDigest(
+    val titleAr: String,
+    val bullets: List<String>,
+    val keyQuote: String,
+    val worthFullRead: Boolean
+) {
+    fun toJson(): JSONObject {
+        val arr = JSONArray()
+        for (b in bullets) arr.put(b)
+        return JSONObject()
+            .put("titleAr", titleAr)
+            .put("bullets", arr)
+            .put("keyQuote", keyQuote)
+            .put("worthFullRead", worthFullRead)
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject): MaterialDigest {
+            val bullets = ArrayList<String>()
+            val arr = o.optJSONArray("bullets")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val s = arr.optString(i, "").trim()
+                    if (s.isNotEmpty()) bullets.add(s)
+                }
+            }
+            return MaterialDigest(
+                titleAr = o.optString("titleAr", ""),
+                bullets = bullets,
+                keyQuote = o.optString("keyQuote", ""),
+                worthFullRead = o.optBoolean("worthFullRead", false)
+            )
+        }
+    }
+}
 
 data class MaterialItem(
     val id: String,
@@ -34,14 +80,17 @@ data class MaterialItem(
     val quality: String,
     val reason: String,
     val truncated: Boolean,
-    val capturedAt: Long
+    val capturedAt: Long,
+    // حقول المعالجة (اختيارية: الملفات القديمة والمنشئون الحاليون يعملون دون تغيير)
+    val status: String = MaterialStatus.NONE,
+    val digest: MaterialDigest? = null
 ) {
     fun toJson(): JSONObject {
         val arr = JSONArray()
         for (l in links) {
             arr.put(JSONObject().put("text", l.text).put("href", l.href))
         }
-        return JSONObject()
+        val o = JSONObject()
             .put("id", id)
             .put("url", url)
             .put("host", host)
@@ -56,6 +105,10 @@ data class MaterialItem(
             .put("reason", reason)
             .put("truncated", truncated)
             .put("capturedAt", capturedAt)
+
+        if (status.isNotEmpty()) o.put("status", status)
+        if (digest != null) o.put("digest", digest.toJson())
+        return o
     }
 
     companion object {
@@ -96,7 +149,9 @@ data class MaterialItem(
                 quality = o.optString("quality", ""),
                 reason = o.optString("reason", ""),
                 truncated = truncated,
-                capturedAt = o.optLong("capturedAt", System.currentTimeMillis())
+                capturedAt = o.optLong("capturedAt", System.currentTimeMillis()),
+                status = o.optString("status", MaterialStatus.NONE),
+                digest = o.optJSONObject("digest")?.let { MaterialDigest.fromJson(it) }
             )
         }
     }
@@ -157,6 +212,18 @@ class MaterialStore(
         return idx < 0
     }
 
+    /**
+     * يعدّل مادة موجودة في مكانها (دون تغيير ترتيبها). يعيد false إن لم توجد
+     * (مثلًا حذفها المستخدم أثناء المعالجة)، فلا يُعاد إحياؤها.
+     */
+    fun update(id: String, transform: (MaterialItem) -> MaterialItem): Boolean {
+        val idx = items.indexOfFirst { it.id == id }
+        if (idx < 0) return false
+        items[idx] = transform(items[idx])
+        scheduleSave()
+        return true
+    }
+
     fun remove(id: String) {
         val idx = items.indexOfFirst { it.id == id }
         if (idx < 0) return
@@ -214,11 +281,19 @@ class MaterialStore(
             val root = JSONObject(file.readText(Charsets.UTF_8))
             val arr = root.optJSONArray("materials") ?: JSONArray()
             val out = ArrayList<MaterialItem>()
+            var reset = 0
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                MaterialItem.fromJson(o)?.let { out.add(it) }
+                val m = MaterialItem.fromJson(o) ?: continue
+                // مادة أُغلق التطبيق وهي قيد المعالجة: تعود بانتظار المعالجة
+                if (m.status == MaterialStatus.PROCESSING) {
+                    out.add(m.copy(status = MaterialStatus.PENDING))
+                    reset++
+                } else {
+                    out.add(m)
+                }
             }
-            log("📚 materials loaded: ${out.size}")
+            log("📚 materials loaded: ${out.size}" + if (reset > 0) " (reset $reset to pending)" else "")
             out
         } catch (e: Exception) {
             // نحفظ الملف التالف جانبًا بدل أن تستبدله الكتابة التالية
