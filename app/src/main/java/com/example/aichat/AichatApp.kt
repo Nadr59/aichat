@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.data.model.MemoryItem
+import com.example.aichat.repository.MaterialItem
+import com.example.aichat.repository.MaterialStore
 import com.example.aichat.repository.MemoryContextBuilder
 import com.example.aichat.repository.WebPlatformRepository
 import kotlinx.coroutines.CompletableDeferred
@@ -42,6 +44,9 @@ class AichatApp : Application() {
         // عدد معرّفات الخطوات المنتهية المحتفَظ بها لإسقاط الردود المتأخرة
         private const val MAX_RETIRED_STEP_IDS = 20
 
+        // [materials] مهلة قصيرة بعد MATERIAL_CAPTURE_DONE قبل احتساب الدفعة (لو وصلت مادة متأخرة)
+        private const val MATERIAL_DONE_DELAY_MS = 400L
+
         // اسم الإضافة (assets/aicapture/)
         private const val EXT_BASE_URL = "resource://android/assets/aicapture/"
         private const val EXT_ID = "aicapture@aichat.example.com"
@@ -69,6 +74,16 @@ class AichatApp : Application() {
 
     lateinit var webPlatformRepository: WebPlatformRepository
         private set
+
+    // =========================
+    // [materials] علبة المواد (materials.json)
+    // =========================
+
+    lateinit var materialStore: MaterialStore
+        private set
+
+    // batchId -> [added, updated, rejected]. يُلمس على الخيط الرئيسي فقط.
+    private val batchStats = LinkedHashMap<String, IntArray>()
 
     // =========================
     // Debug log
@@ -610,6 +625,66 @@ class AichatApp : Application() {
                 logDebug("🔍 JS: ${json.optString("info")}")
             }
 
+            // [materials] مادة ملتقطة من صفحة (لا سجل لكل مادة حتى لا يفيض السجل في الدفعات الكبيرة)
+            "MATERIAL_CAPTURE" -> {
+                val batchId = json.optString("batchId", "")
+                val item = MaterialItem.fromJson(json)
+
+                mainHandler.post {
+                    var st = batchStats[batchId]
+                    if (st == null) {
+                        if (batchStats.size >= 20) batchStats.remove(batchStats.keys.first())
+                        st = IntArray(3)
+                        batchStats[batchId] = st
+                    }
+
+                    if (item == null) {
+                        st[2]++
+                    } else if (materialStore.upsert(item, batchId)) {
+                        st[0]++
+                    } else {
+                        st[1]++
+                    }
+                }
+            }
+
+            // [materials] نهاية الدفعة: سطر سجل واحد + Toast التأكيد الذي يعتمد عليه الزر
+            "MATERIAL_CAPTURE_DONE" -> {
+                val batchId = json.optString("batchId", "")
+                val count = json.optInt("count", 0)
+                val method = json.optString("method", "")
+                val reason = json.optString("reason", "")
+
+                mainHandler.postDelayed({
+                    val st = batchStats.remove(batchId) ?: IntArray(3)
+                    val total = materialStore.items.size
+
+                    logDebug(
+                        "📦 MATERIALS batch method=$method sent=$count added=${st[0]} " +
+                            "updated=${st[1]} rejected=${st[2]} total=$total" +
+                            (if (reason.isNotBlank()) " reason=$reason" else "")
+                    )
+
+                    val msg = when {
+                        count == 0 -> when (reason) {
+                            "blocked_page" -> "⛔ هذه الصفحة محظورة من الالتقاط"
+                            "no_content" -> "⚠️ لم أجد محتوى يصلح للالتقاط"
+                            "exception" -> "❌ فشل الالتقاط في الصفحة"
+                            else -> "⚠️ لم يُلتقط شيء"
+                        }
+
+                        st[0] + st[1] == 0 -> "⚠️ لم تُحفظ أي مادة (مرفوضة: ${st[2]})"
+
+                        else -> buildString {
+                            append("📦 حُفظت ${st[0]} مادة جديدة")
+                            if (st[1] > 0) append("، وحُدّثت ${st[1]}")
+                            append(" (الإجمالي $total)")
+                        }
+                    }
+                    showToast(msg)
+                }, MATERIAL_DONE_DELAY_MS)
+            }
+
             else -> {
                 logDebug("ℹ️ PORT msg: $type")
             }
@@ -663,6 +738,10 @@ class AichatApp : Application() {
         val db = ChatDatabase.getDatabase(this)
         webPlatformRepository = WebPlatformRepository(db.webPlatformDao())
         Log.d(TAG, "✅ Database ready")
+
+        // [materials] علبة المواد (ملف JSON خارج قاعدة البيانات)
+        materialStore = MaterialStore(filesDir) { logDebug(it) }
+        materialStore.load()
     }
 
     @Synchronized
