@@ -1,5 +1,9 @@
 package com.example.aichat.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -23,13 +28,15 @@ import java.util.Locale
 
 /**
  * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا).
- * الضغط على مادة يوسّعها (النص والروابط)، وفيها زر حذف. «مسح الكل» بتأكيد.
+ * الضغط على مادة يوسّعها (النص والروابط)، وفيها زرا نسخ وحذف.
+ * في الأسفل: «نسخ الكل» و«مسح الكل» (بتأكيد).
  */
 @Composable
 fun MaterialsDialog(
     store: MaterialStore,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val list = store.items
     var expandedId by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -72,6 +79,13 @@ fun MaterialsDialog(
                             onToggle = {
                                 expandedId = if (expandedId == m.id) null else m.id
                             },
+                            onCopy = {
+                                copyToClipboard(
+                                    context,
+                                    materialToText(m),
+                                    "تم نسخ المادة"
+                                )
+                            },
                             onDelete = {
                                 if (expandedId == m.id) expandedId = null
                                 store.remove(m.id)
@@ -82,13 +96,32 @@ fun MaterialsDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { confirmClear = true },
-                enabled = list.isNotEmpty()
-            ) {
-                Icon(Icons.Filled.DeleteOutline, contentDescription = null)
-                Spacer(Modifier.width(4.dp))
-                Text("مسح الكل")
+            Row {
+                TextButton(
+                    onClick = {
+                        // نأخذ لقطة من القائمة لحظة الضغط
+                        val snapshot = list.toList()
+                        copyToClipboard(
+                            context,
+                            snapshot.joinToString("\n\n════════\n\n") { materialToText(it) },
+                            "تم نسخ ${snapshot.size} مادة"
+                        )
+                    },
+                    enabled = list.isNotEmpty()
+                ) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("نسخ الكل")
+                }
+
+                TextButton(
+                    onClick = { confirmClear = true },
+                    enabled = list.isNotEmpty()
+                ) {
+                    Icon(Icons.Filled.DeleteOutline, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("مسح الكل")
+                }
             }
         },
         dismissButton = {
@@ -122,6 +155,7 @@ private fun MaterialRow(
     m: MaterialItem,
     expanded: Boolean,
     onToggle: () -> Unit,
+    onCopy: () -> Unit,
     onDelete: () -> Unit
 ) {
     Surface(
@@ -163,22 +197,12 @@ private fun MaterialRow(
                     Spacer(Modifier.height(6.dp))
                 }
 
+                // نص واحد بفواصل أسطر صريحة: لا يلتصق الرابط بما بعده عند النسخ
                 SelectionContainer {
-                    Column {
-                        if (m.url.isNotBlank()) {
-                            Text(
-                                text = m.url,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(Modifier.height(6.dp))
-                        }
-
-                        Text(
-                            text = m.text,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                    Text(
+                        text = if (m.url.isNotBlank()) m.url + "\n\n" + m.text else m.text,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
 
                 if (m.links.isNotEmpty()) {
@@ -190,14 +214,12 @@ private fun MaterialRow(
                     )
                     Spacer(Modifier.height(4.dp))
                     SelectionContainer {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            for (l in m.links) {
-                                Text(
-                                    text = "• ${l.text}\n${l.href}",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                        }
+                        Text(
+                            text = m.links.joinToString("\n\n") {
+                                "• ${it.text.replace('\n', ' ')}\n${it.href}"
+                            },
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
 
@@ -205,6 +227,12 @@ private fun MaterialRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
+                    TextButton(onClick = onCopy) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("نسخ")
+                    }
+
                     TextButton(onClick = onDelete) {
                         Icon(Icons.Filled.DeleteOutline, contentDescription = null)
                         Spacer(Modifier.width(4.dp))
@@ -214,6 +242,36 @@ private fun MaterialRow(
             }
         }
     }
+}
+
+/** نص المادة للنسخ: العنوان، الرابط، النص، ثم الروابط (كل رابط في سطر مستقل بينها سطر فارغ). */
+private fun materialToText(m: MaterialItem): String = buildString {
+    if (m.title.isNotBlank()) append(m.title).append('\n')
+    if (m.url.isNotBlank()) append(m.url).append('\n')
+    if (isNotEmpty()) append('\n')
+    append(m.text)
+
+    if (m.links.isNotEmpty()) {
+        append("\n\nالروابط (").append(m.links.size).append("):\n\n")
+        append(
+            m.links.joinToString("\n\n") {
+                "• ${it.text.replace('\n', ' ')}\n${it.href}"
+            }
+        )
+    }
+}
+
+private fun copyToClipboard(context: Context, text: String, okMessage: String) {
+    val ok = runCatching {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("AiChat Materials", text))
+    }.isSuccess
+
+    Toast.makeText(
+        context,
+        if (ok) okMessage else "تعذّر النسخ (قد يكون الحجم كبيرًا)",
+        Toast.LENGTH_SHORT
+    ).show()
 }
 
 private fun metaLine(m: MaterialItem): String {
