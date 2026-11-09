@@ -22,10 +22,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.aichat.repository.MaterialItem
+import com.example.aichat.repository.MaterialStatus
 import com.example.aichat.repository.MaterialStore
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -33,7 +35,7 @@ import java.util.Locale
 
 /**
  * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا).
- * كل مادة بطاقة: عنوان + معاينة + أزرار (النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
+ * كل مادة بطاقة: خلاصة (إن وُجدت) أو معاينة + أزرار (النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
  * في الأسفل: «نسخ الكل» و«مسح الكل» (بتأكيد).
  */
 @Composable
@@ -83,6 +85,9 @@ fun MaterialsDialog(
                             expanded = expandedId == m.id,
                             onToggle = {
                                 expandedId = if (expandedId == m.id) null else m.id
+                            },
+                            onDigest = {
+                                store.update(m.id) { it.copy(status = MaterialStatus.PENDING) }
                             },
                             onOpen = { openExternally(context, m.url) },
                             onShare = {
@@ -168,12 +173,24 @@ private fun MaterialRow(
     m: MaterialItem,
     expanded: Boolean,
     onToggle: () -> Unit,
+    onDigest: () -> Unit,
     onOpen: () -> Unit,
     onShare: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit
 ) {
     val canOpen = m.url.startsWith("http://") || m.url.startsWith("https://")
+    val digest = m.digest.takeIf { m.status == MaterialStatus.READY }
+    val shownTitle = digest?.titleAr?.takeIf { it.isNotBlank() } ?: m.title.ifBlank { m.url }
+    val canDigest = m.quality != "weak" &&
+        (m.status == MaterialStatus.NONE || m.status == MaterialStatus.FAILED)
+
+    val statusLine: String? = when (m.status) {
+        MaterialStatus.PENDING -> "⏳ بانتظار التلخيص (يعمل حين تكون محادثة ChatGPT أو Venice مفتوحة)"
+        MaterialStatus.PROCESSING -> "⚙️ جارٍ التلخيص…"
+        MaterialStatus.FAILED -> "❌ فشل التلخيص (التفاصيل في سجلات التشخيص)"
+        else -> null
+    }
 
     Surface(
         tonalElevation = 2.dp,
@@ -185,7 +202,7 @@ private fun MaterialRow(
             // رأس البطاقة: الضغط عليه يوسّع/يطوي النص الكامل
             Column(modifier = Modifier.clickable(onClick = onToggle)) {
                 Text(
-                    text = m.title.ifBlank { m.url },
+                    text = shownTitle,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     maxLines = if (expanded) 4 else 2,
@@ -200,8 +217,46 @@ private fun MaterialRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                // معاينة مؤقتة: مكانها لاحقًا النقاط الثلاث والاقتباس
-                if (!expanded && m.text.isNotBlank()) {
+                if (statusLine != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = statusLine,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (m.status == MaterialStatus.FAILED)
+                            MaterialTheme.colorScheme.error
+                        else
+                            MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                if (digest != null) {
+                    Spacer(Modifier.height(6.dp))
+                    for (b in digest.bullets) {
+                        Text(
+                            text = "• $b",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
+                    if (digest.keyQuote.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "« ${digest.keyQuote} »",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontStyle = FontStyle.Italic,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (digest.worthFullRead) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "⭐ تستحق القراءة كاملة",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                } else if (!expanded && m.text.isNotBlank()) {
+                    // معاينة للمواد التي لم تُلخَّص بعد
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = m.text.trim(),
@@ -214,6 +269,15 @@ private fun MaterialRow(
 
             if (expanded) {
                 Spacer(Modifier.height(8.dp))
+
+                if (digest != null && m.title.isNotBlank()) {
+                    Text(
+                        text = "العنوان الأصلي: ${m.title}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
 
                 if (m.quality == "weak") {
                     Text(
@@ -249,6 +313,24 @@ private fun MaterialRow(
                             style = MaterialTheme.typography.labelSmall
                         )
                     }
+                }
+            }
+
+            if (canDigest) {
+                TextButton(
+                    onClick = onDigest,
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (m.status == MaterialStatus.FAILED) "أعد التلخيص" else "لخّص",
+                        style = MaterialTheme.typography.labelMedium
+                    )
                 }
             }
 
@@ -295,8 +377,16 @@ private fun MaterialRow(
     }
 }
 
-/** نص المادة للنسخ والمشاركة: العنوان، الرابط، النص، ثم الروابط (كل رابط في سطر مستقل بينها سطر فارغ). */
+/** نص المادة للنسخ والمشاركة: الخلاصة (إن وُجدت)، العنوان، الرابط، النص، ثم الروابط. */
 private fun materialToText(m: MaterialItem): String = buildString {
+    val d = m.digest.takeIf { m.status == MaterialStatus.READY }
+    if (d != null) {
+        if (d.titleAr.isNotBlank()) append(d.titleAr).append('\n')
+        for (b in d.bullets) append("• ").append(b).append('\n')
+        if (d.keyQuote.isNotBlank()) append("« ").append(d.keyQuote).append(" »\n")
+        append("\n────────\n\n")
+    }
+
     if (m.title.isNotBlank()) append(m.title).append('\n')
     if (m.url.isNotBlank()) append(m.url).append('\n')
     if (isNotEmpty()) append('\n')
