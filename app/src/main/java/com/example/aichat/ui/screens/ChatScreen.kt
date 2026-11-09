@@ -146,9 +146,11 @@ fun ChatScreen(
     var showChainDialog by remember { mutableStateOf(false) }
     var topMenuExpanded by remember { mutableStateOf(false) }
     var showWebImportDialog by remember { mutableStateOf(false) }
-
     // ✅ عارض سجلات التشخيص المؤقت
     var showDebugLogs by remember { mutableStateOf(false) }
+
+    // علبة المواد
+    var showMaterials by remember { mutableStateOf(false) }
 
     // BottomSheet Tree
     var showTreeSheet by remember { mutableStateOf(false) }
@@ -806,8 +808,25 @@ fun ChatScreen(
                                         Text("سجلات التشخيص")
                                     }
                                 },
-                                onClick = {
+                                                                onClick = {
                                     showDebugLogs = true
+                                    topMenuExpanded = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.Inbox,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("علبة المواد")
+                                    }
+                                },
+                                onClick = {
+                                    showMaterials = true
                                     topMenuExpanded = false
                                 }
                             )
@@ -1624,6 +1643,14 @@ fun ChatScreen(
             }
         )
     }
+        // علبة المواد
+    if (showMaterials) {
+        MaterialsDialog(
+            store = app.materialStore,
+            onDismiss = { showMaterials = false }
+        )
+    }
+
 
     // ✅ عارض سجلات التشخيص المؤقت
     if (showDebugLogs) {
