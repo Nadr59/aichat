@@ -1,8 +1,13 @@
 package com.example.aichat.ui.screens
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -28,7 +33,7 @@ import java.util.Locale
 
 /**
  * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا).
- * الضغط على مادة يوسّعها (النص والروابط)، وفيها زرا نسخ وحذف.
+ * كل مادة بطاقة: عنوان + معاينة + أزرار (النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
  * في الأسفل: «نسخ الكل» و«مسح الكل» (بتأكيد).
  */
 @Composable
@@ -78,6 +83,14 @@ fun MaterialsDialog(
                             expanded = expandedId == m.id,
                             onToggle = {
                                 expandedId = if (expandedId == m.id) null else m.id
+                            },
+                            onOpen = { openExternally(context, m.url) },
+                            onShare = {
+                                shareText(
+                                    context,
+                                    materialToText(m),
+                                    m.title.ifBlank { m.url }
+                                )
                             },
                             onCopy = {
                                 copyToClipboard(
@@ -155,34 +168,49 @@ private fun MaterialRow(
     m: MaterialItem,
     expanded: Boolean,
     onToggle: () -> Unit,
+    onOpen: () -> Unit,
+    onShare: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val canOpen = m.url.startsWith("http://") || m.url.startsWith("https://")
+
     Surface(
         tonalElevation = 2.dp,
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier
-                .clickable(onClick = onToggle)
-                .padding(10.dp)
-        ) {
-            Text(
-                text = m.title.ifBlank { m.url },
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                maxLines = if (expanded) 4 else 2,
-                overflow = TextOverflow.Ellipsis
-            )
+        Column(modifier = Modifier.padding(10.dp)) {
 
-            Spacer(Modifier.height(2.dp))
+            // رأس البطاقة: الضغط عليه يوسّع/يطوي النص الكامل
+            Column(modifier = Modifier.clickable(onClick = onToggle)) {
+                Text(
+                    text = m.title.ifBlank { m.url },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = if (expanded) 4 else 2,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-            Text(
-                text = metaLine(m),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                Spacer(Modifier.height(2.dp))
+
+                Text(
+                    text = metaLine(m),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // معاينة مؤقتة: مكانها لاحقًا النقاط الثلاث والاقتباس
+                if (!expanded && m.text.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = m.text.trim(),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
 
             if (expanded) {
                 Spacer(Modifier.height(8.dp))
@@ -222,29 +250,52 @@ private fun MaterialRow(
                         )
                     }
                 }
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+            Spacer(Modifier.height(4.dp))
+
+            // صف الأزرار الثابت
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = onToggle,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    TextButton(onClick = onCopy) {
-                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("نسخ")
-                    }
+                    Text(
+                        text = if (expanded) "إخفاء النص" else "النص الكامل",
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1
+                    )
+                }
 
-                    TextButton(onClick = onDelete) {
-                        Icon(Icons.Filled.DeleteOutline, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("حذف")
-                    }
+                IconButton(
+                    onClick = onOpen,
+                    enabled = canOpen,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح الرابط في المتصفح")
+                }
+
+                IconButton(onClick = onShare, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.Share, contentDescription = "مشاركة")
+                }
+
+                IconButton(onClick = onCopy, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = "نسخ")
+                }
+
+                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.DeleteOutline, contentDescription = "حذف")
                 }
             }
         }
     }
 }
 
-/** نص المادة للنسخ: العنوان، الرابط، النص، ثم الروابط (كل رابط في سطر مستقل بينها سطر فارغ). */
+/** نص المادة للنسخ والمشاركة: العنوان، الرابط، النص، ثم الروابط (كل رابط في سطر مستقل بينها سطر فارغ). */
 private fun materialToText(m: MaterialItem): String = buildString {
     if (m.title.isNotBlank()) append(m.title).append('\n')
     if (m.url.isNotBlank()) append(m.url).append('\n')
@@ -272,6 +323,43 @@ private fun copyToClipboard(context: Context, text: String, okMessage: String) {
         if (ok) okMessage else "تعذّر النسخ (قد يكون الحجم كبيرًا)",
         Toast.LENGTH_SHORT
     ).show()
+}
+
+/** فتح الرابط في متصفح خارجي. */
+private fun openExternally(context: Context, url: String) {
+    val ok = runCatching {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }.isSuccess
+
+    if (!ok) {
+        Toast.makeText(context, "تعذّر فتح الرابط (لا يوجد متصفح؟)", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** مشاركة نص المادة إلى أي تطبيق (مع إخفاء علبة المواد نفسها من القائمة). */
+private fun shareText(context: Context, text: String, subject: String) {
+    val ok = runCatching {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+        }
+        val chooser = Intent.createChooser(send, "مشاركة المادة")
+        if (Build.VERSION.SDK_INT >= 24) {
+            chooser.putExtra(
+                Intent.EXTRA_EXCLUDE_COMPONENTS,
+                arrayOf(ComponentName(context.packageName, "com.example.aichat.ShareReceiverActivity"))
+            )
+        }
+        if (context !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }.isSuccess
+
+    if (!ok) {
+        Toast.makeText(context, "تعذّرت المشاركة (قد يكون النص كبيرًا)", Toast.LENGTH_SHORT).show()
+    }
 }
 
 private fun metaLine(m: MaterialItem): String {
