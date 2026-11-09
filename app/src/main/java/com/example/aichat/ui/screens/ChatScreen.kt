@@ -354,6 +354,25 @@ fun ChatScreen(
             sender
         }
     }
+                
+        
+    // ── علبة المواد: معالجة الخلاصات في الخلفية (تعمل حين يكون ChatGPT/Venice جاهزًا) ──
+    val digestReady = chainWebSender != null && !webPageLoading && !webRuntimeMissing &&
+        !webSendInFlight && !isLoading
+    val digestHasWork = app.materialStore.items.any {
+        it.status == com.example.aichat.repository.MaterialStatus.PENDING ||
+            it.status == com.example.aichat.repository.MaterialStatus.PROCESSING
+    }
+    LaunchedEffect(digestReady, digestHasWork, chainWebSender) {
+        val sender = chainWebSender
+        if (digestReady && digestHasWork && sender != null) {
+            com.example.aichat.repository.MaterialDigestRunner.runPending(
+                store = app.materialStore,
+                sender = sender,
+                log = { app.logDebug(it) }
+            )
+        }
+    }
 
     // ── 1.ج.1: طي/فرد مربع الإدخال لتحرير مساحة للرسائل/محرك Arena المرئي ──
     var inputBarExpanded by rememberSaveable { mutableStateOf(true) }
