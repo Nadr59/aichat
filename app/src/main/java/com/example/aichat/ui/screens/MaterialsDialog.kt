@@ -186,8 +186,7 @@ private fun MaterialRow(
         (m.status == MaterialStatus.NONE || m.status == MaterialStatus.FAILED)
 
     val statusLine: String? = when (m.status) {
-        MaterialStatus.PENDING -> "⏳ بانتظار التلخيص (يعمل حين تكون محادثة ChatGPT أو Venice مفتوحة)"
-        MaterialStatus.PROCESSING -> "⚙️ جارٍ التلخيص…"
+                MaterialStatus.PENDING -> "⏳ بانتظار التلخيص"
         MaterialStatus.FAILED -> "❌ فشل التلخيص (التفاصيل في سجلات التشخيص)"
         else -> null
     }
