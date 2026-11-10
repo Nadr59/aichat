@@ -358,8 +358,8 @@ fun ChatScreen(
         
         // ── علبة المواد: معالجة الخلاصات في الخلفية (ويب جاهز، أو مزوّد API حين لا توجد منصة ويب) ──
     val digestViaApi = selectedWebPlatformId == null
-    val apiDigestSender: suspend (String, String) -> String? = remember(viewModel) {
-        { persona: String, input: String ->
+        val apiDigestSender = remember<suspend (String, String) -> String?>(viewModel) {
+        { persona, input ->
             viewModel.repository.sendMessage(
                 history = emptyList(),
                 userMessage = input,
@@ -369,7 +369,8 @@ fun ChatScreen(
                 agentPrompt = persona
             )
         }
-    }
+        }
+    
     val digestSender: (suspend (String, String) -> String?)? =
         if (digestViaApi) apiDigestSender else chainWebSender
     val digestReady = digestSender != null && !isLoading &&
