@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.aichat.data.model.AgentProfile
 import com.example.aichat.repository.MaterialItem
 import com.example.aichat.repository.MaterialStatus
 import com.example.aichat.repository.MaterialStore
@@ -36,17 +37,23 @@ import java.util.Locale
 /**
  * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا) مع بحث محلي.
  * كل مادة بطاقة: خلاصة (إن وُجدت) أو معاينة + أزرار
- * (إلى مربع الإدخال، لخّص، النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
+ * (إلى مربع الإدخال، وكيل، لخّص، النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
  * في الأسفل: «نسخ الكل» (الظاهر فقط) و«مسح الكل» (بتأكيد، ومعطّل أثناء البحث).
  *
  * onInsertToInput: يستلم نص المادة (عنوان + رابط + نص) ليضعه المستدعي في مربع الإدخال.
  * إن كان null يختفي الزر.
+ *
+ * agents + onRunAgent: زر «وكيل» يفتح قائمة بأسماء agents؛ عند الاختيار يُستدعى
+ * onRunAgent(نص المادة، الوكيل). المستدعي هو من يقرر إغلاق الحوار (حتى يبقى مفتوحًا
+ * إن لم تكن الظروف مناسبة). إن كان onRunAgent null يختفي الزر.
  */
 @Composable
 fun MaterialsDialog(
     store: MaterialStore,
     onDismiss: () -> Unit,
-    onInsertToInput: ((String) -> Unit)? = null
+    onInsertToInput: ((String) -> Unit)? = null,
+    agents: List<AgentProfile> = emptyList(),
+    onRunAgent: ((String, AgentProfile) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val list = store.items
@@ -128,6 +135,7 @@ fun MaterialsDialog(
                                 MaterialRow(
                                     m = m,
                                     expanded = expandedId == m.id,
+                                    agents = agents,
                                     onToggle = {
                                         expandedId = if (expandedId == m.id) null else m.id
                                     },
@@ -141,6 +149,9 @@ fun MaterialsDialog(
                                             ).show()
                                             onDismiss()
                                         }
+                                    },
+                                    onRunAgent = if (onRunAgent == null) null else {
+                                        { agent -> onRunAgent(materialToInputText(m), agent) }
                                     },
                                     onDigest = {
                                         store.update(m.id) { it.copy(status = MaterialStatus.PENDING) }
@@ -230,14 +241,18 @@ fun MaterialsDialog(
 private fun MaterialRow(
     m: MaterialItem,
     expanded: Boolean,
+    agents: List<AgentProfile>,
     onToggle: () -> Unit,
     onInsert: (() -> Unit)?,
+    onRunAgent: ((AgentProfile) -> Unit)?,
     onDigest: () -> Unit,
     onOpen: () -> Unit,
     onShare: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var agentMenu by remember { mutableStateOf(false) }
+
     val canOpen = m.url.startsWith("http://") || m.url.startsWith("https://")
     val digest = m.digest.takeIf { m.status == MaterialStatus.READY }
     val shownTitle = digest?.titleAr?.takeIf { it.isNotBlank() } ?: m.title.ifBlank { m.url }
@@ -393,6 +408,55 @@ private fun MaterialRow(
                 }
             }
 
+            if (onRunAgent != null) {
+                Box {
+                    TextButton(
+                        onClick = { agentMenu = true },
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "وكيل",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = agentMenu,
+                        onDismissRequest = { agentMenu = false }
+                    ) {
+                        if (agents.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("لا يوجد وكلاء. أضف وكيلًا من شاشة الوكلاء") },
+                                onClick = { agentMenu = false },
+                                enabled = false
+                            )
+                        } else {
+                            agents.forEach { a ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = a.name,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    onClick = {
+                                        agentMenu = false
+                                        onRunAgent(a)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             if (canDigest) {
                 TextButton(
                     onClick = onDigest,
@@ -485,7 +549,7 @@ private fun normalizeForSearch(s: String): String {
     return sb.toString().trim()
 }
 
-/** ما يوضع في مربع الإدخال: العنوان الأصلي، الرابط، ثم النص (بلا قائمة الروابط). */
+/** ما يوضع في مربع الإدخال (أو يُرسل إلى وكيل): العنوان الأصلي، الرابط، ثم النص (بلا قائمة الروابط). */
 private fun materialToInputText(m: MaterialItem): String = buildString {
     if (m.title.isNotBlank()) append(m.title).append('\n')
     if (m.url.isNotBlank()) append(m.url).append('\n')
