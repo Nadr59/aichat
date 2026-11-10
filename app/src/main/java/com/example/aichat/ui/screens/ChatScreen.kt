@@ -1686,10 +1686,45 @@ fun ChatScreen(
     onInsertToInput = { materialText ->
         val old = userInput.text
         val merged = if (old.isBlank()) materialText else old.trimEnd() + "\n\n" + materialText
-        userInput = TextFieldValue(
-            merged,
-            androidx.compose.ui.text.TextRange(merged.length)
-        )
+                userInput = TextFieldValue(merged, androidx.compose.ui.text.TextRange(merged.length))
+    },
+    agents = agentsViewModel.agents.collectAsState().value,
+    onRunAgent = { materialText, agent ->
+        if (isLoading) {
+            Toast.makeText(
+                context,
+                "هناك معالجة جارية. انتظر حتى تنتهي.",
+                Toast.LENGTH_LONG
+            ).show()
+        } else if (selectedImage != null) {
+            Toast.makeText(
+                context,
+                "السلسلة لا تدعم الصور الآن. أزل الصورة المحددة أولًا.",
+                Toast.LENGTH_LONG
+            ).show()
+        } else if (selectedWebPlatformId != null && !isHiddenAutoSendPlatform) {
+            Toast.makeText(
+                context,
+                "السلسلة على الويب تعمل مع ChatGPT وVenice فقط.",
+                Toast.LENGTH_LONG
+            ).show()
+        } else if (selectedWebPlatformId != null &&
+            (webPageLoading || webRuntimeMissing || webSendInFlight)
+        ) {
+            Toast.makeText(
+                context,
+                "منصة الويب غير جاهزة بعد (الصفحة تُحمَّل أو رسالة قيد الانتظار). حاول بعد قليل.",
+                Toast.LENGTH_LONG
+            ).show()
+        } else {
+            showMaterials = false
+            viewModel.runAgentChainSteps(
+                materialText,
+                listOf(ChainStepSpec(agentId = agent.id)),
+                channelKey = chainChannelKey,
+                sender = chainWebSender
+            )
+        }
     }
 )
     }
