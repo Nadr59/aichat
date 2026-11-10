@@ -34,10 +34,10 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا).
+ * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا) مع بحث محلي.
  * كل مادة بطاقة: خلاصة (إن وُجدت) أو معاينة + أزرار
  * (إلى مربع الإدخال، لخّص، النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
- * في الأسفل: «نسخ الكل» و«مسح الكل» (بتأكيد).
+ * في الأسفل: «نسخ الكل» (الظاهر فقط) و«مسح الكل» (بتأكيد، ومعطّل أثناء البحث).
  *
  * onInsertToInput: يستلم نص المادة (عنوان + رابط + نص) ليضعه المستدعي في مربع الإدخال.
  * إن كان null يختفي الزر.
@@ -52,6 +52,18 @@ fun MaterialsDialog(
     val list = store.items
     var expandedId by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+
+    val searching = query.isNotBlank()
+    val shown: List<MaterialItem> = if (!searching) {
+        list.toList()
+    } else {
+        val terms = normalizeForSearch(query).split(' ').filter { it.isNotEmpty() }
+        list.filter { m ->
+            val hay = normalizeForSearch(searchableText(m))
+            terms.all { hay.contains(it) }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -63,7 +75,8 @@ fun MaterialsDialog(
                 Icon(Icons.Filled.Inbox, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "علبة المواد (${list.size})",
+                    text = if (searching) "علبة المواد (${shown.size} من ${list.size})"
+                    else "علبة المواد (${list.size})",
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = onDismiss) {
@@ -78,53 +91,82 @@ fun MaterialsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 420.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(list, key = { it.id }) { m ->
-                        MaterialRow(
-                            m = m,
-                            expanded = expandedId == m.id,
-                            onToggle = {
-                                expandedId = if (expandedId == m.id) null else m.id
-                            },
-                            onInsert = if (onInsertToInput == null) null else {
-                                {
-                                    onInsertToInput(materialToInputText(m))
-                                    Toast.makeText(
-                                        context,
-                                        "أُضيفت المادة إلى مربع الإدخال",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                    onDismiss()
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("ابحث في العلبة") },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Search, contentDescription = null)
+                        },
+                        trailingIcon = {
+                            if (searching) {
+                                IconButton(onClick = { query = "" }) {
+                                    Icon(Icons.Filled.Clear, contentDescription = "مسح البحث")
                                 }
-                            },
-                            onDigest = {
-                                store.update(m.id) { it.copy(status = MaterialStatus.PENDING) }
-                            },
-                            onOpen = { openExternally(context, m.url) },
-                            onShare = {
-                                shareText(
-                                    context,
-                                    materialToText(m),
-                                    m.title.ifBlank { m.url }
-                                )
-                            },
-                            onCopy = {
-                                copyToClipboard(
-                                    context,
-                                    materialToText(m),
-                                    "تم نسخ المادة"
-                                )
-                            },
-                            onDelete = {
-                                if (expandedId == m.id) expandedId = null
-                                store.remove(m.id)
                             }
+                        }
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    if (shown.isEmpty()) {
+                        Text(
+                            "لا نتائج لـ «${query.trim()}»",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 380.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(shown, key = { it.id }) { m ->
+                                MaterialRow(
+                                    m = m,
+                                    expanded = expandedId == m.id,
+                                    onToggle = {
+                                        expandedId = if (expandedId == m.id) null else m.id
+                                    },
+                                    onInsert = if (onInsertToInput == null) null else {
+                                        {
+                                            onInsertToInput(materialToInputText(m))
+                                            Toast.makeText(
+                                                context,
+                                                "أُضيفت المادة إلى مربع الإدخال",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            onDismiss()
+                                        }
+                                    },
+                                    onDigest = {
+                                        store.update(m.id) { it.copy(status = MaterialStatus.PENDING) }
+                                    },
+                                    onOpen = { openExternally(context, m.url) },
+                                    onShare = {
+                                        shareText(
+                                            context,
+                                            materialToText(m),
+                                            m.title.ifBlank { m.url }
+                                        )
+                                    },
+                                    onCopy = {
+                                        copyToClipboard(
+                                            context,
+                                            materialToText(m),
+                                            "تم نسخ المادة"
+                                        )
+                                    },
+                                    onDelete = {
+                                        if (expandedId == m.id) expandedId = null
+                                        store.remove(m.id)
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -133,15 +175,15 @@ fun MaterialsDialog(
             Row {
                 TextButton(
                     onClick = {
-                        // نأخذ لقطة من القائمة لحظة الضغط
-                        val snapshot = list.toList()
+                        // نأخذ لقطة من المواد الظاهرة لحظة الضغط
+                        val snapshot = shown.toList()
                         copyToClipboard(
                             context,
                             snapshot.joinToString("\n\n════════\n\n") { materialToText(it) },
                             "تم نسخ ${snapshot.size} مادة"
                         )
                     },
-                    enabled = list.isNotEmpty()
+                    enabled = shown.isNotEmpty()
                 ) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
@@ -150,7 +192,7 @@ fun MaterialsDialog(
 
                 TextButton(
                     onClick = { confirmClear = true },
-                    enabled = list.isNotEmpty()
+                    enabled = list.isNotEmpty() && !searching
                 ) {
                     Icon(Icons.Filled.DeleteOutline, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
@@ -410,6 +452,37 @@ private fun MaterialRow(
             }
         }
     }
+}
+
+/** كل ما يُبحث فيه عن المادة (الخلاصة إن وُجدت، ثم الأصل). */
+private fun searchableText(m: MaterialItem): String = buildString {
+    append(m.title).append(' ')
+    m.digest?.let { d ->
+        append(d.titleAr).append(' ')
+        for (b in d.bullets) append(b).append(' ')
+        append(d.keyQuote).append(' ')
+    }
+    append(m.host).append(' ')
+    append(m.url).append(' ')
+    append(m.text)
+}
+
+/**
+ * تطبيع خفيف للبحث العربي: يحذف التشكيل والتطويل، ويوحّد الألف والياء والتاء المربوطة،
+ * ويحوّل الأحرف اللاتينية إلى صغيرة.
+ */
+private fun normalizeForSearch(s: String): String {
+    val sb = StringBuilder(s.length)
+    for (ch in s) {
+        when (ch) {
+            in '\u064B'..'\u065F', '\u0670', '\u0640' -> {}
+            'أ', 'إ', 'آ', 'ٱ' -> sb.append('ا')
+            'ى' -> sb.append('ي')
+            'ة' -> sb.append('ه')
+            else -> sb.append(ch.lowercaseChar())
+        }
+    }
+    return sb.toString().trim()
 }
 
 /** ما يوضع في مربع الإدخال: العنوان الأصلي، الرابط، ثم النص (بلا قائمة الروابط). */
