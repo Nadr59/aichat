@@ -1681,9 +1681,17 @@ fun ChatScreen(
         // علبة المواد
     if (showMaterials) {
         MaterialsDialog(
-            store = app.materialStore,
-            onDismiss = { showMaterials = false }
+    store = app.materialStore,
+    onDismiss = { showMaterials = false },
+    onInsertToInput = { materialText ->
+        val old = userInput.text
+        val merged = if (old.isBlank()) materialText else old.trimEnd() + "\n\n" + materialText
+        userInput = TextFieldValue(
+            merged,
+            androidx.compose.ui.text.TextRange(merged.length)
         )
+    }
+)
     }
 
 
