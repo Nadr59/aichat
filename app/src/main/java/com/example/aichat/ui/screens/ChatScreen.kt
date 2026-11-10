@@ -356,15 +356,30 @@ fun ChatScreen(
     }
                 
         
-    // ── علبة المواد: معالجة الخلاصات في الخلفية (تعمل حين يكون ChatGPT/Venice جاهزًا) ──
-    val digestReady = chainWebSender != null && !webPageLoading && !webRuntimeMissing &&
-        !webSendInFlight && !isLoading
+        // ── علبة المواد: معالجة الخلاصات في الخلفية (ويب جاهز، أو مزوّد API حين لا توجد منصة ويب) ──
+    val digestViaApi = selectedWebPlatformId == null
+    val apiDigestSender: suspend (String, String) -> String? = remember(viewModel) {
+        { persona: String, input: String ->
+            viewModel.repository.sendMessage(
+                history = emptyList(),
+                userMessage = input,
+                imageBase64 = null,
+                memoryContext = "",
+                hasMemorySource = false,
+                agentPrompt = persona
+            )
+        }
+    }
+    val digestSender: (suspend (String, String) -> String?)? =
+        if (digestViaApi) apiDigestSender else chainWebSender
+    val digestReady = digestSender != null && !isLoading &&
+        (digestViaApi || (!webPageLoading && !webRuntimeMissing && !webSendInFlight))
     val digestHasWork = app.materialStore.items.any {
         it.status == com.example.aichat.repository.MaterialStatus.PENDING ||
             it.status == com.example.aichat.repository.MaterialStatus.PROCESSING
     }
-    LaunchedEffect(digestReady, digestHasWork, chainWebSender) {
-        val sender = chainWebSender
+    LaunchedEffect(digestReady, digestHasWork, digestViaApi, chainWebSender) {
+        val sender = if (digestViaApi) apiDigestSender else chainWebSender
         if (digestReady && digestHasWork && sender != null) {
             com.example.aichat.repository.MaterialDigestRunner.runPending(
                 store = app.materialStore,
