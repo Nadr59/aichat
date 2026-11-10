@@ -35,13 +35,18 @@ import java.util.Locale
 
 /**
  * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا).
- * كل مادة بطاقة: خلاصة (إن وُجدت) أو معاينة + أزرار (النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
+ * كل مادة بطاقة: خلاصة (إن وُجدت) أو معاينة + أزرار
+ * (إلى مربع الإدخال، لخّص، النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
  * في الأسفل: «نسخ الكل» و«مسح الكل» (بتأكيد).
+ *
+ * onInsertToInput: يستلم نص المادة (عنوان + رابط + نص) ليضعه المستدعي في مربع الإدخال.
+ * إن كان null يختفي الزر.
  */
 @Composable
 fun MaterialsDialog(
     store: MaterialStore,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onInsertToInput: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val list = store.items
@@ -85,6 +90,17 @@ fun MaterialsDialog(
                             expanded = expandedId == m.id,
                             onToggle = {
                                 expandedId = if (expandedId == m.id) null else m.id
+                            },
+                            onInsert = if (onInsertToInput == null) null else {
+                                {
+                                    onInsertToInput(materialToInputText(m))
+                                    Toast.makeText(
+                                        context,
+                                        "أُضيفت المادة إلى مربع الإدخال",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    onDismiss()
+                                }
                             },
                             onDigest = {
                                 store.update(m.id) { it.copy(status = MaterialStatus.PENDING) }
@@ -173,6 +189,7 @@ private fun MaterialRow(
     m: MaterialItem,
     expanded: Boolean,
     onToggle: () -> Unit,
+    onInsert: (() -> Unit)?,
     onDigest: () -> Unit,
     onOpen: () -> Unit,
     onShare: () -> Unit,
@@ -186,7 +203,8 @@ private fun MaterialRow(
         (m.status == MaterialStatus.NONE || m.status == MaterialStatus.FAILED)
 
     val statusLine: String? = when (m.status) {
-                MaterialStatus.PENDING -> "⏳ بانتظار التلخيص"
+        MaterialStatus.PENDING -> "⏳ بانتظار التلخيص"
+        MaterialStatus.PROCESSING -> "⚙️ جارٍ التلخيص…"
         MaterialStatus.FAILED -> "❌ فشل التلخيص (التفاصيل في سجلات التشخيص)"
         else -> null
     }
@@ -315,6 +333,24 @@ private fun MaterialRow(
                 }
             }
 
+            if (onInsert != null) {
+                TextButton(
+                    onClick = onInsert,
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "إلى مربع الإدخال",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+
             if (canDigest) {
                 TextButton(
                     onClick = onDigest,
@@ -374,6 +410,14 @@ private fun MaterialRow(
             }
         }
     }
+}
+
+/** ما يوضع في مربع الإدخال: العنوان الأصلي، الرابط، ثم النص (بلا قائمة الروابط). */
+private fun materialToInputText(m: MaterialItem): String = buildString {
+    if (m.title.isNotBlank()) append(m.title).append('\n')
+    if (m.url.isNotBlank()) append(m.url).append('\n')
+    if (isNotEmpty()) append('\n')
+    append(m.text.trim())
 }
 
 /** نص المادة للنسخ والمشاركة: الخلاصة (إن وُجدت)، العنوان، الرابط، النص، ثم الروابط. */
