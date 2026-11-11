@@ -384,6 +384,7 @@ fun ChatScreen(
         if (digestReady && digestHasWork && sender != null) {
             com.example.aichat.repository.MaterialDigestRunner.runPending(
                 store = app.materialStore,
+    boxStore = app.boxStore,
                 sender = sender,
                 log = { app.logDebug(it) }
             )
