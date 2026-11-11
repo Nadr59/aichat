@@ -1,3 +1,4 @@
+
 package com.example.aichat.ui.screens
 
 import android.app.Activity
@@ -14,8 +15,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -40,6 +43,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** حدّ التحذير لطول مدخل الوكيل على العلبة (بالأحرف). تحذير فقط، لا منع. */
+private const val BOX_AGENT_SOFT_LIMIT = 12000
+
 /**
  * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا) مع بحث محلي،
  * وعلب صغيرة (boxStore) تجمع مواد مختارة تحت اسم وسؤال اختياري.
@@ -48,11 +54,12 @@ import java.util.Locale
  * (إلى مربع الإدخال، وكيل، لخّص، النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
  * في الأسفل: «نسخ الكل» (الظاهر فقط) و«مسح الكل» (بتأكيد، ومعطّل أثناء البحث وداخل العلب).
  *
- * onInsertToInput: يستلم نص المادة (عنوان + رابط + نص) ليضعه المستدعي في مربع الإدخال.
+ * onInsertToInput: يستلم نصًا ليضعه المستدعي في مربع الإدخال (مادة، أو ملخص علبة).
  * إن كان null يختفي الزر.
  *
  * agents + onRunAgent: زر «وكيل» يفتح قائمة بأسماء agents؛ عند الاختيار يُستدعى
- * onRunAgent(نص المادة، الوكيل). المستدعي هو من يقرر إغلاق الحوار.
+ * onRunAgent(النص، الوكيل). المستدعي هو من يقرر إغلاق الحوار.
+ * يُستعمل للمادة الواحدة (نصها) وللعلبة (خلاصات موادها المُلخَّصة).
  *
  * boxStore: إن كان null تختفي واجهة العلب كلها.
  */
@@ -81,6 +88,10 @@ fun MaterialsDialog(
     var showCreateName by remember { mutableStateOf(false) }
     var editingBoxId by remember { mutableStateOf<String?>(null) }
     var confirmDeleteBoxId by remember { mutableStateOf<String?>(null) }
+
+    // وكيل العلبة: قائمة الاختيار، ثم شاشة المعاينة
+    var boxAgentMenu by remember { mutableStateOf(false) }
+    var boxAgentFor by remember { mutableStateOf<AgentProfile?>(null) }
 
     // المواد الحية فقط: معرّفات العلب الميتة تُرشَح هنا عند كل عرض
     val aliveIds = list.map { it.id }.toHashSet()
@@ -271,6 +282,15 @@ fun MaterialsDialog(
 
                     // رأس العلبة المختارة
                     if (currentBox != null && !creating) {
+                        // base هنا = كل مواد العلبة الحية (غير مصفّاة بالبحث)
+                        val readyCount = base.count { isReady(it) }
+                        val notReady = base.size - readyCount
+                        val digestable = base.filter { canDigestItem(it) }
+                        val inQueue = base.count {
+                            it.status == MaterialStatus.PENDING ||
+                                it.status == MaterialStatus.PROCESSING
+                        }
+
                         Spacer(Modifier.height(8.dp))
                         Surface(
                             tonalElevation = 1.dp,
@@ -310,6 +330,162 @@ fun MaterialsDialog(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
+
+                                // إشعار المواد غير المُلخَّصة
+                                if (base.isNotEmpty() && notReady > 0) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = if (readyCount == 0) {
+                                            "لا توجد مادة مُلخَّصة في هذه العلبة. " +
+                                                "زر «وكيل» معطّل حتى تُلخَّص مادة واحدة على الأقل."
+                                        } else {
+                                            "$notReady من ${base.size} مادة غير مُلخَّصة " +
+                                                "وستُستبعد من الوكيل."
+                                        } + if (inQueue > 0) " ($inQueue في الطابور)" else "",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    if (digestable.isNotEmpty()) {
+                                        TextButton(
+                                            onClick = {
+                                                for (d in digestable) {
+                                                    store.update(d.id) {
+                                                        it.copy(status = MaterialStatus.PENDING)
+                                                    }
+                                                }
+                                                Toast.makeText(
+                                                    context,
+                                                    "أُضيفت ${digestable.size} مادة إلى طابور التلخيص",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 4.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.AutoAwesome,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                text = "لخّصها الآن (${digestable.size})",
+                                                style = MaterialTheme.typography.labelMedium
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // أزرار العلبة كلها
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (onRunAgent != null) {
+                                        Box {
+                                            TextButton(
+                                                onClick = { boxAgentMenu = true },
+                                                enabled = readyCount > 0,
+                                                contentPadding = PaddingValues(horizontal = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Person,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = "وكيل",
+                                                    style = MaterialTheme.typography.labelMedium
+                                                )
+                                            }
+                                            DropdownMenu(
+                                                expanded = boxAgentMenu,
+                                                onDismissRequest = { boxAgentMenu = false }
+                                            ) {
+                                                if (agents.isEmpty()) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("لا يوجد وكلاء. أضف وكيلًا من شاشة الوكلاء") },
+                                                        onClick = { boxAgentMenu = false },
+                                                        enabled = false
+                                                    )
+                                                } else {
+                                                    agents.forEach { a ->
+                                                        DropdownMenuItem(
+                                                            text = {
+                                                                Text(
+                                                                    text = a.name,
+                                                                    maxLines = 1,
+                                                                    overflow = TextOverflow.Ellipsis
+                                                                )
+                                                            },
+                                                            onClick = {
+                                                                boxAgentMenu = false
+                                                                boxAgentFor = a
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (onInsertToInput != null) {
+                                        TextButton(
+                                            onClick = {
+                                                onInsertToInput(
+                                                    boxToInputText(
+                                                        currentBox.name,
+                                                        currentBox.question,
+                                                        base
+                                                    )
+                                                )
+                                                Toast.makeText(
+                                                    context,
+                                                    "أُضيفت العلبة إلى مربع الإدخال",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                onDismiss()
+                                            },
+                                            enabled = base.isNotEmpty(),
+                                            contentPadding = PaddingValues(horizontal = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = "إلى الإدخال",
+                                                style = MaterialTheme.typography.labelMedium
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.weight(1f))
+
+                                    IconButton(
+                                        onClick = {
+                                            copyToClipboard(
+                                                context,
+                                                boxToText(currentBox.name, currentBox.question, base),
+                                                "تم نسخ العلبة (${base.size} مادة)"
+                                            )
+                                        },
+                                        enabled = base.isNotEmpty(),
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Filled.ContentCopy, contentDescription = "نسخ العلبة")
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            shareText(
+                                                context,
+                                                boxToText(currentBox.name, currentBox.question, base),
+                                                currentBox.name
+                                            )
+                                        },
+                                        enabled = base.isNotEmpty(),
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Share, contentDescription = "مشاركة العلبة")
+                                    }
+                                }
                             }
                         }
                     }
@@ -329,7 +505,7 @@ fun MaterialsDialog(
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 380.dp),
+                                .heightIn(max = if (currentBox != null && !creating) 260.dp else 380.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(shown, key = { it.id }) { m ->
@@ -509,6 +685,108 @@ fun MaterialsDialog(
             }
         )
     }
+
+    // معاينة تشغيل وكيل على العلبة
+    val previewAgent = boxAgentFor
+    if (previewAgent != null && currentBox != null && onRunAgent != null) {
+        BoxAgentPreviewDialog(
+            box = currentBox,
+            agent = previewAgent,
+            items = base,
+            onRun = { text ->
+                boxAgentFor = null
+                onRunAgent(text, previewAgent)
+            },
+            onDismiss = { boxAgentFor = null }
+        )
+    }
+}
+
+/** معاينة قبل تشغيل وكيل على العلبة: ما سيدخل وما سيُستبعد، والحجم، والسؤال لهذه المرة. */
+@Composable
+private fun BoxAgentPreviewDialog(
+    box: MaterialBox,
+    agent: AgentProfile,
+    items: List<MaterialItem>,
+    onRun: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    // تعديل السؤال هنا لهذه المرة فقط ولا يغيّر المحفوظ
+    var question by remember { mutableStateOf(box.question) }
+
+    val ready = items.filter { isReady(it) }
+    val skipped = items.size - ready.size
+    val text = boxToAgentInput(box.name, question, ready)
+    val tooLong = text.length > BOX_AGENT_SOFT_LIMIT
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("تشغيل «${agent.name}» على العلبة") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "العلبة: ${box.name}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "المواد الداخلة (بخلاصاتها): ${ready.size}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (skipped > 0) {
+                    Text(
+                        text = "المستبعدة لأنها غير مُلخَّصة: $skipped",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Text(
+                    text = "حجم المدخل التقريبي: ${text.length} حرف",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (tooLong) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "⚠️ المدخل أطول من $BOX_AGENT_SOFT_LIMIT حرف وقد يتجاوز ما يتحمله النموذج. " +
+                            "يمكنك تقليل مواد العلبة.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = question,
+                    onValueChange = { question = it.take(BOX_QUESTION_MAX) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 4,
+                    label = { Text("السؤال لهذه المرة") },
+                    placeholder = { Text("إن تُرك فارغًا: لخّص وقارن بين هذه المواد") }
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "التعديل هنا لهذه المرة فقط ولا يغيّر سؤال العلبة المحفوظ. " +
+                        "سيظهر المدخل كاملًا في الدردشة كرسالة منك.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onRun(text) },
+                enabled = ready.isNotEmpty()
+            ) { Text("تشغيل") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("إلغاء") }
+        }
+    )
 }
 
 /** حوار اسم العلبة وسؤالها الاختياري (للإنشاء والتعديل). */
@@ -581,8 +859,7 @@ private fun MaterialRow(
     val canOpen = m.url.startsWith("http://") || m.url.startsWith("https://")
     val digest = m.digest.takeIf { m.status == MaterialStatus.READY }
     val shownTitle = digest?.titleAr?.takeIf { it.isNotBlank() } ?: m.title.ifBlank { m.url }
-    val canDigest = m.quality != "weak" &&
-        (m.status == MaterialStatus.NONE || m.status == MaterialStatus.FAILED)
+    val canDigest = canDigestItem(m)
 
     val statusLine: String? = when (m.status) {
         MaterialStatus.PENDING -> "⏳ بانتظار التلخيص"
@@ -861,6 +1138,15 @@ private fun MaterialRow(
     }
 }
 
+/** مادة مُلخَّصة وجاهزة (حالتها READY ولها خلاصة). */
+private fun isReady(m: MaterialItem): Boolean =
+    m.status == MaterialStatus.READY && m.digest != null
+
+/** هل يصحّ وضع المادة في طابور التلخيص (غير ضعيفة، ولم تُلخَّص أو فشلت). */
+private fun canDigestItem(m: MaterialItem): Boolean =
+    m.quality != "weak" &&
+        (m.status == MaterialStatus.NONE || m.status == MaterialStatus.FAILED)
+
 /** كل ما يُبحث فيه عن المادة (الخلاصة إن وُجدت، ثم الأصل). */
 private fun searchableText(m: MaterialItem): String = buildString {
     append(m.title).append(' ')
@@ -898,6 +1184,67 @@ private fun materialToInputText(m: MaterialItem): String = buildString {
     if (m.url.isNotBlank()) append(m.url).append('\n')
     if (isNotEmpty()) append('\n')
     append(m.text.trim())
+}
+
+/**
+ * مدخل وكيل العلبة: السؤال (أو تعليمة عامة)، ثم خلاصات المواد المُلخَّصة بأرقام [م1]…،
+ * ثم قسم «المصادر» بالروابط الحقيقية من رابط كل مادة (الخلاصة نفسها لا تحمل روابط).
+ */
+private fun boxToAgentInput(
+    boxName: String,
+    question: String,
+    ready: List<MaterialItem>
+): String = buildString {
+    val q = question.trim().ifBlank { "لخّص وقارن بين هذه المواد." }
+    append(q).append("\n\n")
+    append("العلبة: ").append(boxName).append('\n')
+    append("فيما يلي خلاصات ").append(ready.size).append(" مادة. ")
+    append("اعتمد عليها وحدها، واذكر رقم المادة بين قوسين مثل [م1] عند كل معلومة تأخذها منها. ")
+    append("إن لم تجد فيها ما يجيب فقل ذلك صراحة ولا تخمّن.\n\n")
+
+    ready.forEachIndexed { i, m ->
+        val d = m.digest ?: return@forEachIndexed
+        append("[م").append(i + 1).append("] ")
+        append(d.titleAr.ifBlank { m.title.ifBlank { m.url } }).append('\n')
+        for (b in d.bullets) append("• ").append(b).append('\n')
+        if (d.keyQuote.isNotBlank()) append("« ").append(d.keyQuote).append(" »\n")
+        append('\n')
+    }
+
+    append("المصادر:\n")
+    ready.forEachIndexed { i, m ->
+        append("[م").append(i + 1).append("] ")
+        append(if (m.url.isNotBlank()) m.url else "(بلا رابط)").append('\n')
+    }
+}
+
+/** ما يوضع في مربع الإدخال للعلبة: الاسم والسؤال وقائمة العناوين والروابط فقط (دون الخلاصات). */
+private fun boxToInputText(
+    boxName: String,
+    question: String,
+    items: List<MaterialItem>
+): String = buildString {
+    append("علبة: ").append(boxName).append('\n')
+    if (question.isNotBlank()) append("السؤال: ").append(question.trim()).append('\n')
+    append("\nالمواد (").append(items.size).append("):\n")
+    items.forEachIndexed { i, m ->
+        val t = m.title.ifBlank { m.digest?.titleAr.orEmpty() }.ifBlank { m.url }
+        append(i + 1).append(". ").append(t).append('\n')
+        if (m.url.isNotBlank() && m.url != t) append("   ").append(m.url).append('\n')
+    }
+}
+
+/** نص العلبة كلها للنسخ والمشاركة: الرأس ثم كل مادة كاملة. */
+private fun boxToText(
+    boxName: String,
+    question: String,
+    items: List<MaterialItem>
+): String = buildString {
+    append("علبة: ").append(boxName).append('\n')
+    if (question.isNotBlank()) append("السؤال: ").append(question.trim()).append('\n')
+    append("عدد المواد: ").append(items.size)
+    append("\n\n════════\n\n")
+    append(items.joinToString("\n\n════════\n\n") { materialToText(it) })
 }
 
 /** نص المادة للنسخ والمشاركة: الخلاصة (إن وُجدت)، العنوان، الرابط، النص، ثم الروابط. */
@@ -991,3 +1338,4 @@ private fun metaLine(m: MaterialItem): String {
 
     return parts.joinToString(" • ")
 }
+
