@@ -384,7 +384,7 @@ fun ChatScreen(
         if (digestReady && digestHasWork && sender != null) {
             com.example.aichat.repository.MaterialDigestRunner.runPending(
                 store = app.materialStore,
-    boxStore = app.boxStore,
+    
                 sender = sender,
                 log = { app.logDebug(it) }
             )
@@ -1681,8 +1681,9 @@ fun ChatScreen(
     }
         // علبة المواد
     if (showMaterials) {
-        MaterialsDialog(
+        MaterialsDialog( 
     store = app.materialStore,
+   boxStore = app.boxStore,
     onDismiss = { showMaterials = false },
     onInsertToInput = { materialText ->
         val old = userInput.text
