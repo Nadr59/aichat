@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -27,6 +28,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.aichat.data.model.AgentProfile
+import com.example.aichat.repository.BOX_NAME_MAX
+import com.example.aichat.repository.BOX_QUESTION_MAX
+import com.example.aichat.repository.BoxStore
+import com.example.aichat.repository.MAX_BOXES
+import com.example.aichat.repository.MaterialBox
 import com.example.aichat.repository.MaterialItem
 import com.example.aichat.repository.MaterialStatus
 import com.example.aichat.repository.MaterialStore
@@ -35,41 +41,77 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا) مع بحث محلي.
+ * حوار علبة المواد: قائمة المواد الملتقطة (الأحدث أولًا) مع بحث محلي،
+ * وعلب صغيرة (boxStore) تجمع مواد مختارة تحت اسم وسؤال اختياري.
+ *
  * كل مادة بطاقة: خلاصة (إن وُجدت) أو معاينة + أزرار
  * (إلى مربع الإدخال، وكيل، لخّص، النص الكامل، فتح الرابط، مشاركة، نسخ، حذف).
- * في الأسفل: «نسخ الكل» (الظاهر فقط) و«مسح الكل» (بتأكيد، ومعطّل أثناء البحث).
+ * في الأسفل: «نسخ الكل» (الظاهر فقط) و«مسح الكل» (بتأكيد، ومعطّل أثناء البحث وداخل العلب).
  *
  * onInsertToInput: يستلم نص المادة (عنوان + رابط + نص) ليضعه المستدعي في مربع الإدخال.
  * إن كان null يختفي الزر.
  *
  * agents + onRunAgent: زر «وكيل» يفتح قائمة بأسماء agents؛ عند الاختيار يُستدعى
- * onRunAgent(نص المادة، الوكيل). المستدعي هو من يقرر إغلاق الحوار (حتى يبقى مفتوحًا
- * إن لم تكن الظروف مناسبة). إن كان onRunAgent null يختفي الزر.
+ * onRunAgent(نص المادة، الوكيل). المستدعي هو من يقرر إغلاق الحوار.
+ *
+ * boxStore: إن كان null تختفي واجهة العلب كلها.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaterialsDialog(
     store: MaterialStore,
     onDismiss: () -> Unit,
     onInsertToInput: ((String) -> Unit)? = null,
     agents: List<AgentProfile> = emptyList(),
-    onRunAgent: ((String, AgentProfile) -> Unit)? = null
+    onRunAgent: ((String, AgentProfile) -> Unit)? = null,
+    boxStore: BoxStore? = null
 ) {
     val context = LocalContext.current
     val list = store.items
+    val boxList: List<MaterialBox> = boxStore?.boxes ?: emptyList()
+
     var expandedId by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
 
-    val searching = query.isNotBlank()
-    val shown: List<MaterialItem> = if (!searching) {
+    // العلب
+    var selectedBoxId by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showCreateName by remember { mutableStateOf(false) }
+    var editingBoxId by remember { mutableStateOf<String?>(null) }
+    var confirmDeleteBoxId by remember { mutableStateOf<String?>(null) }
+
+    // المواد الحية فقط: معرّفات العلب الميتة تُرشَح هنا عند كل عرض
+    val aliveIds = list.map { it.id }.toHashSet()
+    val currentBox: MaterialBox? =
+        if (selectedBoxId == null) null else boxList.firstOrNull { it.id == selectedBoxId }
+
+    val base: List<MaterialItem> = if (currentBox == null) {
         list.toList()
     } else {
+        val ids = currentBox.materialIds.toHashSet()
+        list.filter { it.id in ids }
+    }
+
+    val searching = query.isNotBlank()
+    val shown: List<MaterialItem> = if (!searching) {
+        base
+    } else {
         val terms = normalizeForSearch(query).split(' ').filter { it.isNotEmpty() }
-        list.filter { m ->
+        base.filter { m ->
             val hay = normalizeForSearch(searchableText(m))
             terms.all { hay.contains(it) }
         }
+    }
+
+    val titleText = when {
+        creating -> "علبة جديدة"
+        currentBox != null ->
+            if (searching) "${currentBox.name} (${shown.size} من ${base.size})"
+            else "${currentBox.name} (${base.size})"
+        searching -> "علبة المواد (${shown.size} من ${list.size})"
+        else -> "علبة المواد (${list.size})"
     }
 
     AlertDialog(
@@ -82,9 +124,10 @@ fun MaterialsDialog(
                 Icon(Icons.Filled.Inbox, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (searching) "علبة المواد (${shown.size} من ${list.size})"
-                    else "علبة المواد (${list.size})",
-                    modifier = Modifier.weight(1f)
+                    text = titleText,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.Close, contentDescription = "إغلاق")
@@ -117,11 +160,169 @@ fun MaterialsDialog(
                         }
                     )
 
+                    // شرائح العلب
+                    if (boxStore != null && !creating) {
+                        Spacer(Modifier.height(8.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            item {
+                                FilterChip(
+                                    selected = currentBox == null,
+                                    onClick = {
+                                        selectedBoxId = null
+                                        expandedId = null
+                                    },
+                                    label = { Text("الكل (${list.size})") }
+                                )
+                            }
+                            items(boxList, key = { it.id }) { b ->
+                                val cnt = b.materialIds.count { it in aliveIds }
+                                FilterChip(
+                                    selected = currentBox?.id == b.id,
+                                    onClick = {
+                                        selectedBoxId = b.id
+                                        expandedId = null
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "${b.name} ($cnt)",
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                )
+                            }
+                            item {
+                                AssistChip(
+                                    onClick = {
+                                        if (boxList.size >= MAX_BOXES) {
+                                            Toast.makeText(
+                                                context,
+                                                "الحد الأقصى $MAX_BOXES علبة",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            creating = true
+                                            selection = emptySet()
+                                            selectedBoxId = null
+                                            expandedId = null
+                                            query = ""
+                                        }
+                                    },
+                                    label = { Text("＋ علبة جديدة") }
+                                )
+                            }
+                        }
+                    }
+
+                    // شريط وضع الإنشاء
+                    if (creating) {
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            tonalElevation = 3.dp,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "اختر المواد (${selection.size})",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    val allShownSelected =
+                                        shown.isNotEmpty() && shown.all { it.id in selection }
+                                    TextButton(
+                                        onClick = {
+                                            selection = if (allShownSelected) {
+                                                selection - shown.map { it.id }.toSet()
+                                            } else {
+                                                selection + shown.map { it.id }
+                                            }
+                                        },
+                                        enabled = shown.isNotEmpty()
+                                    ) {
+                                        Text(
+                                            if (allShownSelected) "إلغاء تحديد الظاهر" else "تحديد الظاهر",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = { showCreateName = true },
+                                        enabled = selection.isNotEmpty()
+                                    ) { Text("إضافة") }
+                                    TextButton(
+                                        onClick = {
+                                            creating = false
+                                            selection = emptySet()
+                                        }
+                                    ) { Text("إلغاء") }
+                                }
+                            }
+                        }
+                    }
+
+                    // رأس العلبة المختارة
+                    if (currentBox != null && !creating) {
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            tonalElevation = 1.dp,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = currentBox.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    IconButton(
+                                        onClick = { editingBoxId = currentBox.id },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Edit, contentDescription = "تعديل اسم العلبة وسؤالها")
+                                    }
+                                    IconButton(
+                                        onClick = { confirmDeleteBoxId = currentBox.id },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Filled.DeleteOutline, contentDescription = "حذف العلبة")
+                                    }
+                                }
+                                if (currentBox.question.isNotBlank()) {
+                                    Text(
+                                        text = "السؤال: ${currentBox.question}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(Modifier.height(8.dp))
 
                     if (shown.isEmpty()) {
                         Text(
-                            "لا نتائج لـ «${query.trim()}»",
+                            text = when {
+                                searching -> "لا نتائج لـ «${query.trim()}»"
+                                currentBox != null -> "العلبة فارغة (حُذفت موادها من العلبة الكبيرة)."
+                                else -> "لا مواد."
+                            },
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
@@ -136,6 +337,11 @@ fun MaterialsDialog(
                                     m = m,
                                     expanded = expandedId == m.id,
                                     agents = agents,
+                                    selectionMode = creating,
+                                    checked = m.id in selection,
+                                    onCheckedChange = { c ->
+                                        selection = if (c) selection + m.id else selection - m.id
+                                    },
                                     onToggle = {
                                         expandedId = if (expandedId == m.id) null else m.id
                                     },
@@ -174,6 +380,8 @@ fun MaterialsDialog(
                                     onDelete = {
                                         if (expandedId == m.id) expandedId = null
                                         store.remove(m.id)
+                                        selection = selection - m.id
+                                        boxStore?.pruneDead(store.items.map { it.id }.toHashSet())
                                     }
                                 )
                             }
@@ -194,7 +402,7 @@ fun MaterialsDialog(
                             "تم نسخ ${snapshot.size} مادة"
                         )
                     },
-                    enabled = shown.isNotEmpty()
+                    enabled = shown.isNotEmpty() && !creating
                 ) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
@@ -203,7 +411,7 @@ fun MaterialsDialog(
 
                 TextButton(
                     onClick = { confirmClear = true },
-                    enabled = list.isNotEmpty() && !searching
+                    enabled = list.isNotEmpty() && !searching && currentBox == null && !creating
                 ) {
                     Icon(Icons.Filled.DeleteOutline, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
@@ -225,7 +433,9 @@ fun MaterialsDialog(
                 TextButton(
                     onClick = {
                         store.clear()
+                        boxStore?.pruneDead(emptySet())
                         expandedId = null
+                        selection = emptySet()
                         confirmClear = false
                     }
                 ) { Text("مسح") }
@@ -235,6 +445,118 @@ fun MaterialsDialog(
             }
         )
     }
+
+    // إنشاء علبة: الاسم والسؤال
+    if (showCreateName && boxStore != null) {
+        BoxNameDialog(
+            title = "علبة جديدة (${selection.size} مادة)",
+            initialName = "",
+            initialQuestion = "",
+            confirmLabel = "إضافة",
+            onConfirm = { n, q ->
+                // نحفظ ترتيب العلبة الكبيرة لا ترتيب الضغط
+                val ids = list.filter { it.id in selection }.map { it.id }
+                val created = boxStore.add(n, q, ids)
+                if (created == null) {
+                    Toast.makeText(context, "تعذّر إنشاء العلبة", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "أُنشئت العلبة «${created.name}»", Toast.LENGTH_SHORT).show()
+                    selectedBoxId = created.id
+                }
+                creating = false
+                selection = emptySet()
+                showCreateName = false
+                query = ""
+            },
+            onDismiss = { showCreateName = false }
+        )
+    }
+
+    // تعديل علبة: الاسم والسؤال
+    val editingBox = editingBoxId?.let { id -> boxList.firstOrNull { it.id == id } }
+    if (editingBox != null && boxStore != null) {
+        BoxNameDialog(
+            title = "تعديل العلبة",
+            initialName = editingBox.name,
+            initialQuestion = editingBox.question,
+            confirmLabel = "حفظ",
+            onConfirm = { n, q ->
+                boxStore.update(editingBox.id, n, q)
+                editingBoxId = null
+            },
+            onDismiss = { editingBoxId = null }
+        )
+    }
+
+    // حذف علبة (العلبة فقط، لا المواد)
+    val deletingBox = confirmDeleteBoxId?.let { id -> boxList.firstOrNull { it.id == id } }
+    if (deletingBox != null && boxStore != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteBoxId = null },
+            title = { Text("حذف العلبة «${deletingBox.name}»؟") },
+            text = { Text("تُحذف العلبة فقط. المواد نفسها تبقى في العلبة الكبيرة.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        boxStore.remove(deletingBox.id)
+                        if (selectedBoxId == deletingBox.id) selectedBoxId = null
+                        confirmDeleteBoxId = null
+                    }
+                ) { Text("حذف") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteBoxId = null }) { Text("إلغاء") }
+            }
+        )
+    }
+}
+
+/** حوار اسم العلبة وسؤالها الاختياري (للإنشاء والتعديل). */
+@Composable
+private fun BoxNameDialog(
+    title: String,
+    initialName: String,
+    initialQuestion: String,
+    confirmLabel: String,
+    onConfirm: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var question by remember { mutableStateOf(initialQuestion) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(BOX_NAME_MAX) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("اسم العلبة") }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = question,
+                    onValueChange = { question = it.take(BOX_QUESTION_MAX) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 4,
+                    label = { Text("سؤال العلبة (اختياري)") }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name, question) },
+                enabled = name.isNotBlank()
+            ) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("إلغاء") }
+        }
+    )
 }
 
 @Composable
@@ -242,6 +564,9 @@ private fun MaterialRow(
     m: MaterialItem,
     expanded: Boolean,
     agents: List<AgentProfile>,
+    selectionMode: Boolean,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
     onToggle: () -> Unit,
     onInsert: (() -> Unit)?,
     onRunAgent: ((AgentProfile) -> Unit)?,
@@ -266,6 +591,10 @@ private fun MaterialRow(
         else -> null
     }
 
+    // في وضع الإنشاء: الضغط على الرأس يبدّل التحديد بدل التوسيع
+    val headerClick: () -> Unit =
+        if (selectionMode) { { onCheckedChange(!checked) } } else onToggle
+
     Surface(
         tonalElevation = 2.dp,
         shape = RoundedCornerShape(8.dp),
@@ -273,245 +602,259 @@ private fun MaterialRow(
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
 
-            // رأس البطاقة: الضغط عليه يوسّع/يطوي النص الكامل
-            Column(modifier = Modifier.clickable(onClick = onToggle)) {
-                Text(
-                    text = shownTitle,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = if (expanded) 4 else 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(Modifier.height(2.dp))
-
-                Text(
-                    text = metaLine(m),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (statusLine != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = statusLine,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (m.status == MaterialStatus.FAILED)
-                            MaterialTheme.colorScheme.error
-                        else
-                            MaterialTheme.colorScheme.primary
-                    )
+            Row(verticalAlignment = Alignment.Top) {
+                if (selectionMode) {
+                    Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+                    Spacer(Modifier.width(4.dp))
                 }
 
-                if (digest != null) {
-                    Spacer(Modifier.height(6.dp))
-                    for (b in digest.bullets) {
-                        Text(
-                            text = "• $b",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Spacer(Modifier.height(2.dp))
-                    }
-                    if (digest.keyQuote.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = "« ${digest.keyQuote} »",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontStyle = FontStyle.Italic,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    if (digest.worthFullRead) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = "⭐ تستحق القراءة كاملة",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                } else if (!expanded && m.text.isNotBlank()) {
-                    // معاينة للمواد التي لم تُلخَّص بعد
-                    Spacer(Modifier.height(6.dp))
+                // رأس البطاقة: الضغط عليه يوسّع/يطوي النص الكامل
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(onClick = headerClick)
+                ) {
                     Text(
-                        text = m.text.trim(),
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 3,
+                        text = shownTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = if (expanded && !selectionMode) 4 else 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                }
-            }
 
-            if (expanded) {
-                Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(2.dp))
 
-                if (digest != null && m.title.isNotBlank()) {
                     Text(
-                        text = "العنوان الأصلي: ${m.title}",
+                        text = metaLine(m),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(6.dp))
-                }
 
-                if (m.quality == "weak") {
-                    Text(
-                        text = "⚠️ جودة ضعيفة" +
-                            (if (m.reason.isNotBlank()) " (${m.reason})" else ""),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(Modifier.height(6.dp))
-                }
-
-                // نص واحد بفواصل أسطر صريحة: لا يلتصق الرابط بما بعده عند النسخ
-                SelectionContainer {
-                    Text(
-                        text = if (m.url.isNotBlank()) m.url + "\n\n" + m.text else m.text,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                if (m.links.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        text = "الروابط (${m.links.size})",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    SelectionContainer {
+                    if (statusLine != null) {
+                        Spacer(Modifier.height(4.dp))
                         Text(
-                            text = m.links.joinToString("\n\n") {
-                                "• ${it.text.replace('\n', ' ')}\n${it.href}"
-                            },
-                            style = MaterialTheme.typography.labelSmall
+                            text = statusLine,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (m.status == MaterialStatus.FAILED)
+                                MaterialTheme.colorScheme.error
+                            else
+                                MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    if (digest != null) {
+                        Spacer(Modifier.height(6.dp))
+                        for (b in digest.bullets) {
+                            Text(
+                                text = "• $b",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Spacer(Modifier.height(2.dp))
+                        }
+                        if (digest.keyQuote.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "« ${digest.keyQuote} »",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontStyle = FontStyle.Italic,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (digest.worthFullRead) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "⭐ تستحق القراءة كاملة",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else if ((!expanded || selectionMode) && m.text.isNotBlank()) {
+                        // معاينة للمواد التي لم تُلخَّص بعد
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = m.text.trim(),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
 
-            if (onInsert != null) {
-                TextButton(
-                    onClick = onInsert,
-                    contentPadding = PaddingValues(horizontal = 4.dp)
-                ) {
-                    Icon(
-                        Icons.Filled.Edit,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "إلى مربع الإدخال",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
-            }
+            if (!selectionMode) {
 
-            if (onRunAgent != null) {
-                Box {
+                if (expanded) {
+                    Spacer(Modifier.height(8.dp))
+
+                    if (digest != null && m.title.isNotBlank()) {
+                        Text(
+                            text = "العنوان الأصلي: ${m.title}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
+
+                    if (m.quality == "weak") {
+                        Text(
+                            text = "⚠️ جودة ضعيفة" +
+                                (if (m.reason.isNotBlank()) " (${m.reason})" else ""),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
+
+                    // نص واحد بفواصل أسطر صريحة: لا يلتصق الرابط بما بعده عند النسخ
+                    SelectionContainer {
+                        Text(
+                            text = if (m.url.isNotBlank()) m.url + "\n\n" + m.text else m.text,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    if (m.links.isNotEmpty()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = "الروابط (${m.links.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        SelectionContainer {
+                            Text(
+                                text = m.links.joinToString("\n\n") {
+                                    "• ${it.text.replace('\n', ' ')}\n${it.href}"
+                                },
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                }
+
+                if (onInsert != null) {
                     TextButton(
-                        onClick = { agentMenu = true },
+                        onClick = onInsert,
                         contentPadding = PaddingValues(horizontal = 4.dp)
                     ) {
                         Icon(
-                            Icons.Filled.Person,
+                            Icons.Filled.Edit,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "وكيل",
+                            text = "إلى مربع الإدخال",
                             style = MaterialTheme.typography.labelMedium
                         )
                     }
+                }
 
-                    DropdownMenu(
-                        expanded = agentMenu,
-                        onDismissRequest = { agentMenu = false }
-                    ) {
-                        if (agents.isEmpty()) {
-                            DropdownMenuItem(
-                                text = { Text("لا يوجد وكلاء. أضف وكيلًا من شاشة الوكلاء") },
-                                onClick = { agentMenu = false },
-                                enabled = false
+                if (onRunAgent != null) {
+                    Box {
+                        TextButton(
+                            onClick = { agentMenu = true },
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
                             )
-                        } else {
-                            agents.forEach { a ->
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "وكيل",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = agentMenu,
+                            onDismissRequest = { agentMenu = false }
+                        ) {
+                            if (agents.isEmpty()) {
                                 DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = a.name,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    },
-                                    onClick = {
-                                        agentMenu = false
-                                        onRunAgent(a)
-                                    }
+                                    text = { Text("لا يوجد وكلاء. أضف وكيلًا من شاشة الوكلاء") },
+                                    onClick = { agentMenu = false },
+                                    enabled = false
                                 )
+                            } else {
+                                agents.forEach { a ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = a.name,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        onClick = {
+                                            agentMenu = false
+                                            onRunAgent(a)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if (canDigest) {
-                TextButton(
-                    onClick = onDigest,
-                    contentPadding = PaddingValues(horizontal = 4.dp)
+                if (canDigest) {
+                    TextButton(
+                        onClick = onDigest,
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (m.status == MaterialStatus.FAILED) "أعد التلخيص" else "لخّص",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // صف الأزرار الثابت
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Filled.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = if (m.status == MaterialStatus.FAILED) "أعد التلخيص" else "لخّص",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
-            }
+                    TextButton(
+                        onClick = onToggle,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Text(
+                            text = if (expanded) "إخفاء النص" else "النص الكامل",
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1
+                        )
+                    }
 
-            Spacer(Modifier.height(4.dp))
+                    IconButton(
+                        onClick = onOpen,
+                        enabled = canOpen,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح الرابط في المتصفح")
+                    }
 
-            // صف الأزرار الثابت
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(
-                    onClick = onToggle,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 4.dp)
-                ) {
-                    Text(
-                        text = if (expanded) "إخفاء النص" else "النص الكامل",
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1
-                    )
-                }
+                    IconButton(onClick = onShare, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Filled.Share, contentDescription = "مشاركة")
+                    }
 
-                IconButton(
-                    onClick = onOpen,
-                    enabled = canOpen,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(Icons.Filled.OpenInBrowser, contentDescription = "فتح الرابط في المتصفح")
-                }
+                    IconButton(onClick = onCopy, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = "نسخ")
+                    }
 
-                IconButton(onClick = onShare, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.Share, contentDescription = "مشاركة")
-                }
-
-                IconButton(onClick = onCopy, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = "نسخ")
-                }
-
-                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.DeleteOutline, contentDescription = "حذف")
+                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Filled.DeleteOutline, contentDescription = "حذف")
+                    }
                 }
             }
         }
