@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.data.model.MemoryItem
+import com.example.aichat.repository.BoxStore
 import com.example.aichat.repository.MaterialItem
 import com.example.aichat.repository.MaterialStore
 import com.example.aichat.repository.MemoryContextBuilder
@@ -80,6 +81,10 @@ class AichatApp : Application() {
     // =========================
 
     lateinit var materialStore: MaterialStore
+        private set
+
+    // [boxes] العلب الصغيرة (boxes.json): أسماء وأرقام مواد فقط
+    lateinit var boxStore: BoxStore
         private set
 
     // batchId -> [added, updated, rejected]. يُلمس على الخيط الرئيسي فقط.
@@ -742,6 +747,10 @@ class AichatApp : Application() {
         // [materials] علبة المواد (ملف JSON خارج قاعدة البيانات)
         materialStore = MaterialStore(filesDir) { logDebug(it) }
         materialStore.load()
+
+        // [boxes] العلب الصغيرة (ملف JSON مستقل)
+        boxStore = BoxStore(filesDir) { logDebug(it) }
+        boxStore.load()
     }
 
     @Synchronized
