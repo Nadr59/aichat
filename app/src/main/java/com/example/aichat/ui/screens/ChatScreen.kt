@@ -76,6 +76,8 @@ import java.util.Locale
 import com.example.aichat.ui.viewmodel.ChainStore
 import com.example.aichat.ui.viewmodel.SavedChain
 import com.example.aichat.ui.viewmodel.MAX_SAVED_CHAIN_NAME_CHARS
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
