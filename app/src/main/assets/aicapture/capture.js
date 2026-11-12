@@ -25,7 +25,7 @@
 
 if (window.top !== window) return;
 // حماية مسار ChatGPT/Venice/Arena: لا نعمل فيها حتى لو أخطأ manifest
-if (/(^|\.)(chatgpt\.com|openai\.com|venice\.ai|arena\.ai)$/i.test(String(location.hostname || ""))) return;
+
 if (window.__aichatCaptureLoaded) return;
 window.__aichatCaptureLoaded = true;
 
