@@ -124,6 +124,20 @@ class BoxStore(
         return true
     }
 
+    /**
+     * استبدال مواد العلبة بالقائمة الجديدة (إضافة وإزالة معًا).
+     * يعيد false إن لم توجد العلبة أو كانت القائمة الجديدة فارغة (لإفراغ علبة احذفها).
+     */
+    fun setMaterials(id: String, materialIds: List<String>): Boolean {
+        val idx = boxes.indexOfFirst { it.id == id }
+        if (idx < 0) return false
+        val ids = materialIds.distinct().take(BOX_MAX_IDS)
+        if (ids.isEmpty()) return false
+        boxes[idx] = boxes[idx].copy(materialIds = ids)
+        scheduleSave()
+        return true
+    }
+
     /** حذف العلبة فقط، لا مواد. */
     fun remove(id: String) {
         val idx = boxes.indexOfFirst { it.id == id }
