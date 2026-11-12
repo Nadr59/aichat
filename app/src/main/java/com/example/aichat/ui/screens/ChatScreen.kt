@@ -1,6 +1,6 @@
 package com.example.aichat.ui.screens
 
-import android.content. 
+import android.content.ClipData 
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
