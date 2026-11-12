@@ -1,15 +1,15 @@
-
-
 package com.example.aichat.ui.screens
 
-import android.content.ClipData
+import android.content. 
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -30,6 +30,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -72,12 +76,6 @@ import java.util.Locale
 import com.example.aichat.ui.viewmodel.ChainStore
 import com.example.aichat.ui.viewmodel.SavedChain
 import com.example.aichat.ui.viewmodel.MAX_SAVED_CHAIN_NAME_CHARS
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,12 +101,9 @@ fun ChatScreen(
     val chainProgress by viewModel.chainProgress.collectAsState()
     val chainResume by viewModel.chainResume.collectAsState()
 
-    
-    
     // ═══════════════════════════════════════════════════════════════
     val workspaceSummary by viewModel.workspaceSummary.collectAsState()
 
-    
     var activeProviderId by remember { mutableStateOf(settings.provider) }
     var activeProviderLabel by remember {
         mutableStateOf(
@@ -354,11 +349,10 @@ fun ChatScreen(
             sender
         }
     }
-                
-        
-        // ── علبة المواد: معالجة الخلاصات في الخلفية (ويب جاهز، أو مزوّد API حين لا توجد منصة ويب) ──
+
+    // ── علبة المواد: معالجة الخلاصات في الخلفية (ويب جاهز، أو مزوّد API حين لا توجد منصة ويب) ──
     val digestViaApi = selectedWebPlatformId == null
-        val apiDigestSender = remember<suspend (String, String) -> String?>(viewModel) {
+    val apiDigestSender = remember<suspend (String, String) -> String?>(viewModel) {
         { persona, input ->
             viewModel.repository.sendMessage(
                 history = emptyList(),
@@ -369,8 +363,8 @@ fun ChatScreen(
                 agentPrompt = persona
             )
         }
-        }
-    
+    }
+
     val digestSender: (suspend (String, String) -> String?)? =
         if (digestViaApi) apiDigestSender else chainWebSender
     val digestReady = digestSender != null && !isLoading &&
@@ -384,7 +378,7 @@ fun ChatScreen(
         if (digestReady && digestHasWork && sender != null) {
             com.example.aichat.repository.MaterialDigestRunner.runPending(
                 store = app.materialStore,
-    
+
                 sender = sender,
                 log = { app.logDebug(it) }
             )
@@ -458,7 +452,6 @@ fun ChatScreen(
         }
     }
 
-    
     LaunchedEffect(webSendInFlight) {
         if (!webSendInFlight) return@LaunchedEffect
 
@@ -546,7 +539,6 @@ fun ChatScreen(
         }
     }
 
-    
     fun sendWebMessage() {
         val platform = selectedPlatform ?: return
         if (!isWebSendCapable) return
@@ -621,7 +613,6 @@ fun ChatScreen(
                 ?.let { AgentPromptBuilder.build(it) }
                 .orEmpty()
 
-            
             val contextBlock = WebSendCoordinator.buildContextBlock(
                 agentPrompt = agentPromptForWeb,
                 workspaceSummary = workspaceSummary,
@@ -655,6 +646,15 @@ fun ChatScreen(
     }
 
     Scaffold(
+        modifier = Modifier.background(
+            Brush.verticalGradient(
+                listOf(
+                    MaterialTheme.colorScheme.background,
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                )
+            )
+        ),
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
@@ -704,40 +704,55 @@ fun ChatScreen(
                         }
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                ),
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.Filled.ArrowBack,
-                            contentDescription = "رجوع"
-                        )
+                    Surface(
+                        onClick = onBack,
+                        modifier = Modifier.padding(horizontal = 8.dp).size(44.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.ArrowBack,
+                                contentDescription = "رجوع",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
                     }
                 },
                 actions = {
                     // ✅ قائمة خيارات موحّدة (⋮) — تجمع كل ما كان أيقونات مبعثرة.
                     Box {
-                        IconButton(onClick = { topMenuExpanded = true }) {
-                            Icon(
-                                Icons.Filled.MoreVert,
-                                contentDescription = "خيارات المحادثة"
-                            )
+                        Surface(
+                            onClick = { topMenuExpanded = true },
+                            modifier = Modifier.padding(horizontal = 8.dp).size(44.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = "خيارات المحادثة",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
                         }
 
                         DropdownMenu(
                             expanded = topMenuExpanded,
-                            onDismissRequest = { topMenuExpanded = false }
+                            onDismissRequest = { topMenuExpanded = false },
+                            shape = RoundedCornerShape(24.dp),
+                            containerColor = MaterialTheme.colorScheme.surface
                         ) {
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.Memory,
-                                            contentDescription = null,
-                                            tint = if (memoryAccessEnabled) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
-                                        )
+                                        MenuIconBox(Icons.Filled.Memory, highlighted = memoryAccessEnabled)
                                         Spacer(Modifier.width(8.dp))
                                         Text(
                                             if (memoryAccessEnabled) {
@@ -748,6 +763,14 @@ fun ChatScreen(
                                         )
                                     }
                                 },
+                                modifier = Modifier
+                                    .padding(horizontal = 6.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        if (memoryAccessEnabled)
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                        else Color.Transparent
+                                    ),
                                 onClick = {
                                     viewModel.toggleMemoryAccess(!memoryAccessEnabled)
                                     topMenuExpanded = false
@@ -757,10 +780,7 @@ fun ChatScreen(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.SmartToy,
-                                            contentDescription = null
-                                        )
+                                        MenuIconBox(Icons.Filled.SmartToy)
                                         Spacer(Modifier.width(8.dp))
                                         Text("اختيار Agent")
                                     }
@@ -774,10 +794,7 @@ fun ChatScreen(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.Link,
-                                            contentDescription = null
-                                        )
+                                        MenuIconBox(Icons.Filled.Link)
                                         Spacer(Modifier.width(8.dp))
                                         Column {
                                             Text("سلسلة وكلاء")
@@ -801,10 +818,7 @@ fun ChatScreen(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.AccountTree,
-                                            contentDescription = null
-                                        )
+                                        MenuIconBox(Icons.Filled.AccountTree)
                                         Spacer(Modifier.width(8.dp))
                                         Text("شجرة المحادثة")
                                     }
@@ -819,10 +833,7 @@ fun ChatScreen(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.Settings,
-                                            contentDescription = null
-                                        )
+                                        MenuIconBox(Icons.Filled.Settings)
                                         Spacer(Modifier.width(8.dp))
                                         Text("الإعدادات")
                                     }
@@ -836,15 +847,12 @@ fun ChatScreen(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.BugReport,
-                                            contentDescription = null
-                                        )
+                                        MenuIconBox(Icons.Filled.BugReport)
                                         Spacer(Modifier.width(8.dp))
                                         Text("سجلات التشخيص")
                                     }
                                 },
-                                                                onClick = {
+                                onClick = {
                                     showDebugLogs = true
                                     topMenuExpanded = false
                                 }
@@ -853,10 +861,7 @@ fun ChatScreen(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.Inbox,
-                                            contentDescription = null
-                                        )
+                                        MenuIconBox(Icons.Filled.Inbox)
                                         Spacer(Modifier.width(8.dp))
                                         Text("علبة المواد")
                                     }
@@ -923,7 +928,7 @@ fun ChatScreen(
                 }
 
                 if (isArenaPlatform && selectedPlatform != null) {
-                    
+
                     VisibleWebEngineHost(
                         platform = selectedPlatform,
                         app = app,
@@ -1001,50 +1006,50 @@ fun ChatScreen(
             }
 
             Column(modifier = Modifier.fillMaxWidth()) {
-    error?.let { err ->
-        ErrorMessage(
-            error = err,
-            onDismiss = viewModel::clearError,
-            onCopy = {
-                copyToClipboard(err)
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = 12.dp,
-                    vertical = 6.dp
-                )
-        )
-    }
-
-    val resume = chainResume
-    if (resume != null && !isLoading && (selectedWebPlatformId == null || chainWebSender != null)) {
-        AgentChainResumeBar(
-            nextStep = resume.nextStep,
-            total = resume.total,
-            agentName = resume.agentName,
-            onResume = {
-                if (selectedWebPlatformId != null &&
-                    (webPageLoading || webRuntimeMissing || webSendInFlight)
-                ) {
-                    Toast.makeText(
-                        context,
-                        "منصة الويب غير جاهزة بعد. حاول بعد قليل.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                } else {
-                    viewModel.resumeAgentChain(
-                        channelKey = chainChannelKey,
-                        sender = chainWebSender
+                error?.let { err ->
+                    ErrorMessage(
+                        error = err,
+                        onDismiss = viewModel::clearError,
+                        onCopy = {
+                            copyToClipboard(err)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = 12.dp,
+                                vertical = 6.dp
+                            )
                     )
                 }
-            },
-            onDismiss = { viewModel.dismissAgentChainResume() },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-        )
-    }
+
+                val resume = chainResume
+                if (resume != null && !isLoading && (selectedWebPlatformId == null || chainWebSender != null)) {
+                    AgentChainResumeBar(
+                        nextStep = resume.nextStep,
+                        total = resume.total,
+                        agentName = resume.agentName,
+                        onResume = {
+                            if (selectedWebPlatformId != null &&
+                                (webPageLoading || webRuntimeMissing || webSendInFlight)
+                            ) {
+                                Toast.makeText(
+                                    context,
+                                    "منصة الويب غير جاهزة بعد. حاول بعد قليل.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } else {
+                                viewModel.resumeAgentChain(
+                                    channelKey = chainChannelKey,
+                                    sender = chainWebSender
+                                )
+                            }
+                        },
+                        onDismiss = { viewModel.dismissAgentChainResume() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
             }
 
             InputBar(
@@ -1679,58 +1684,58 @@ fun ChatScreen(
             }
         )
     }
-        // علبة المواد
-    if (showMaterials) {
-        MaterialsDialog( 
-    store = app.materialStore,
-   boxStore = app.boxStore,
-    onDismiss = { showMaterials = false },
-    onInsertToInput = { materialText ->
-        val old = userInput.text
-        val merged = if (old.isBlank()) materialText else old.trimEnd() + "\n\n" + materialText
-                userInput = TextFieldValue(merged, androidx.compose.ui.text.TextRange(merged.length))
-    },
-    agents = agentsViewModel.agents.collectAsState().value,
-    onRunAgent = { materialText, agent ->
-        if (isLoading) {
-            Toast.makeText(
-                context,
-                "هناك معالجة جارية. انتظر حتى تنتهي.",
-                Toast.LENGTH_LONG
-            ).show()
-        } else if (selectedImage != null) {
-            Toast.makeText(
-                context,
-                "السلسلة لا تدعم الصور الآن. أزل الصورة المحددة أولًا.",
-                Toast.LENGTH_LONG
-            ).show()
-        } else if (selectedWebPlatformId != null && !isHiddenAutoSendPlatform) {
-            Toast.makeText(
-                context,
-                "السلسلة على الويب تعمل مع ChatGPT وVenice فقط.",
-                Toast.LENGTH_LONG
-            ).show()
-        } else if (selectedWebPlatformId != null &&
-            (webPageLoading || webRuntimeMissing || webSendInFlight)
-        ) {
-            Toast.makeText(
-                context,
-                "منصة الويب غير جاهزة بعد (الصفحة تُحمَّل أو رسالة قيد الانتظار). حاول بعد قليل.",
-                Toast.LENGTH_LONG
-            ).show()
-        } else {
-            showMaterials = false
-            viewModel.runAgentChainSteps(
-                materialText,
-                listOf(ChainStepSpec(agentId = agent.id)),
-                channelKey = chainChannelKey,
-                sender = chainWebSender
-            )
-        }
-    }
-)
-    }
 
+    // علبة المواد
+    if (showMaterials) {
+        MaterialsDialog(
+            store = app.materialStore,
+            boxStore = app.boxStore,
+            onDismiss = { showMaterials = false },
+            onInsertToInput = { materialText ->
+                val old = userInput.text
+                val merged = if (old.isBlank()) materialText else old.trimEnd() + "\n\n" + materialText
+                userInput = TextFieldValue(merged, androidx.compose.ui.text.TextRange(merged.length))
+            },
+            agents = agentsViewModel.agents.collectAsState().value,
+            onRunAgent = { materialText, agent ->
+                if (isLoading) {
+                    Toast.makeText(
+                        context,
+                        "هناك معالجة جارية. انتظر حتى تنتهي.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else if (selectedImage != null) {
+                    Toast.makeText(
+                        context,
+                        "السلسلة لا تدعم الصور الآن. أزل الصورة المحددة أولًا.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else if (selectedWebPlatformId != null && !isHiddenAutoSendPlatform) {
+                    Toast.makeText(
+                        context,
+                        "السلسلة على الويب تعمل مع ChatGPT وVenice فقط.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else if (selectedWebPlatformId != null &&
+                    (webPageLoading || webRuntimeMissing || webSendInFlight)
+                ) {
+                    Toast.makeText(
+                        context,
+                        "منصة الويب غير جاهزة بعد (الصفحة تُحمَّل أو رسالة قيد الانتظار). حاول بعد قليل.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    showMaterials = false
+                    viewModel.runAgentChainSteps(
+                        materialText,
+                        listOf(ChainStepSpec(agentId = agent.id)),
+                        channelKey = chainChannelKey,
+                        sender = chainWebSender
+                    )
+                }
+            }
+        )
+    }
 
     // ✅ عارض سجلات التشخيص المؤقت
     if (showDebugLogs) {
@@ -1998,7 +2003,6 @@ private const val CHAIN_WEB_STEP_TIMEOUT_MS = 300_000L
 private const val WEB_CONTEXT_RECENT_MESSAGE_COUNT = 4
 
 /* ----------------------------- مُحدِّد المحرّك الموحّد (API + منصات الويب) ----------------------------- */
-
 
 @Composable
 private fun EngineSelector(
@@ -3384,5 +3388,29 @@ private fun AgentChainResumeBar(
                 )
             }
         }
+    }
+}
+
+/* ----------------------------- أيقونة بند القائمة داخل مربع ----------------------------- */
+
+@Composable
+private fun MenuIconBox(icon: ImageVector, highlighted: Boolean = false) {
+    val colors = MaterialTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (highlighted) colors.primary
+                else colors.primaryContainer.copy(alpha = 0.6f)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = if (highlighted) colors.onPrimary else LocalContentColor.current
+        )
     }
 }
