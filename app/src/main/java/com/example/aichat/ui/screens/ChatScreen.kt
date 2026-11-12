@@ -860,7 +860,7 @@ fun ChatScreen(
                                 }
                             )
 
-                            DropdownMenuItem(
+                                                        DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         MenuIconBox(Icons.Filled.Inbox)
@@ -868,19 +868,18 @@ fun ChatScreen(
                                         Text("علبة المواد")
                                     }
                                 },
-                                                onClick = {
-                    showMaterials = true
-                    topMenuExpanded = false
-                }
-            )
-        }   // يغلق DropdownMenu
-    }       // ← أضف هذا (يغلق MaterialTheme)
-}           // يغلق Box
-                    }
-                }
-            )
-        }
-    ) { padding ->
+                                onClick = {
+                                    showMaterials = true
+                                    topMenuExpanded = false
+                                }
+                            )
+                        }   // يغلق DropdownMenu
+                    }       // يغلق MaterialTheme
+                }           // يغلق Box
+            }               // يغلق actions
+        )                   // يغلق TopAppBar
+    }                       // يغلق topBar
+) { padding ->
         Column(
             Modifier
                 .fillMaxSize()
