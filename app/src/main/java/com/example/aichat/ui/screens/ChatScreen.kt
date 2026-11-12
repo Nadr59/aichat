@@ -742,13 +742,15 @@ fun ChatScreen(
                                 )
                             }
                         }
+                        MaterialTheme(
+    shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(24.dp))
+) {
+    
 
                         DropdownMenu(
-                            expanded = topMenuExpanded,
-                            onDismissRequest = { topMenuExpanded = false },
-                            shape = RoundedCornerShape(24.dp),
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ) {
+    expanded = topMenuExpanded,
+    onDismissRequest = { topMenuExpanded = false }
+) {
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -866,12 +868,14 @@ fun ChatScreen(
                                         Text("علبة المواد")
                                     }
                                 },
-                                onClick = {
-                                    showMaterials = true
-                                    topMenuExpanded = false
-                                }
-                            )
-                        }
+                                                onClick = {
+                    showMaterials = true
+                    topMenuExpanded = false
+                }
+            )
+        }   // يغلق DropdownMenu
+    }       // ← أضف هذا (يغلق MaterialTheme)
+}           // يغلق Box
                     }
                 }
             )
