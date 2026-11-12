@@ -1,4 +1,3 @@
-
 package com.example.aichat.ui.screens
 
 import android.app.Activity
@@ -54,6 +53,7 @@ private const val BOX_INPUT_SOFT_LIMIT = 12000
  *
  * العلبة الصغيرة: «إلى الإدخال» يضع السؤال وخلاصات المواد المُلخَّصة والمصادر في مربع الإدخال،
  * ثم يعدّل المستخدم النص ويرسله أو يشغّل عليه وكيلًا/سلسلة من القائمة المعتادة.
+ * «إضافة/إزالة مواد» يفتح اختيارًا بكل مواد العلبة الكبيرة والمواد الحالية مؤشَّر عليها.
  *
  * onInsertToInput: يستلم نصًا ليضعه المستدعي في مربع الإدخال (مادة، أو ملخص علبة).
  * إن كان null يختفي الزر.
@@ -84,6 +84,7 @@ fun MaterialsDialog(
     // العلب
     var selectedBoxId by remember { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
+    var membersBoxId by remember { mutableStateOf<String?>(null) }
     var selection by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showCreateName by remember { mutableStateOf(false) }
     var editingBoxId by remember { mutableStateOf<String?>(null) }
@@ -94,7 +95,12 @@ fun MaterialsDialog(
     val currentBox: MaterialBox? =
         if (selectedBoxId == null) null else boxList.firstOrNull { it.id == selectedBoxId }
 
-    val base: List<MaterialItem> = if (currentBox == null) {
+    // وضع تعديل مواد علبة موجودة (picking) أو إنشاء علبة جديدة (creating): كلاهما اختيار بمربعات
+    val picking = membersBoxId != null && currentBox?.id == membersBoxId
+    val selecting = creating || picking
+
+    // في وضع التعديل تُعرض كل مواد العلبة الكبيرة ليُختار منها
+    val base: List<MaterialItem> = if (currentBox == null || picking) {
         list.toList()
     } else {
         val ids = currentBox.materialIds.toHashSet()
@@ -114,6 +120,7 @@ fun MaterialsDialog(
 
     val titleText = when {
         creating -> "علبة جديدة"
+        picking -> "تعديل مواد العلبة"
         currentBox != null ->
             if (searching) "${currentBox.name} (${shown.size} من ${base.size})"
             else "${currentBox.name} (${base.size})"
@@ -168,7 +175,7 @@ fun MaterialsDialog(
                     )
 
                     // شرائح العلب
-                    if (boxStore != null && !creating) {
+                    if (boxStore != null && !selecting) {
                         Spacer(Modifier.height(8.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             item {
@@ -221,8 +228,8 @@ fun MaterialsDialog(
                         }
                     }
 
-                    // شريط وضع الإنشاء
-                    if (creating) {
+                    // شريط وضع الاختيار (إنشاء علبة أو تعديل مواد علبة)
+                    if (selecting) {
                         Spacer(Modifier.height(8.dp))
                         Surface(
                             tonalElevation = 3.dp,
@@ -235,9 +242,15 @@ fun MaterialsDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "اختر المواد (${selection.size})",
+                                        text = if (picking) {
+                                            "مواد «${currentBox?.name.orEmpty()}» (${selection.size})"
+                                        } else {
+                                            "اختر المواد (${selection.size})"
+                                        },
                                         style = MaterialTheme.typography.labelLarge,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     val allShownSelected =
                                         shown.isNotEmpty() && shown.all { it.id in selection }
@@ -257,17 +270,45 @@ fun MaterialsDialog(
                                         )
                                     }
                                 }
+                                if (picking) {
+                                    Text(
+                                        text = "أشِّر لإضافة مادة، وأزل العلامة لإزالتها من العلبة. " +
+                                            "المواد نفسها تبقى في العلبة الكبيرة.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Button(
-                                        onClick = { showCreateName = true },
+                                        onClick = {
+                                            val box = currentBox
+                                            if (picking && box != null) {
+                                                // ترتيب العلبة الكبيرة لا ترتيب الضغط
+                                                val ids = list.filter { it.id in selection }.map { it.id }
+                                                val ok = boxStore?.setMaterials(box.id, ids) == true
+                                                Toast.makeText(
+                                                    context,
+                                                    if (ok) "حُفظت مواد العلبة (${ids.size})"
+                                                    else "تعذّر حفظ مواد العلبة",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                membersBoxId = null
+                                                selection = emptySet()
+                                                query = ""
+                                                expandedId = null
+                                            } else {
+                                                showCreateName = true
+                                            }
+                                        },
                                         enabled = selection.isNotEmpty()
-                                    ) { Text("إضافة") }
+                                    ) { Text(if (picking) "حفظ" else "إضافة") }
                                     TextButton(
                                         onClick = {
                                             creating = false
+                                            membersBoxId = null
                                             selection = emptySet()
                                         }
                                     ) { Text("إلغاء") }
@@ -277,7 +318,7 @@ fun MaterialsDialog(
                     }
 
                     // رأس العلبة المختارة
-                    if (currentBox != null && !creating) {
+                    if (currentBox != null && !selecting) {
                         // base هنا = كل مواد العلبة الحية (غير مصفّاة بالبحث)
                         val readyCount = base.count { isReady(it) }
                         val notReady = base.size - readyCount
@@ -324,6 +365,30 @@ fun MaterialsDialog(
                                         text = "السؤال: ${currentBox.question}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                // إضافة/إزالة مواد من هذه العلبة
+                                TextButton(
+                                    onClick = {
+                                        membersBoxId = currentBox.id
+                                        selection = currentBox.materialIds
+                                            .filter { it in aliveIds }
+                                            .toSet()
+                                        query = ""
+                                        expandedId = null
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Add,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = "إضافة/إزالة مواد",
+                                        style = MaterialTheme.typography.labelMedium
                                     )
                                 }
 
@@ -465,7 +530,7 @@ fun MaterialsDialog(
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = if (currentBox != null && !creating) 260.dp else 380.dp),
+                                .heightIn(max = if (currentBox != null && !selecting) 260.dp else 380.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(shown, key = { it.id }) { m ->
@@ -473,7 +538,7 @@ fun MaterialsDialog(
                                     m = m,
                                     expanded = expandedId == m.id,
                                     agents = agents,
-                                    selectionMode = creating,
+                                    selectionMode = selecting,
                                     checked = m.id in selection,
                                     onCheckedChange = { c ->
                                         selection = if (c) selection + m.id else selection - m.id
@@ -538,7 +603,7 @@ fun MaterialsDialog(
                             "تم نسخ ${snapshot.size} مادة"
                         )
                     },
-                    enabled = shown.isNotEmpty() && !creating
+                    enabled = shown.isNotEmpty() && !selecting
                 ) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
@@ -547,7 +612,7 @@ fun MaterialsDialog(
 
                 TextButton(
                     onClick = { confirmClear = true },
-                    enabled = list.isNotEmpty() && !searching && currentBox == null && !creating
+                    enabled = list.isNotEmpty() && !searching && currentBox == null && !selecting
                 ) {
                     Icon(Icons.Filled.DeleteOutline, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
@@ -726,7 +791,7 @@ private fun MaterialRow(
         else -> null
     }
 
-    // في وضع الإنشاء: الضغط على الرأس يبدّل التحديد بدل التوسيع
+    // في وضع الاختيار: الضغط على الرأس يبدّل التحديد بدل التوسيع
     val headerClick: () -> Unit =
         if (selectionMode) { { onCheckedChange(!checked) } } else onToggle
 
