@@ -17,14 +17,32 @@ private val LightColors = lightColorScheme(
     surfaceVariant   = Color(0xFFE8EAED)
 )
 
+// Dark Emerald
+private val EmeraldBackground = Color(0xFF061A16)
+private val EmeraldCard       = Color(0xFF0C2922)
+private val EmeraldMint       = Color(0xFF49E6B1)
+private val EmeraldSecondary  = Color(0xFF164438)
+private val EmeraldText       = Color(0xFFE6FFF5)
+private val EmeraldTextSoft   = Color(0xFFA5C2B6)
+private val EmeraldOnMint     = Color(0xFF04231A)
+private val EmeraldBorder     = Color(0xFF3E6B5C)
+
 private val DarkColors = darkColorScheme(
-    primary          = Color(0xFF8AB4F8),
-    onPrimary        = Color(0xFF1A1A2E),
-    primaryContainer = Color(0xFF1A4A8A),
-    secondary        = Color(0xFF81C995),
-    background       = Color(0xFF1A1A1A),
-    surface          = Color(0xFF2D2D2D),
-    surfaceVariant   = Color(0xFF3D3D3D)
+    primary               = EmeraldMint,
+    onPrimary             = EmeraldOnMint,
+    primaryContainer      = EmeraldSecondary,
+    onPrimaryContainer    = EmeraldText,
+    secondary             = Color(0xFF7FD9B8),
+    onSecondary           = EmeraldOnMint,
+    secondaryContainer    = EmeraldSecondary,
+    onSecondaryContainer  = EmeraldText,
+    background            = EmeraldBackground,
+    onBackground          = EmeraldText,
+    surface               = EmeraldCard,
+    onSurface             = EmeraldText,
+    surfaceVariant        = EmeraldSecondary,
+    onSurfaceVariant      = EmeraldTextSoft,
+    outline               = EmeraldBorder
 )
 
 @Composable
