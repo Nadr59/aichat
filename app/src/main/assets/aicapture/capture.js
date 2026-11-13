@@ -28,7 +28,7 @@ if (window.top !== window) return;
 if (window.__aichatCaptureLoaded) return;
 window.__aichatCaptureLoaded = true;
 
-var VERSION = "1.0.64";
+var VERSION = "1.0.65";
 var SHOW_BUTTON = true;
 
 var LIMITS = {
@@ -1060,7 +1060,7 @@ function captureNow(opts) {
 }
 
 // ============================================================
-// تشخيص مؤقت (v1.0.64): يسجّل متى يتغيّر موضع الزر ولماذا.
+// تشخيص مؤقت (v1.0.65): يسجّل متى يتغيّر موضع الزر ولماذا.
 // لا يغيّر أي سلوك. محدود بـ60 سطرًا. أسطره تبدأ بـ🔬
 // ============================================================
 
@@ -1094,7 +1094,7 @@ function installButtonWatch(host) {
         " parent=" + (host.parentNode ? host.parentNode.nodeName : "none") +
         " htmlTf=" + hs.transform +
         " blocked=" + isBlockedPage() +
-        " style=[" + String(host.getAttribute("style") || "").slice(0, 100) + "]";
+        " style=[" + String(host.getAttribute("style") || "").slice(0, 400) + "]";
     } catch (e) {
       return "describe-error=" + e;
     }
@@ -1134,8 +1134,8 @@ function installButtonWatch(host) {
         var rec = recs[i];
         logged++;
         log("🔬 attr " + rec.attributeName +
-          " old=[" + String(rec.oldValue || "").slice(0, 100) + "]" +
-          " new=[" + String(host.getAttribute(rec.attributeName) || "").slice(0, 100) + "]");
+          " old=[" + String(rec.oldValue || "").slice(0, 400) + "]" +
+          " new=[" + String(host.getAttribute(rec.attributeName) || "").slice(0, 400) + "]");
       }
     }).observe(host, { attributes: true, attributeOldValue: true });
   } catch (e) {}
@@ -1158,7 +1158,12 @@ function installButton() {
 
   var root = host.attachShadow({ mode: "closed" });
   var style = document.createElement("style");
+  // الموضع هنا داخل الظل بـ!important: أنماط الظل المهمّة تتغلب على أنماط الصفحة
+  // الخارجية، فلا تضيع إن أعادت الصفحة كتابة سمة style على العنصر الخارجي.
   style.textContent =
+    ":host{all:initial !important;position:fixed !important;" +
+    "z-index:2147483647 !important;bottom:96px !important;" +
+    "right:12px !important;display:block !important;}" +
     "button{all:initial;box-sizing:border-box;width:52px;height:52px;" +
     "border-radius:26px;background:#1f2937;color:#fff;font:600 13px/52px " +
     "system-ui,sans-serif;text-align:center;cursor:pointer;" +
@@ -1207,10 +1212,11 @@ function installButton() {
     }).observe(document.documentElement, { childList: true });
   } catch (e) {}
 
-  // إخفاء الزر في الصفحات المحظورة (تتغير مع تنقل SPA)
+  // إخفاء الزر في الصفحات المحظورة (تتغير مع تنقل SPA).
+  // نُخفي الزر الداخلي لا العنصر الخارجي؛ ولا نكتب شيئًا إلا إن تغيّرت الحالة.
   setInterval(function () {
     var want = isBlockedPage() ? "none" : "";
-    if (host.style.display !== want) host.style.display = want;
+    if (btn.style.display !== want) btn.style.display = want;
   }, 1500);
 
   // تشخيص مؤقت: لا يغيّر شيئًا
