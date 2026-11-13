@@ -24,12 +24,11 @@
 "use strict";
 
 if (window.top !== window) return;
-// حماية مسار ChatGPT/Venice/Arena: لا نعمل فيها حتى لو أخطأ manifest
 
 if (window.__aichatCaptureLoaded) return;
 window.__aichatCaptureLoaded = true;
 
-var VERSION = "1.0.62";
+var VERSION = "1.0.63";
 var SHOW_BUTTON = true;
 
 var LIMITS = {
@@ -1061,6 +1060,68 @@ function captureNow(opts) {
 }
 
 // ============================================================
+// تشخيص مؤقت (v1.0.63): يسجّل متى يختفي الزر ولماذا.
+// لا يغيّر أي سلوك. محدود بـ60 سطرًا. أسطره تبدأ بـ🔬
+// ============================================================
+
+function installButtonWatch(host) {
+  var lastState = "";
+  var logged = 0;
+  var MAX_LINES = 60;
+
+  function describe() {
+    try {
+      var r = host.getBoundingClientRect();
+      var cs = getComputedStyle(host);
+      var topEl = "none";
+      if (r.width > 0 && r.height > 0) {
+        var el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        topEl = el === host ? "host" : (el ? String(el.tagName || "?").toLowerCase() : "none");
+      }
+      return "connected=" + host.isConnected +
+        " display=" + cs.display +
+        " vis=" + cs.visibility +
+        " opacity=" + cs.opacity +
+        " rect=" + Math.round(r.left) + "," + Math.round(r.top) + "," +
+        Math.round(r.width) + "x" + Math.round(r.height) +
+        " topAtCenter=" + topEl +
+        " vp=" + window.innerWidth + "x" + window.innerHeight +
+        " blocked=" + isBlockedPage();
+    } catch (e) {
+      return "describe-error=" + e;
+    }
+  }
+
+  function check(reason) {
+    if (logged >= MAX_LINES) return;
+    var s = describe();
+    if (s === lastState) return;
+    lastState = s;
+    logged++;
+    log("🔬 btn[" + reason + "] " + s);
+  }
+
+  ["pointerdown", "focusin", "focusout"].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      if (logged >= MAX_LINES) return;
+      var t = e.target;
+      var tag = (t && t.tagName) ? String(t.tagName).toLowerCase() : "?";
+      var id = (t && t.id) ? " id=" + String(t.id).slice(0, 30) : "";
+      var cls = (t && typeof t.className === "string" && t.className)
+        ? " class=" + t.className.slice(0, 40) : "";
+      var ed = (t && t.isContentEditable) ? " editable" : "";
+      logged++;
+      log("🔬 " + ev + " target=" + tag + id + cls + ed);
+      setTimeout(function () { check(ev + "+0.3s"); }, 300);
+      setTimeout(function () { check(ev + "+1s"); }, 1000);
+    }, true);
+  });
+
+  setInterval(function () { check("tick"); }, 500);
+  check("init");
+}
+
+// ============================================================
 // Floating button (Shadow DOM). التأكيد الفعلي يأتي من التطبيق (Toast)
 // ============================================================
 
@@ -1113,10 +1174,12 @@ function installButton() {
   document.documentElement.appendChild(host);
 
   // الصفحات التي تعيد بناء الـDOM قد تزيل الزر
+  var readded = 0;
   try {
     new MutationObserver(function () {
       if (!host.isConnected && document.documentElement) {
         document.documentElement.appendChild(host);
+        if (readded++ < 10) log("🔬 الزر أُزيل من الصفحة فأُعيد إلحاقه (#" + readded + ")");
       }
     }).observe(document.documentElement, { childList: true });
   } catch (e) {}
@@ -1125,6 +1188,9 @@ function installButton() {
   setInterval(function () {
     host.style.display = isBlockedPage() ? "none" : "";
   }, 1500);
+
+  // تشخيص مؤقت: لا يغيّر شيئًا
+  try { installButtonWatch(host); } catch (e2) {}
 }
 
 // ============================================================
