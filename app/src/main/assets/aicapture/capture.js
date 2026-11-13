@@ -28,7 +28,7 @@ if (window.top !== window) return;
 if (window.__aichatCaptureLoaded) return;
 window.__aichatCaptureLoaded = true;
 
-var VERSION = "1.0.63";
+var VERSION = "1.0.64";
 var SHOW_BUTTON = true;
 
 var LIMITS = {
@@ -1060,7 +1060,7 @@ function captureNow(opts) {
 }
 
 // ============================================================
-// تشخيص مؤقت (v1.0.63): يسجّل متى يختفي الزر ولماذا.
+// تشخيص مؤقت (v1.0.64): يسجّل متى يتغيّر موضع الزر ولماذا.
 // لا يغيّر أي سلوك. محدود بـ60 سطرًا. أسطره تبدأ بـ🔬
 // ============================================================
 
@@ -1068,11 +1068,13 @@ function installButtonWatch(host) {
   var lastState = "";
   var logged = 0;
   var MAX_LINES = 60;
+  var T0 = Date.now();
 
   function describe() {
     try {
       var r = host.getBoundingClientRect();
       var cs = getComputedStyle(host);
+      var hs = getComputedStyle(document.documentElement);
       var topEl = "none";
       if (r.width > 0 && r.height > 0) {
         var el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
@@ -1082,11 +1084,17 @@ function installButtonWatch(host) {
         " display=" + cs.display +
         " vis=" + cs.visibility +
         " opacity=" + cs.opacity +
+        " pos=" + cs.position +
+        " off(t/r/b)=" + cs.top + "/" + cs.right + "/" + cs.bottom +
+        " dir=" + cs.direction +
         " rect=" + Math.round(r.left) + "," + Math.round(r.top) + "," +
         Math.round(r.width) + "x" + Math.round(r.height) +
         " topAtCenter=" + topEl +
         " vp=" + window.innerWidth + "x" + window.innerHeight +
-        " blocked=" + isBlockedPage();
+        " parent=" + (host.parentNode ? host.parentNode.nodeName : "none") +
+        " htmlTf=" + hs.transform +
+        " blocked=" + isBlockedPage() +
+        " style=[" + String(host.getAttribute("style") || "").slice(0, 100) + "]";
     } catch (e) {
       return "describe-error=" + e;
     }
@@ -1098,7 +1106,8 @@ function installButtonWatch(host) {
     if (s === lastState) return;
     lastState = s;
     logged++;
-    log("🔬 btn[" + reason + "] " + s);
+    log("🔬 btn[" + reason + "] t=" + Math.round((Date.now() - T0) / 1000) +
+      "s ready=" + document.readyState + " " + s);
   }
 
   ["pointerdown", "focusin", "focusout"].forEach(function (ev) {
@@ -1116,6 +1125,20 @@ function installButtonWatch(host) {
       setTimeout(function () { check(ev + "+1s"); }, 1000);
     }, true);
   });
+
+  // أي تغيير في سمات عنصر الزر نفسه (قيمة قبل وبعد)
+  try {
+    new MutationObserver(function (recs) {
+      for (var i = 0; i < recs.length; i++) {
+        if (logged >= MAX_LINES) return;
+        var rec = recs[i];
+        logged++;
+        log("🔬 attr " + rec.attributeName +
+          " old=[" + String(rec.oldValue || "").slice(0, 100) + "]" +
+          " new=[" + String(host.getAttribute(rec.attributeName) || "").slice(0, 100) + "]");
+      }
+    }).observe(host, { attributes: true, attributeOldValue: true });
+  } catch (e) {}
 
   setInterval(function () { check("tick"); }, 500);
   check("init");
@@ -1186,7 +1209,8 @@ function installButton() {
 
   // إخفاء الزر في الصفحات المحظورة (تتغير مع تنقل SPA)
   setInterval(function () {
-    host.style.display = isBlockedPage() ? "none" : "";
+    var want = isBlockedPage() ? "none" : "";
+    if (host.style.display !== want) host.style.display = want;
   }, 1500);
 
   // تشخيص مؤقت: لا يغيّر شيئًا
