@@ -29,7 +29,7 @@ if (window.top !== window) return;
 if (window.__aichatCaptureLoaded) return;
 window.__aichatCaptureLoaded = true;
 
-var VERSION = "1.0.61";
+var VERSION = "1.0.62";
 var SHOW_BUTTON = true;
 
 var LIMITS = {
