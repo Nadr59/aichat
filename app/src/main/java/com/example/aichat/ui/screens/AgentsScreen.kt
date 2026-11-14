@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -28,6 +31,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -49,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import com.example.aichat.data.model.AgentProfile
 import com.example.aichat.ui.viewmodel.AgentsViewModel
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +68,7 @@ fun AgentsScreen(
 
     var importing by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<AgentProfile?>(null) }
+    var editTarget by remember { mutableStateOf<AgentProfile?>(null) }
 
     val importLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -155,6 +162,7 @@ fun AgentsScreen(
                                     val hint = agent.description
                                         .ifBlank { agent.personality }
                                         .ifBlank { agent.scenario }
+                                        .ifBlank { agent.systemPrompt }
 
                                     if (hint.isNotBlank()) {
                                         Text(
@@ -165,6 +173,10 @@ fun AgentsScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
+                                }
+
+                                IconButton(onClick = { editTarget = agent }) {
+                                    Icon(Icons.Filled.Edit, contentDescription = "تعديل")
                                 }
 
                                 IconButton(onClick = { deleteTarget = agent }) {
@@ -195,6 +207,169 @@ fun AgentsScreen(
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) { Text("إلغاء") }
             }
+        )
+    }
+
+    editTarget?.let { agent ->
+        AgentEditDialog(
+            agent = agent,
+            onDismiss = { editTarget = null },
+            onSave = { updated ->
+                viewModel.upsert(updated) { result ->
+                    scope.launch {
+                        result.onSuccess { snackbar.showSnackbar("✅ تم حفظ التعديل: ${updated.name}") }
+                            .onFailure { e -> snackbar.showSnackbar("❌ فشل الحفظ: ${e.message ?: "خطأ"}") }
+                    }
+                }
+                editTarget = null
+            },
+            onSaveCopy = { copy ->
+                viewModel.upsert(copy) { result ->
+                    scope.launch {
+                        result.onSuccess { snackbar.showSnackbar("✅ تم إنشاء نسخة: ${copy.name}") }
+                            .onFailure { e -> snackbar.showSnackbar("❌ فشل الحفظ: ${e.message ?: "خطأ"}") }
+                    }
+                }
+                editTarget = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun AgentEditDialog(
+    agent: AgentProfile,
+    onDismiss: () -> Unit,
+    onSave: (AgentProfile) -> Unit,
+    onSaveCopy: (AgentProfile) -> Unit
+) {
+    var name by remember(agent.id) { mutableStateOf(agent.name) }
+    var systemPrompt by remember(agent.id) { mutableStateOf(agent.systemPrompt) }
+    var description by remember(agent.id) { mutableStateOf(agent.description) }
+    var personality by remember(agent.id) { mutableStateOf(agent.personality) }
+    var scenario by remember(agent.id) { mutableStateOf(agent.scenario) }
+    var exampleMessages by remember(agent.id) { mutableStateOf(agent.exampleMessages) }
+    var postHistory by remember(agent.id) { mutableStateOf(agent.postHistoryInstructions) }
+    var creatorNotes by remember(agent.id) { mutableStateOf(agent.creatorNotes) }
+
+    fun buildUpdated(): AgentProfile = agent.copy(
+        name = name.trim(),
+        systemPrompt = systemPrompt.trim(),
+        description = description.trim(),
+        personality = personality.trim(),
+        scenario = scenario.trim(),
+        exampleMessages = exampleMessages.trim(),
+        postHistoryInstructions = postHistory.trim(),
+        creatorNotes = creatorNotes.trim(),
+        updatedAt = System.currentTimeMillis()
+    )
+
+    val canSave = name.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("تعديل الوكيل") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "كل الحقول أدناه تُجمع وتُرسل للنموذج كتعليمات (الاسم أيضًا).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("الاسم") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = systemPrompt,
+                    onValueChange = { systemPrompt = it },
+                    label = { Text("التعليمات الرئيسية (System Prompt)") },
+                    minLines = 6,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedButton(
+                    onClick = {
+                        description = ""
+                        personality = ""
+                        scenario = ""
+                        exampleMessages = ""
+                        postHistory = ""
+                        creatorNotes = ""
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("تفريغ بقية الحقول (تبقى التعليمات الرئيسية فقط)") }
+
+                Text(
+                    "حقول أخرى",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                AgentTextField("الوصف (Description)", description) { description = it }
+                AgentTextField("الشخصية (Personality)", personality) { personality = it }
+                AgentTextField("السيناريو (Scenario)", scenario) { scenario = it }
+                AgentTextField("أمثلة الحوار (Example Messages)", exampleMessages) { exampleMessages = it }
+                AgentTextField("تعليمات ما بعد السجل (Post-History)", postHistory) { postHistory = it }
+                AgentTextField("ملاحظات المنشئ (Creator Notes)", creatorNotes) { creatorNotes = it }
+
+                OutlinedButton(
+                    onClick = {
+                        val base = buildUpdated()
+                        val now = System.currentTimeMillis()
+                        val copyName =
+                            if (base.name == agent.name) "${base.name} (نسخة)" else base.name
+                        onSaveCopy(
+                            base.copy(
+                                id = UUID.randomUUID().toString(),
+                                name = copyName,
+                                createdAt = now,
+                                updatedAt = now
+                            )
+                        )
+                    },
+                    enabled = canSave,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("حفظ كنسخة جديدة (يبقى الأصل كما هو)") }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(buildUpdated()) },
+                enabled = canSave
+            ) { Text("حفظ") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("إلغاء") }
+        }
+    )
+}
+
+@Composable
+private fun AgentTextField(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit
+) {
+    var open by remember { mutableStateOf(value.isNotBlank()) }
+
+    if (!open) {
+        TextButton(onClick = { open = true }) { Text("+ $label") }
+    } else {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            label = { Text(label) },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
