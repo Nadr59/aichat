@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
@@ -243,6 +244,9 @@ fun GeckoTestScreen(
     // ✅ قائمة المزيد + نافذة السجلات
     var showMoreMenu by remember { mutableStateOf(false) }
     var showDebugLogs by rememberSaveable { mutableStateOf(false) }
+    
+    // علبة المواد
+    var showMaterials by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         webAgentId = aiSettings.webAgentIdOrNull
@@ -703,6 +707,19 @@ fun GeckoTestScreen(
                         expanded = showMoreMenu,
                         onDismissRequest = { showMoreMenu = false }
                     ) {
+                                                DropdownMenuItem(
+                            text = { Text("علبة المواد") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Inventory2,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                showMoreMenu = false
+                                showMaterials = true
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("عرض السجلات") },
                             leadingIcon = {
@@ -1085,6 +1102,23 @@ fun GeckoTestScreen(
         )
     }
 
+        // =========================
+    // علبة المواد
+    // =========================
+    if (showMaterials) {
+        MaterialsDialog(
+            store = app.materialStore,
+            boxStore = app.boxStore,
+            onDismiss = { showMaterials = false },
+            onInsertToInput = { materialText ->
+                val old = displayedText
+                val merged =
+                    if (old.isBlank()) materialText else old.trimEnd() + "\n\n" + materialText
+                if (enhancedQuery != null) enhancedQuery = merged else query = merged
+                showSendBar = true
+            }
+        )
+    }
     // =========================
     // ✅ نافذة السجلات
     // =========================
