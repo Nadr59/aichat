@@ -601,6 +601,44 @@ fun GeckoTestScreen(
         }
         timeoutRunnable = r
         mainHandler.postDelayed(r, 5000L)
+        
+    // ============================================================
+    // علبة المواد: معالجة الخلاصات في الخلفية (عبر مزود API)
+    // ============================================================
+
+    val digestSender: (suspend (String, String) -> String?)? =
+        remember<(suspend (String, String) -> String?)?>(chatViewModel) {
+            val vm = chatViewModel
+            if (vm == null) {
+                null
+            } else {
+                val s: suspend (String, String) -> String? = { persona, input ->
+                    vm.repository.sendMessage(
+                        history = emptyList(),
+                        userMessage = input,
+                        imageBase64 = null,
+                        memoryContext = "",
+                        hasMemorySource = false,
+                        agentPrompt = persona
+                    )
+                }
+                s
+            }
+        }
+    val digestHasWork = app.materialStore.items.any {
+        it.status == com.example.aichat.repository.MaterialStatus.PENDING ||
+            it.status == com.example.aichat.repository.MaterialStatus.PROCESSING
+    }
+    LaunchedEffect(digestSender, digestHasWork) {
+        val sender = digestSender
+        if (digestHasWork && sender != null) {
+            com.example.aichat.repository.MaterialDigestRunner.runPending(
+                store = app.materialStore,
+                sender = sender,
+                log = { app.logDebug(it) }
+            )
+        }
+    }
     }
 
     // ============================================================
