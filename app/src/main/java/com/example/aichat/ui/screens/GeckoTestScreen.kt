@@ -1,5 +1,4 @@
 
-
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package com.example.aichat.ui.screens
@@ -15,7 +14,10 @@ import android.os.Looper
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,12 +31,16 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
@@ -42,6 +48,10 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
@@ -60,12 +70,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -81,12 +88,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -118,7 +130,7 @@ import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
 
 /**
- * GeckoTestScreen (Tabs + GeckoView + SendBar) — سقالة تطوير للويب.
+ * GeckoTestScreen (Tabs + GeckoView + SendBar) — شاشة متصفح مزودات الويب.
  *
  * الهدف الاستراتيجي: شاشة محادثة واحدة (ChatScreen) يعمل فيها GeckoView
  * كمحرك خلفي مخفي. هذه الشاشة تبقى أداة اختبار/تشخيص — وستبقى ظاهرة
@@ -130,6 +142,9 @@ import org.mozilla.geckoview.WebRequestError
  *   vm.workspaceSummary — نفس المصدر الذي يُحدَّث، فيتطابقان دائمًا.
  * - أُزيل الاعتماد على Reflection لاستخراج ConversationRepository:
  *   الحقن يقرأ StateFlow مباشرة، والشجرة تعمل عبر دوال الـVM العامة.
+ *
+ * ✅ تصميم الواجهة: رأس بنفسجي فاتح قابل للطي (كبسولة أدوات + أقراص منصات)،
+ * ومربع إدخال قابل للطي، لإعطاء أكبر مساحة لصفحة الويب.
  */
 @Composable
 fun GeckoTestScreen(
@@ -155,7 +170,7 @@ fun GeckoTestScreen(
     }
     val currentWorkspaceSummary by workspaceSummaryFlow.collectAsStateWithLifecycle()
 
-    // عرض رسائل النجاح/الخطأ القادمة من الـVM داخل شاشة الويب (سقالة تطوير).
+    // عرض رسائل النجاح/الخطأ القادمة من الـVM داخل شاشة الويب.
     val vmErrorFlow = remember(chatViewModel) {
         chatViewModel?.error ?: MutableStateFlow<String?>(null)
     }
@@ -244,9 +259,12 @@ fun GeckoTestScreen(
     // ✅ قائمة المزيد + نافذة السجلات
     var showMoreMenu by remember { mutableStateOf(false) }
     var showDebugLogs by rememberSaveable { mutableStateOf(false) }
-    
+
     // علبة المواد
     var showMaterials by remember { mutableStateOf(false) }
+
+    // ✅ طي الرأس العلوي (كبسولة الأدوات + أقراص المنصات) لتكبير صفحة الويب
+    var showHeader by rememberSaveable { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         webAgentId = aiSettings.webAgentIdOrNull
@@ -602,6 +620,7 @@ fun GeckoTestScreen(
         timeoutRunnable = r
         mainHandler.postDelayed(r, 5000L)
     }
+
     // ============================================================
     // علبة المواد: معالجة الخلاصات في الخلفية (عبر مزود API)
     // ============================================================
@@ -639,7 +658,6 @@ fun GeckoTestScreen(
             )
         }
     }
-    
 
     // ============================================================
     // Back handling
@@ -667,202 +685,295 @@ fun GeckoTestScreen(
     // UI
     // ============================================================
 
-    Column(modifier = modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                Column {
-                    Text(
-                        text = platform.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+    val colors = MaterialTheme.colorScheme
+    val webShape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
 
-                    Text(
-                        text = "الوكيل: ${webAgentName ?: "بدون وكيل"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onHome) {
-                    Icon(
-                        Icons.Filled.Home,
-                        contentDescription = "العودة إلى الشاشة الرئيسية"
-                    )
-                }
-            },
-            actions = {
-                // الوكيل
-                IconButton(onClick = { showWebAgentDialog = true }) {
-                    Icon(
-                        Icons.Filled.SmartToy,
-                        contentDescription = "اختيار الوكيل"
-                    )
-                }
-
-                // الحفظ
-                if (chatViewModel != null && platform.memoryEnabled) {
-                    IconButton(
-                        onClick = saveToMemory,
-                        enabled = !isSavingMemory && !isLoading
-                    ) {
-                        Text(if (isSavingMemory) "⏳" else "🧠")
-                    }
-                }
-
-                // الفروع
-                if (chatViewModel != null) {
-                    IconButton(onClick = { showWebTreeSheet = true }) {
-                        Icon(
-                            Icons.Filled.AccountTree,
-                            contentDescription = "شجرة المحادثات"
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colors.background)
+    ) {
+        if (showHeader) {
+            // ───────── الرأس المفتوح ─────────
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(colors.primaryContainer, colors.background)
                         )
-                    }
-                }
-
-                // إظهار/إخفاء مربع الإدخال
-                IconButton(
-                    onClick = { showSendBar = !showSendBar }
+                    )
+                    .statusBarsPadding()
+                    .padding(top = 8.dp, bottom = 6.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(if (showSendBar) "⌄" else "⌨️")
-                }
-
-                // بقية الأدوات في قائمة واحدة
-                Box {
-                    IconButton(onClick = { showMoreMenu = true }) {
+                    // الرئيسية
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .shadow(3.dp, RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.surface)
+                            .clickable(onClick = onHome),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
-                            Icons.Filled.MoreVert,
-                            contentDescription = "المزيد"
+                            Icons.Filled.Home,
+                            contentDescription = "العودة إلى الشاشة الرئيسية",
+                            tint = colors.primary
                         )
                     }
 
-                    DropdownMenu(
-                        expanded = showMoreMenu,
-                        onDismissRequest = { showMoreMenu = false }
+                    Spacer(Modifier.width(10.dp))
+
+                    // العنوان + الوكيل
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = platform.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "الوكيل: ${webAgentName ?: "بدون وكيل"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
+                    // كبسولة الأدوات
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = colors.surface,
+                        shadowElevation = 3.dp
                     ) {
-                                                DropdownMenuItem(
-                            text = { Text("علبة المواد") },
-                            leadingIcon = {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // الوكيل
+                            IconButton(
+                                onClick = { showWebAgentDialog = true },
+                                modifier = Modifier.size(36.dp)
+                            ) {
                                 Icon(
-                                    Icons.Filled.Inventory2,
-                                    contentDescription = null
+                                    Icons.Filled.SmartToy,
+                                    contentDescription = "اختيار الوكيل",
+                                    tint = colors.primary,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                showMaterials = true
                             }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("عرض السجلات") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Filled.BugReport,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                showDebugLogs = true
-                            }
-                        )
 
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (memoryInjectionEnabled)
-                                        "إيقاف حقن الذاكرة"
-                                    else
-                                        "تفعيل حقن الذاكرة"
-                                )
-                            },
-                            onClick = {
-                                memoryInjectionEnabled = !memoryInjectionEnabled
-                                showMoreMenu = false
-                            },
-                            enabled = chatViewModel != null && platform.memoryEnabled
-                        )
-
-                        DropdownMenuItem(
-                            text = { Text("الرجوع داخل الصفحة") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                if (canGoBack) {
-                                    runCatching { session.goBack() }
-                                } else {
-                                    onBack()
+                            // حفظ آخر رد كذاكرة
+                            if (chatViewModel != null && platform.memoryEnabled) {
+                                IconButton(
+                                    onClick = saveToMemory,
+                                    enabled = !isSavingMemory && !isLoading,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    if (isSavingMemory) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Filled.Memory,
+                                            contentDescription = "حفظ آخر رد كذاكرة",
+                                            tint = if (isLoading) colors.outline else colors.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
-                        )
 
-                        DropdownMenuItem(
-                            text = { Text("تحديث الصفحة") },
-                            leadingIcon = {
-                                Icon(Icons.Filled.Refresh, contentDescription = null)
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                if (session.isOpen) session.reload()
+                            // الفروع
+                            if (chatViewModel != null) {
+                                IconButton(
+                                    onClick = { showWebTreeSheet = true },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.AccountTree,
+                                        contentDescription = "شجرة المحادثات",
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
-                        )
 
-                        DropdownMenuItem(
-                            text = { Text("فتح في المتصفح الخارجي") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Filled.OpenInBrowser,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                openExternal(context, currentUrl)
+                            // بقية الأدوات في قائمة واحدة
+                            Box {
+                                IconButton(
+                                    onClick = { showMoreMenu = true },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.MoreVert,
+                                        contentDescription = "المزيد",
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showMoreMenu,
+                                    onDismissRequest = { showMoreMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("علبة المواد") },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.Inventory2,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            showMaterials = true
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = { Text("عرض السجلات") },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.BugReport,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            showDebugLogs = true
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (memoryInjectionEnabled)
+                                                    "إيقاف حقن الذاكرة"
+                                                else
+                                                    "تفعيل حقن الذاكرة"
+                                            )
+                                        },
+                                        onClick = {
+                                            memoryInjectionEnabled = !memoryInjectionEnabled
+                                            showMoreMenu = false
+                                        },
+                                        enabled = chatViewModel != null && platform.memoryEnabled
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = { Text("الرجوع داخل الصفحة") },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            if (canGoBack) {
+                                                runCatching { session.goBack() }
+                                            } else {
+                                                onBack()
+                                            }
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = { Text("تحديث الصفحة") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Refresh, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            if (session.isOpen) session.reload()
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = { Text("فتح في المتصفح الخارجي") },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.OpenInBrowser,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            openExternal(context, currentUrl)
+                                        }
+                                    )
+                                }
                             }
-                        )
-                    }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.background
-            )
-        )
 
-        if (enabledPlatforms.isNotEmpty()) {
-            val selectedIndex =
-                enabledPlatforms.indexOfFirst { it.id == platform.id }.let { if (it >= 0) it else 0 }
-
-            ScrollableTabRow(selectedTabIndex = selectedIndex, edgePadding = 8.dp) {
-                enabledPlatforms.forEach { tabPlatform ->
-                    val isSelected = tabPlatform.id == platform.id
-                    Tab(
-                        selected = isSelected,
-                        onClick = { if (!isSelected) activePlatformId = tabPlatform.id },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            // طي الرأس
+                            IconButton(
+                                onClick = { showHeader = false },
+                                modifier = Modifier.size(36.dp)
                             ) {
-                                if (tabPlatform.iconEmoji.isNotBlank()) Text(tabPlatform.iconEmoji)
-                                Text(tabPlatform.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(
+                                    Icons.Filled.KeyboardArrowUp,
+                                    contentDescription = "طي الشريط العلوي",
+                                    tint = colors.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
                             }
                         }
-                    )
+                    }
+                }
+
+                // أقراص المنصات
+                if (enabledPlatforms.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        enabledPlatforms.forEach { tabPlatform ->
+                            val isSelected = tabPlatform.id == platform.id
+                            PlatformPill(
+                                id = tabPlatform.id,
+                                name = tabPlatform.name,
+                                selected = isSelected,
+                                onClick = { if (!isSelected) activePlatformId = tabPlatform.id }
+                            )
+                        }
+                    }
                 }
             }
+        } else {
+            // ───────── الرأس المطوي ─────────
+            CollapsedTopStrip(
+                title = platform.name,
+                onExpand = { showHeader = true }
+            )
         }
 
-        Box(modifier = Modifier.weight(1f)) {
+        // ───────── صفحة الويب ─────────
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clip(webShape)
+                .background(colors.surface)
+        ) {
             key(sessionKey) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -912,14 +1023,33 @@ fun GeckoTestScreen(
                     onOpenBrowser = { openExternal(context, currentUrl) }
                 )
             }
+
+            // زر عائم لإظهار مربع الإدخال بعد طيه
+            if (!showSendBar) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(14.dp)
+                        .size(44.dp)
+                        .shadow(4.dp, CircleShape)
+                        .clip(CircleShape)
+                        .background(colors.primary)
+                        .clickable { showSendBar = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.Keyboard,
+                        contentDescription = "إظهار مربع الإدخال",
+                        tint = colors.onPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
         }
 
         if (showSendBar) {
             WebSendBar(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding(),
+                modifier = Modifier.fillMaxWidth(),
                 text = displayedText,
                 onTextChange = { if (enhancedQuery != null) enhancedQuery = it else query = it },
                 isEnhanced = enhancedQuery != null,
@@ -929,6 +1059,7 @@ fun GeckoTestScreen(
                 includeMemory = includeMemory,
                 curatorReasoning = curatorReasoning,
                 onToggleMemory = { includeMemory = !includeMemory },
+                onCollapse = { showSendBar = false },
                 onEnhance = {
                     val t = displayedText.trim()
                     if (t.isBlank()) return@WebSendBar
@@ -1140,7 +1271,7 @@ fun GeckoTestScreen(
         )
     }
 
-        // =========================
+    // =========================
     // علبة المواد
     // =========================
     if (showMaterials) {
@@ -1157,6 +1288,7 @@ fun GeckoTestScreen(
             }
         )
     }
+
     // =========================
     // ✅ نافذة السجلات
     // =========================
@@ -1280,6 +1412,101 @@ private data class PendingWebHandoff(
     val targetPlatformId: String,
     val summary: String
 )
+
+/* ============================ Header pieces ============================ */
+
+private val PlatformDotPalette = listOf(
+    Color(0xFFB8F0DC),
+    Color(0xFFFFC38A),
+    Color(0xFFD9D0FF),
+    Color(0xFFBFE3FF),
+    Color(0xFFFFD3E0)
+)
+
+/** شريط رفيع يظهر عند طي الرأس: اسم المنصة وسهم للفتح. */
+@Composable
+private fun CollapsedTopStrip(
+    title: String,
+    onExpand: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.primaryContainer)
+            .statusBarsPadding()
+            .clickable(onClick = onExpand)
+            .padding(horizontal = 14.dp)
+            .height(30.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.Filled.KeyboardArrowDown,
+            contentDescription = "إظهار الشريط العلوي",
+            tint = colors.primary,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+/** قرص منصة: دائرة بحرفها الأول + الاسم. المختار بنفسجي غامق. */
+@Composable
+private fun PlatformPill(
+    id: String,
+    name: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(20.dp)
+    val bg = if (selected) colors.primary else colors.surface
+    val fg = if (selected) colors.onPrimary else colors.onSurface
+    val dot = PlatformDotPalette[(id.hashCode() and 0x7fffffff) % PlatformDotPalette.size]
+    val letter = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+
+    Row(
+        modifier = Modifier
+            .shadow(if (selected) 0.dp else 1.dp, shape)
+            .clip(shape)
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(dot),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = letter,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF1B1230)
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
 
 /* ============================ Web Tree BottomSheet ============================ */
 
@@ -1668,7 +1895,7 @@ private fun ConversationRowLite(
     }
 }
 
-/* ============================ Send bar (كما كان) ============================ */
+/* ============================ Send bar (التصميم الجديد) ============================ */
 
 @Composable
 private fun WebSendBar(
@@ -1682,23 +1909,73 @@ private fun WebSendBar(
     includeMemory: Boolean,
     curatorReasoning: String,
     onToggleMemory: () -> Unit,
+    onCollapse: () -> Unit,
     onEnhance: () -> Unit,
     onClearEnhanced: () -> Unit,
     onSend: () -> Unit
 ) {
-    Card(
+    val colors = MaterialTheme.colorScheme
+    val canSend = text.isNotBlank() && !isSending && !isEnhancing
+
+    Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        color = colors.surface,
+        shadowElevation = 8.dp
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
+            modifier = Modifier
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // شرائح صغيرة: تحسين + ذاكرة + سهم الطي
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val enhanceEnabled = text.isNotBlank() && !isSending && !isEnhancing
+                MiniChip(
+                    label = when {
+                        isEnhanced -> "↩️ تراجع عن التحسين"
+                        isEnhancing -> "… جاري التحسين"
+                        else -> "⚡ تحسين"
+                    },
+                    selected = isEnhanced,
+                    enabled = if (isEnhanced) !isSending else enhanceEnabled,
+                    onClick = if (isEnhanced) onClearEnhanced else onEnhance
+                )
+
+                if (memoryEnabled) {
+                    MiniChip(
+                        label = "🧠 ذاكرة",
+                        selected = includeMemory,
+                        enabled = !isSending && !isEnhancing,
+                        onClick = onToggleMemory
+                    )
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                IconButton(
+                    onClick = onCollapse,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = "طي مربع الإدخال",
+                        tint = colors.primary
+                    )
+                }
+            }
+
             if (includeMemory && curatorReasoning.isNotBlank()) {
                 Text(
                     text = "🧠 اختيار الوسيط: $curatorReasoning",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = colors.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1709,22 +1986,6 @@ private fun WebSendBar(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (memoryEnabled) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clickable(enabled = !isSending && !isEnhancing, onClick = onToggleMemory)
-                            .padding(horizontal = 6.dp, vertical = 6.dp)
-                    ) {
-                        Checkbox(
-                            checked = includeMemory,
-                            onCheckedChange = { onToggleMemory() },
-                            enabled = !isSending && !isEnhancing
-                        )
-                        Text("ذاكرة", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-
                 OutlinedTextField(
                     value = text,
                     onValueChange = onTextChange,
@@ -1732,31 +1993,71 @@ private fun WebSendBar(
                     minLines = 1,
                     maxLines = 5,
                     enabled = !isSending,
+                    shape = RoundedCornerShape(24.dp),
                     textStyle = MaterialTheme.typography.bodyMedium,
-                    label = { Text(if (isEnhanced) "مُحسّن ✨" else "اكتب رسالتك") }
+                    placeholder = { Text(if (isEnhanced) "مُحسّن ✨" else "اكتب رسالتك") }
                 )
 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(
-                        onClick = if (isEnhanced) onClearEnhanced else onEnhance,
-                        enabled = text.isNotBlank() && !isSending && !isEnhancing
-                    ) {
-                        if (!isEnhanced && isEnhancing) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text(if (isEnhanced) "↩️" else "⚡")
-                        }
-                    }
-
-                    IconButton(
-                        onClick = onSend,
-                        enabled = text.isNotBlank() && !isSending && !isEnhancing
-                    ) {
-                        Text(if (isSending) "⏳" else "📤")
+                Box(
+                    modifier = Modifier
+                        .padding(bottom = 4.dp)
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (canSend) colors.primary else colors.primaryContainer)
+                        .clickable(enabled = canSend, onClick = onSend),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSending) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "إرسال",
+                            tint = if (canSend) colors.onPrimary else colors.outline,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MiniChip(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(16.dp)
+    val bg = if (selected) colors.primaryContainer else colors.background
+    val fg = when {
+        !enabled -> colors.outline
+        selected -> colors.primary
+        else -> colors.onSurface
+    }
+
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(bg)
+            .border(1.dp, if (selected) colors.primary else colors.outline, shape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = fg,
+            maxLines = 1
+        )
     }
 }
 
