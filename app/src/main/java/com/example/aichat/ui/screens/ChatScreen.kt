@@ -78,6 +78,8 @@ import com.example.aichat.ui.viewmodel.SavedChain
 import com.example.aichat.ui.viewmodel.MAX_SAVED_CHAIN_NAME_CHARS
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.material.icons.filled.Inventory2
+import com.example.aichat.repository.exportReplyToMaterial
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -977,6 +979,24 @@ fun ChatScreen(
                                     },
                                     onSaveMemory = {
                                         memoryMessage = msg
+                                    },
+                                                                        onExport = {
+                                        val label = activeProviderLabel?.toString()
+                                        val result = exportReplyToMaterial(
+                                            store = app.materialStore,
+                                            replyText = msg.content,
+                                            sourceLabel = if (label.isNullOrBlank()) "ردّ نموذج" else label,
+                                            key = "${msg.id}-${msg.content.hashCode()}"
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            when (result) {
+                                                true -> "أُضيف إلى العلبة"
+                                                false -> "تعذّر الإضافة (ربما العلبة ممتلئة)"
+                                                null -> "لا يوجد نص للتصدير"
+                                            },
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                     },
                                     onBranch = {
                                         viewModel.branchFromMessage(msg.id)
@@ -2358,7 +2378,8 @@ private fun ThinkingBubble() {
 private fun MessageBubble(
     message: Message,
     onCopy: () -> Unit,
-    onSaveMemory: () -> Unit,
+        onSaveMemory: () -> Unit,
+    onExport: () -> Unit,
     onBranch: () -> Unit,
     branchEnabled: Boolean
 ) {
@@ -2429,6 +2450,24 @@ private fun MessageBubble(
                     onClick = {
                         actionsMenuExpanded = false
                         onSaveMemory()
+                    }
+                )
+                
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Inventory2,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("تصدير إلى العلبة")
+                        }
+                    },
+                    onClick = {
+                        actionsMenuExpanded = false
+                        onExport()
                     }
                 )
 
