@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,8 +45,10 @@ import com.example.aichat.ui.screens.materialToInputText
 import kotlinx.coroutines.delay
 
 /**
- * لوحة علبة المواد داخل لوحة المفاتيح. للقراءة فقط.
+ * لوحة علبة المواد وأدوات النص داخل لوحة المفاتيح.
  * onInsert: يدرج النص عند المؤشر ويعيد هل نجح. لا يرسل.
+ * session: يتغيّر مع كل حقل كتابة جديد فتُمسح نتيجة «أدوات النص» القديمة.
+ * host: صلة «أدوات النص» بالحقل والمزوّد.
  * onSwitchKeyboard: يفتح قائمة اختيار لوحة المفاتيح في النظام.
  */
 @Composable
@@ -53,6 +56,8 @@ fun MaterialsKeyboardPanel(
     store: MaterialStore,
     boxStore: BoxStore,
     blockedReason: String?,
+    session: Int,
+    host: TextToolsHost,
     onInsert: (String) -> Boolean,
     onSwitchKeyboard: () -> Unit
 ) {
@@ -67,10 +72,14 @@ fun MaterialsKeyboardPanel(
         }
     }
 
+    fun showStatus(message: String) {
+        tick++
+        status = message to tick
+    }
+
     fun doInsert(text: String, label: String) {
         val ok = onInsert(text)
-        tick++
-        status = (if (ok) "✓ أُدرج: $label" else "⚠️ تعذّر الإدراج في هذا الحقل") to tick
+        showStatus(if (ok) "✓ أُدرج: $label" else "⚠️ تعذّر الإدراج في هذا الحقل")
     }
 
     // قراءة القوائم هنا تجعل اللوحة تتحدّث تلقائيًا
@@ -101,6 +110,11 @@ fun MaterialsKeyboardPanel(
                     selected = tab == 1,
                     onClick = { tab = 1 },
                     text = { Text("العلب الصغيرة (${boxes.size})") }
+                )
+                Tab(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    text = { Text("أدوات النص") }
                 )
             }
         }
@@ -136,7 +150,7 @@ fun MaterialsKeyboardPanel(
                     }
                 }
 
-                else -> {
+                tab == 1 -> {
                     if (boxes.isEmpty()) {
                         Message("لا علب صغيرة. أنشئها من علبة المواد داخل AiChat.")
                     } else {
@@ -199,6 +213,13 @@ fun MaterialsKeyboardPanel(
                             }
                         }
                     }
+                }
+
+                else -> key(session) {
+                    TextToolsTab(
+                        host = host,
+                        onStatus = { showStatus(it) }
+                    )
                 }
             }
         }
