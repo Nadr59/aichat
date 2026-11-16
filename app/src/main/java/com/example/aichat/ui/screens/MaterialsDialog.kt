@@ -1062,7 +1062,7 @@ private fun MaterialRow(
 }
 
 /** مادة مُلخَّصة وجاهزة (حالتها READY ولها خلاصة). */
-private fun isReady(m: MaterialItem): Boolean =
+ fun isReady(m: MaterialItem): Boolean =
     m.status == MaterialStatus.READY && m.digest != null
 
 /** هل يصحّ وضع المادة في طابور التلخيص (غير ضعيفة، ولم تُلخَّص أو فشلت). */
@@ -1071,7 +1071,7 @@ private fun canDigestItem(m: MaterialItem): Boolean =
         (m.status == MaterialStatus.NONE || m.status == MaterialStatus.FAILED)
 
 /** كل ما يُبحث فيه عن المادة (الخلاصة إن وُجدت، ثم الأصل). */
-private fun searchableText(m: MaterialItem): String = buildString {
+ fun searchableText(m: MaterialItem): String = buildString {
     append(m.title).append(' ')
     m.digest?.let { d ->
         append(d.titleAr).append(' ')
@@ -1114,7 +1114,7 @@ private fun materialToInputText(m: MaterialItem): String = buildString {
  * بأرقام [م1]…، ثم قسم «المصادر» بالروابط الحقيقية من رابط كل مادة
  * (الخلاصة نفسها لا تحمل روابط).
  */
-private fun boxToInputText(
+ fun boxToInputText(
     boxName: String,
     question: String,
     ready: List<MaterialItem>
