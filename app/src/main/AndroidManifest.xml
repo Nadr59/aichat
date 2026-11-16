@@ -57,7 +57,21 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-        </activity>
+                </activity>
+
+        <!-- لوحة مفاتيح AiChat: علبة المواد (إدراج عند المؤشر، لا إرسال) -->
+        <service
+            android:name=".AiChatKeyboardService"
+            android:label="علبة AiChat"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/aichat_keyboard_method" />
+        </service>
 
     </application>
 
