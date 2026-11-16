@@ -1071,7 +1071,7 @@ private fun canDigestItem(m: MaterialItem): Boolean =
         (m.status == MaterialStatus.NONE || m.status == MaterialStatus.FAILED)
 
 /** كل ما يُبحث فيه عن المادة (الخلاصة إن وُجدت، ثم الأصل). */
- fun searchableText(m: MaterialItem): String = buildString {
+private fun searchableText(m: MaterialItem): String = buildString {
     append(m.title).append(' ')
     m.digest?.let { d ->
         append(d.titleAr).append(' ')
@@ -1102,7 +1102,7 @@ private fun normalizeForSearch(s: String): String {
 }
 
 /** ما يوضع في مربع الإدخال (أو يُرسل إلى وكيل): العنوان الأصلي، الرابط، ثم النص (بلا قائمة الروابط). */
-private fun materialToInputText(m: MaterialItem): String = buildString {
+ fun materialToInputText(m: MaterialItem): String = buildString {
     if (m.title.isNotBlank()) append(m.title).append('\n')
     if (m.url.isNotBlank()) append(m.url).append('\n')
     if (isNotEmpty()) append('\n')
