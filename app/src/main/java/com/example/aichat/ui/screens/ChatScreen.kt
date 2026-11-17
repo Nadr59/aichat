@@ -80,6 +80,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.material.icons.filled.Inventory2
 import com.example.aichat.repository.exportReplyToMaterial
+import com.example.aichat.ui.screens.QuestionsSaveDialog
+import com.example.aichat.ui.screens.splitQuestionBlocks
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2381,6 +2383,7 @@ private fun MessageBubble(
         onSaveMemory: () -> Unit,
     onExport: () -> Unit,
     onBranch: () -> Unit,
+        materialStore: com.example.aichat.repository.MaterialStore,
     branchEnabled: Boolean
 ) {
     val isUser = remember(message) {
