@@ -1002,6 +1002,7 @@ fun ChatScreen(
                                     },
                                     onBranch = {
                                         viewModel.branchFromMessage(msg.id)
+                                                materialStore = app.materialStore,
                                     },
                                     branchEnabled = !isLoading
                                 )
@@ -2406,6 +2407,8 @@ private fun MessageBubble(
 
     // ✅ قائمة الإجراءات — تظهر فقط عند long-press (بدل الأيقونات الدائمة).
     var actionsMenuExpanded by remember { mutableStateOf(false) }
+        var showSaveQuestions by remember { mutableStateOf(false) }
+    val questionCount = remember(message.content) { splitQuestionBlocks(message.content).size }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2434,6 +2437,13 @@ private fun MessageBubble(
                 )
             }
 
+                        if (showSaveQuestions) {
+                QuestionsSaveDialog(
+                    store = materialStore,
+                    text = message.content,
+                    onDismiss = { showSaveQuestions = false }
+                )
+                        }
             DropdownMenu(
                 expanded = actionsMenuExpanded,
                 onDismissRequest = { actionsMenuExpanded = false }
@@ -2492,6 +2502,26 @@ private fun MessageBubble(
                     },
                     enabled = branchEnabled
                 )
+                
+                if (questionCount > 0) {
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Filled.Inventory2,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("حفظ الأسئلة في العلبة ($questionCount)")
+                            }
+                        },
+                        onClick = {
+                            actionsMenuExpanded = false
+                            showSaveQuestions = true
+                        }
+                    )
+                }
             }
         }
     }
