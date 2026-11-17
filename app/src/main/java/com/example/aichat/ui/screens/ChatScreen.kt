@@ -1002,8 +1002,9 @@ fun ChatScreen(
                                     },
                                     onBranch = {
                                         viewModel.branchFromMessage(msg.id)
-                                                materialStore = app.materialStore,
+                                                
                                     },
+                                            materialStore = app.materialStore,
                                     branchEnabled = !isLoading
                                 )
                             }
