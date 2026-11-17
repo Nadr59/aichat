@@ -36,6 +36,7 @@ import com.example.aichat.repository.MaterialBox
 import com.example.aichat.repository.MaterialItem
 import com.example.aichat.repository.MaterialStatus
 import com.example.aichat.repository.MaterialStore
+import com.example.aichat.repository.SharedMaterialParser
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -143,6 +144,12 @@ fun MaterialsDialog(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                                IconButton(
+                    onClick = { pasteFromClipboard(context, store) },
+                    enabled = !selecting
+                ) {
+                    Icon(Icons.Filled.ContentPaste, contentDescription = "لصق من الحافظة")
+                                }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.Close, contentDescription = "إغلاق")
                 }
@@ -1189,6 +1196,43 @@ private fun copyToClipboard(context: Context, text: String, okMessage: String) {
     Toast.makeText(
         context,
         if (ok) okMessage else "تعذّر النسخ (قد يكون الحجم كبيرًا)",
+        Toast.LENGTH_SHORT
+    ).show()
+}
+/** يضيف نص الحافظة مادةً جديدة بالطريقة نفسها المتبعة في المشاركة. بضغطة المستخدم فقط، ولا يرسل شيئًا إلى نموذج. */
+private fun pasteFromClipboard(context: Context, store: MaterialStore) {
+    val raw: String = runCatching {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = cm.primaryClip
+        val isText = cm.primaryClipDescription?.hasMimeType("text/*") == true
+        if (!isText || clip == null || clip.itemCount == 0) ""
+        else clip.getItemAt(0).coerceToText(context)?.toString().orEmpty()
+    }.getOrDefault("")
+
+    if (raw.isBlank()) {
+        Toast.makeText(context, "الحافظة فارغة أو ليست نصًا", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    val item = SharedMaterialParser.parse(raw, null, "clipboard")
+    if (item == null) {
+        Toast.makeText(context, "تعذّرت إضافة النص", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    // لا نستبدل مادة موجودة (قد تحمل خلاصة)
+    if (store.items.any { it.id == item.id }) {
+        Toast.makeText(context, "هذه المادة موجودة في العلبة", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    store.upsert(item, "paste-" + System.currentTimeMillis())
+
+    Toast.makeText(
+        context,
+        "أُضيف من الحافظة (${item.text.length} حرف)" +
+            (if (item.truncated) " — اقتُطع إلى 8000 حرف" else "") +
+            (if (item.reason == "link_only") "\nرابط فقط، لم يُجلب محتوى الصفحة" else ""),
         Toast.LENGTH_SHORT
     ).show()
 }
