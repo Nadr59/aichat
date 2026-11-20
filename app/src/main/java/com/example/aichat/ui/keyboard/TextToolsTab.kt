@@ -65,7 +65,7 @@ private class ToolResult(
     val output: String
 )
 
-private fun translatePrompt(language: String): String = """
+ fun translatePrompt(language: String): String = """
 You are a translation engine. Translate the user's message into $language.
 Rules:
 - Output only the translation: no explanations, notes, quotes or code fences.
