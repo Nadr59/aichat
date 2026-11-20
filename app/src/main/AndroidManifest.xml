@@ -58,6 +58,20 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
                 </activity>
+                <!-- معالجة النص المحدد: نافذة صغيرة فوق التطبيق (ترجمة/تنقيح/تلخيص/وكلاء) -->
+        <activity
+            android:name=".TextToolsActivity"
+            android:exported="true"
+            android:label="AiChat – معالجة النص"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="stateAlwaysHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
 
         <!-- لوحة مفاتيح AiChat: علبة المواد (إدراج عند المؤشر، لا إرسال) -->
         <service
