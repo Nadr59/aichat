@@ -20,9 +20,9 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,8 +45,9 @@ import com.example.aichat.ui.screens.materialToInputText
 import kotlinx.coroutines.delay
 
 /**
- * لوحة علبة المواد وأدوات النص داخل لوحة المفاتيح.
+ * لوحة مفاتيح AiChat: حروف، علبة المواد، العلب الصغيرة، أدوات النص.
  * onInsert: يدرج النص عند المؤشر ويعيد هل نجح. لا يرسل.
+ * onDelete / onEnter: مفتاحا الحذف و Enter في تبويب الحروف.
  * session: يتغيّر مع كل حقل كتابة جديد فتُمسح نتيجة «أدوات النص» القديمة.
  * host: صلة «أدوات النص» بالحقل والمزوّد.
  * onSwitchKeyboard: يفتح قائمة اختيار لوحة المفاتيح في النظام.
@@ -59,9 +60,13 @@ fun MaterialsKeyboardPanel(
     session: Int,
     host: TextToolsHost,
     onInsert: (String) -> Boolean,
+    onDelete: () -> Unit,
+    onEnter: () -> Unit,
     onSwitchKeyboard: () -> Unit
 ) {
+    // 0 = حروف (الافتراضي)، 1 = مواد، 2 = علب، 3 = أدوات النص
     var tab by remember { mutableStateOf(0) }
+    var lettersArabic by remember { mutableStateOf(true) }
     var tick by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf<Pair<String, Int>?>(null) }
 
@@ -100,21 +105,30 @@ fun MaterialsKeyboardPanel(
             IconButton(onClick = onSwitchKeyboard) {
                 Icon(Icons.Filled.Language, contentDescription = "تبديل لوحة المفاتيح")
             }
-            TabRow(selectedTabIndex = tab, modifier = Modifier.weight(1f)) {
+            ScrollableTabRow(
+                selectedTabIndex = tab,
+                edgePadding = 0.dp,
+                modifier = Modifier.weight(1f)
+            ) {
                 Tab(
                     selected = tab == 0,
                     onClick = { tab = 0 },
-                    text = { Text("المواد (${materials.size})") }
+                    text = { Text("حروف", maxLines = 1) }
                 )
                 Tab(
                     selected = tab == 1,
                     onClick = { tab = 1 },
-                    text = { Text("العلب الصغيرة (${boxes.size})") }
+                    text = { Text("المواد (${materials.size})", maxLines = 1) }
                 )
                 Tab(
                     selected = tab == 2,
                     onClick = { tab = 2 },
-                    text = { Text("أدوات النص") }
+                    text = { Text("العلب (${boxes.size})", maxLines = 1) }
+                )
+                Tab(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
+                    text = { Text("أدوات النص", maxLines = 1) }
                 )
             }
         }
@@ -132,7 +146,15 @@ fun MaterialsKeyboardPanel(
             when {
                 blockedReason != null -> Message(blockedReason)
 
-                tab == 0 -> {
+                tab == 0 -> LettersTab(
+                    arabic = lettersArabic,
+                    onToggleLanguage = { lettersArabic = !lettersArabic },
+                    onInsert = onInsert,
+                    onDelete = onDelete,
+                    onEnter = onEnter
+                )
+
+                tab == 1 -> {
                     if (materials.isEmpty()) {
                         Message("لا مواد في العلبة. التقط صفحات من داخل AiChat بزر «التقط».")
                     } else {
@@ -150,7 +172,7 @@ fun MaterialsKeyboardPanel(
                     }
                 }
 
-                tab == 1 -> {
+                tab == 2 -> {
                     if (boxes.isEmpty()) {
                         Message("لا علب صغيرة. أنشئها من علبة المواد داخل AiChat.")
                     } else {
