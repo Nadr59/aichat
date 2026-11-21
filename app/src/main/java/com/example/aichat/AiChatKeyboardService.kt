@@ -4,6 +4,7 @@ import android.content.Context
 import android.inputmethodservice.InputMethodService
 import android.text.InputType
 import android.view.View
+import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.runtime.getValue
@@ -101,6 +102,8 @@ class AiChatKeyboardService :
                         session = session,
                         host = host,
                         onInsert = { insertText(it) },
+                        onDelete = { deleteBackward() },
+                        onEnter = { pressEnter() },,
                         onSwitchKeyboard = { switchKeyboard() }
                     )
                 }
@@ -141,6 +144,31 @@ class AiChatKeyboardService :
     private fun insertText(text: String): Boolean {
         val ic = currentInputConnection ?: return false
         return runCatching { ic.commitText(text, 1) }.getOrDefault(false)
+    }
+    /** يحذف حرفًا قبل المؤشر (أو المحدد) بضغطة مفتاح حذف، دون قراءة نص الحقل. */
+    private fun deleteBackward() {
+        runCatching { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL) }
+    }
+
+    /**
+     * Enter كلوحة عادية: إن كان للحقل إجراء (إرسال، بحث، التالي…) نفّذه،
+     * وإلا أدرج سطرًا جديدًا. لا يعمل إلا بضغطة المستخدم.
+     */
+    private fun pressEnter() {
+        runCatching {
+            val ic = currentInputConnection ?: return
+            val opts = currentInputEditorInfo?.imeOptions ?: 0
+            val action = opts and EditorInfo.IME_MASK_ACTION
+            val noEnterAction = (opts and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
+            val hasAction = !noEnterAction &&
+                action != EditorInfo.IME_ACTION_NONE &&
+                action != EditorInfo.IME_ACTION_UNSPECIFIED
+            if (hasAction) {
+                ic.performEditorAction(action)
+            } else {
+                sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+            }
+        }
     }
 
     private fun switchKeyboard() {
