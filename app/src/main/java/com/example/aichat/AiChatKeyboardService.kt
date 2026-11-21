@@ -103,7 +103,7 @@ class AiChatKeyboardService :
                         host = host,
                         onInsert = { insertText(it) },
                         onDelete = { deleteBackward() },
-                        onEnter = { pressEnter() },,
+                        onEnter = { pressEnter() },
                         onSwitchKeyboard = { switchKeyboard() }
                     )
                 }
